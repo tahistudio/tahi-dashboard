@@ -14,8 +14,8 @@
  *   - a non-previewing admin is untouched;
  *   - `impersonating` still stays true, so every unopened portal write keeps
  *     its 403;
- *   - a read still costs no acting resolution (resolvePermissions and the
- *     roster read are for writes only).
+ *   - every preview proves super-admin access, including reads;
+ *   - reads never resolve an acting roster identity.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -116,16 +116,16 @@ describe('getPortalAuth: preview identity on reads', () => {
     expect(auth.impersonating).toBe(true)
     expect(auth.canWriteAsClient).toBeUndefined()
     expect(auth.actingAs).toBeUndefined()
-    // And it still costs no acting resolution.
-    expect(resolvePermissions).not.toHaveBeenCalled()
+    // The cookie requests a lens; permissions authorise it before a seat lookup.
+    expect(resolvePermissions).toHaveBeenCalledTimes(1)
+    expect(resolvePermissions).toHaveBeenCalledWith(expect.anything(), {
+      userId: 'user_liam', orgId: TAHI_ORG, sessionId: 'sess_1',
+    })
     expect(resolveTeamMember).not.toHaveBeenCalled()
   })
 
   it('costs exactly one select for the seat', async () => {
-    // The reason act-mode identity is not resolved on reads is that it cost a
-    // roster read, a roles join and two feature_visibility reads on every one
-    // of the ~10 portal GETs a client overview fans out. The seat is a single
-    // indexed lookup, which is the price of the preview being truthful.
+    // Permission resolution is mocked separately; the one data select is the seat.
     selectQueue.push([{ id: 'contact_primary' }])
     await getPortalAuth(req(viewCookies))
     expect(selectCount).toBe(1)
@@ -142,11 +142,14 @@ describe('getPortalAuth: preview identity on reads', () => {
 
   it('leaves a real client session exactly as it was', async () => {
     clerkAuth.mockResolvedValue({ userId: 'user_bob', orgId: 'org_client', sessionId: 's' })
-    selectQueue.push([{ id: CLIENT_D1_ORG }]) // their own org resolution
+    const ownOrgId = '5c07ff11-bbb1-412f-9ce0-d2d2c066845c'
+    selectQueue.push([{ id: ownOrgId }])
     const auth = await getPortalAuth(req(actCookies))
 
     expect(auth.impersonating).toBe(false)
-    expect(auth.orgId).toBe(CLIENT_D1_ORG)
+    expect(auth.orgId).toBe(ownOrgId)
+    expect(auth.orgId).not.toBe(CLIENT_D1_ORG)
+    expect(auth.canWriteAsClient).toBeUndefined()
     // No seat and no flag: their routes go on resolving their own row by login.
     expect(auth.contactId).toBeUndefined()
     expect(auth.previewContact).toBeUndefined()
@@ -180,16 +183,51 @@ describe('getPortalAuth: preview identity on reads', () => {
     expect(auth.actingAs?.adminTeamMemberId).toBe('tm_liam')
   })
 
-  it('still carries the seat when the act grant is refused', async () => {
-    // A Tahi admin who is not a super admin keeps the read-only lens they had,
-    // and the lens must still be pointed at somebody.
+  it('does not resolve a seat when a non-super-admin forges act cookies', async () => {
     resolvePermissions.mockResolvedValue({ isSuperAdmin: false })
     selectQueue.push([{ id: 'contact_primary' }])
     const auth = await getPortalAuth(req(actCookies, 'POST'))
 
     expect(auth.canWriteAsClient).toBeUndefined()
-    expect(auth.impersonating).toBe(true)
-    expect(auth.contactId).toBe('contact_primary')
-    expect(auth.previewContact).toBe(true)
+    expect(auth.impersonating).toBe(false)
+    expect(auth.orgId).toBeNull()
+    expect(auth.clerkOrgId).toBe(TAHI_ORG)
+    expect(auth.contactId).toBeUndefined()
+    expect(auth.previewContact).toBeUndefined()
+    expect(auth.actingAs).toBeUndefined()
+    expect(selectCount).toBe(0)
+    expect(resolveTeamMember).not.toHaveBeenCalled()
+  })
+
+  describe.each([
+    { role: 'roleless member', isAdmin: false },
+    { role: 'ordinary admin', isAdmin: true },
+  ])('$role preview cookies', ({ isAdmin }) => {
+    it.each(['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'])(
+      'refuses %s before client reads', async method => {
+        resolvePermissions.mockResolvedValue({ isAdmin, isSuperAdmin: false })
+        const auth = await getPortalAuth(req(viewCookies, method))
+        expect(auth.orgId).toBeNull()
+        expect(auth.userId).toBe('user_liam')
+        expect(auth.impersonating).toBe(false)
+        expect(auth.contactId).toBeUndefined()
+        expect(auth.previewContact).toBeUndefined()
+        expect(auth.canWriteAsClient).toBeUndefined()
+        expect(selectCount).toBe(0)
+        expect(resolveTeamMember).not.toHaveBeenCalled()
+      },
+    )
+  })
+
+  it.each(['GET', 'HEAD', 'POST'])('fails closed on permission lookup errors for %s', async method => {
+    resolvePermissions.mockRejectedValue(new Error('Permissions unavailable'))
+    const auth = await getPortalAuth(req(actCookies, method))
+    expect(auth.orgId).toBeNull()
+    expect(auth.impersonating).toBe(false)
+    expect(auth.contactId).toBeUndefined()
+    expect(auth.actingAs).toBeUndefined()
+    expect(auth.canWriteAsClient).toBeUndefined()
+    expect(selectCount).toBe(0)
+    expect(resolveTeamMember).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,5 @@
 'use client'
+import { isContractPastExpiry } from '@/lib/contract-signing-state'
 
 import { useState, useEffect, useMemo } from 'react'
 import useSWR from 'swr'
@@ -66,7 +67,7 @@ const STATUS_OPTIONS: { value: ContractStatus; label: string; tone: BadgeTone }[
   { value: 'sent',             label: 'Sent',             tone: 'info'     },
   { value: 'partially_signed', label: 'Partially signed', tone: 'warning'  },
   { value: 'signed',           label: 'Signed',           tone: 'positive' },
-  { value: 'expired',          label: 'Expired',          tone: 'neutral'  },
+  { value: 'expired',          label: 'Lapsed',           tone: 'neutral'  },
   { value: 'cancelled',        label: 'Cancelled',        tone: 'danger'   },
 ]
 const STATUS_BY_VALUE = new Map(STATUS_OPTIONS.map(s => [s.value, s]))
@@ -106,7 +107,7 @@ function ContractMobileCard({
   onOpen: () => void
 }) {
   const typeDef = TYPE_BY_VALUE.get(contract.type as ContractType)
-  const statusDef = STATUS_BY_VALUE.get(contract.status)
+  const statusDef = isContractPastExpiry(contract.status, contract.expiresAt) ? { label: 'Lapsed', tone: 'neutral' as const } : STATUS_BY_VALUE.get(contract.status)
   return (
     <div
       onClick={onOpen}
@@ -266,7 +267,8 @@ export function ContractsContent() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return items.filter(c => {
-      if (selectedStatuses.size > 0 && !selectedStatuses.has(c.status)) return false
+      const status = isContractPastExpiry(c.status, c.expiresAt) ? 'expired' : c.status
+      if (selectedStatuses.size > 0 && !selectedStatuses.has(status)) return false
       if (selectedTypes.size > 0 && !selectedTypes.has(c.type)) return false
       if (q) {
         if (!c.name.toLowerCase().includes(q) &&
@@ -338,13 +340,14 @@ export function ContractsContent() {
       header: 'Name',
       sortable: true,
       sortValue: r => r.name.toLowerCase(),
-      minWidth: '18rem',
+      minWidth: '12rem',
       render: r => (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
           <FileSignature size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
           <span data-private style={{
             fontWeight: 600,
             color: 'var(--color-text)',
+            maxWidth: '12rem',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -357,7 +360,7 @@ export function ContractsContent() {
       header: 'Type',
       sortable: true,
       sortValue: r => r.type,
-      width: '7rem',
+       width: '6rem',
       render: r => {
         const def = TYPE_BY_VALUE.get(r.type as ContractType)
         return (
@@ -372,7 +375,7 @@ export function ContractsContent() {
       header: 'Org',
       sortable: true,
       sortValue: r => (r.orgName ?? '').toLowerCase(),
-      minWidth: '12rem',
+      minWidth: '8rem',
       render: r => r.orgName ? (
         <div style={{
           display: 'inline-flex',
@@ -381,6 +384,7 @@ export function ContractsContent() {
           fontSize: '0.75rem',
           color: 'var(--color-text-muted)',
           minWidth: 0,
+          maxWidth: '8rem',
         }}>
           <Building2 size={12} aria-hidden="true" style={{ flexShrink: 0 }} />
           <span data-private style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.orgName}</span>
@@ -391,10 +395,10 @@ export function ContractsContent() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      sortValue: r => r.status,
-      width: '10rem',
+        sortValue: r => isContractPastExpiry(r.status, r.expiresAt) ? 'expired' : r.status,
+       width: '9rem',
       render: r => {
-        const def = STATUS_BY_VALUE.get(r.status)
+        const def = isContractPastExpiry(r.status, r.expiresAt) ? { label: 'Lapsed', tone: 'neutral' as const } : STATUS_BY_VALUE.get(r.status)
         return (
           <Badge tone={def?.tone ?? 'neutral'} variant="soft" size="sm" dot>
             {r.markedSigned ? 'Marked signed' : def?.label ?? r.status}
@@ -407,7 +411,7 @@ export function ContractsContent() {
       header: 'Sent',
       sortable: true,
       sortValue: r => r.sentAt ?? '',
-      width: '9rem',
+       width: '7rem',
       render: r => (
         <span style={{
           display: 'inline-flex',
@@ -426,7 +430,7 @@ export function ContractsContent() {
       header: 'Expiry',
       sortable: true,
       sortValue: r => r.expiresAt ?? '',
-      width: '9rem',
+       width: '7rem',
       render: r => (
         <span style={{
           display: 'inline-flex',
@@ -479,6 +483,7 @@ export function ContractsContent() {
       <Card padding="none">
         <DataTable<ContractListItem>
           ariaLabel="Contracts"
+          cardBreakpoint="xl"
           columns={columns}
           rows={filtered}
           getRowId={r => r.id}

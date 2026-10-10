@@ -11,6 +11,9 @@
  * can be asserted rather than inferred from a return value.
  */
 import { describe, it, expect } from 'vitest'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
+import { SQL } from 'drizzle-orm'
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 import { importStripeInvoice, type StripeInvoiceLike } from '@/lib/stripe-import'
 
 type QueryRecord = { calls: Array<{ method: string; args: unknown[] }> }
@@ -46,6 +49,9 @@ function makeDb(results: unknown[] = []) {
       insert: (...args: unknown[]) => entry('insert', args),
       update: (...args: unknown[]) => entry('update', args),
       delete: (...args: unknown[]) => entry('delete', args),
+      // D1 executes the deferred insert builders together and returns each
+      // statement's result. The first INSERT ... RETURNING creates one row.
+      batch: async (statements: unknown[]) => statements.map((_, index) => index === 0 ? [{ id: 'inserted' }] : []),
     },
     queries,
   }
@@ -57,6 +63,22 @@ function argOf(record: QueryRecord | undefined, method: string): unknown {
 
 function byEntry(queries: QueryRecord[], method: string): QueryRecord[] {
   return queries.filter(q => q.calls[0]?.method === method)
+}
+
+function writtenStatus(record: QueryRecord | undefined, localStatus: string): unknown {
+  const value = (argOf(record, 'set') as { status?: unknown }).status
+  if (!(value instanceof SQL)) return value
+  // A conditional status write must be checked for its persisted result,
+  // rather than assuming every update still writes a literal string.
+  const sqlite = new DatabaseSync(':memory:')
+  try {
+    sqlite.exec('CREATE TABLE invoices (status TEXT NOT NULL)')
+    sqlite.prepare('INSERT INTO invoices (status) VALUES (?)').run(localStatus)
+    const query = new SQLiteSyncDialect().sqlToQuery(value)
+    return sqlite.prepare(`SELECT ${query.sql} AS status FROM invoices`).get(...query.params as SQLInputValue[])?.status
+  } finally {
+    sqlite.close()
+  }
 }
 
 const STRIPE_INVOICE: StripeInvoiceLike = {
@@ -188,10 +210,10 @@ describe('importStripeInvoice', () => {
   it('still maps a Stripe void or uncollectible invoice to written_off', async () => {
     const { handle: voidHandle, queries: voidQueries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'sent' }]])
     await importStripeInvoice(voidHandle as unknown as Db, { ...STRIPE_INVOICE, status: 'void' })
-    expect((argOf(byEntry(voidQueries, 'update')[0], 'set') as Record<string, unknown>).status).toBe('written_off')
+    expect(writtenStatus(byEntry(voidQueries, 'update')[0], 'sent')).toBe('written_off')
 
     const { handle: uncHandle, queries: uncQueries } = makeDb([[{ id: 'inv-local', orgId: 'org-a', status: 'sent' }]])
     await importStripeInvoice(uncHandle as unknown as Db, { ...STRIPE_INVOICE, status: 'uncollectible' })
-    expect((argOf(byEntry(uncQueries, 'update')[0], 'set') as Record<string, unknown>).status).toBe('written_off')
+    expect(writtenStatus(byEntry(uncQueries, 'update')[0], 'sent')).toBe('written_off')
   })
 })

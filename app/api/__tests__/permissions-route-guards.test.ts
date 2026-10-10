@@ -194,11 +194,11 @@ describe('the money routes outside the audit parenthetical', () => {
 })
 
 describe('financial_reports is not the operational reports resource', () => {
-  it('lets an ops reporter read /reports but not the money surfaces', async () => {
-    // The whole point of splitting the resource: seed 0078 hands reports.view
-    // to project_manager and to viewer, and cash / MRR / runway is not that.
+  it('denies an ops reporter the overview because it includes invoice totals', async () => {
+    // The overview includes outstanding invoices, so reports.view alone is
+    // insufficient even though seed 0078 grants it to project_manager/viewer.
     asOpsReporter()
-    expect((await reportsOverview(req('/api/admin/reports/overview'))).status).not.toBe(403)
+    expect((await reportsOverview(req('/api/admin/reports/overview'))).status).toBe(403)
     expect((await commitmentsList(req('/api/admin/commitments'))).status).toBe(403)
     expect((await deriveBilling(req('/api/admin/derive-billing'))).status).toBe(403)
   })

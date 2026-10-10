@@ -28,7 +28,8 @@ import {
   Hourglass, FileSignature, Download,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
-import { isMarkedSigned } from '@/lib/contract-signing-state'
+import { contractExpiryDay } from '@/lib/contract-expiry'
+import { isMarkedSigned, isContractPastExpiry } from '@/lib/contract-signing-state'
 import { useToast } from '@/components/tahi/toast'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { PromptDialog } from '@/components/tahi/prompt-dialog'
@@ -433,7 +434,8 @@ export function ContractDetail({ id }: { id: string }) {
 
   // ── Derived state ────────────────────────────────────────────────────
 
-  const isLocked = contract.status === 'signed' || contract.status === 'cancelled' || contract.status === 'expired'
+  const lapsed = isContractPastExpiry(contract.status, contract.expiresAt)
+  const isLocked = contract.status === 'signed' || contract.status === 'cancelled' || lapsed
   // Status set to 'signed' by hand (a PATCH or the MCP update_contract tool)
   // rather than by the last signature: no signatures, signing date or signed
   // PDF exist for it, so nothing below may imply they do.
@@ -445,7 +447,7 @@ export function ContractDetail({ id }: { id: string }) {
   const signedCount = sortedSigners.filter(s => s.status === 'signed').length
   const palette = markedSigned
     ? { ...STATUS_PALETTE.signed, label: 'Marked signed' }
-    : STATUS_PALETTE[contract.status]
+    : lapsed ? { ...STATUS_PALETTE.expired, label: 'Lapsed' } : STATUS_PALETTE[contract.status]
   const publicUrl = contract.publicShareToken
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/p/contract/${contract.publicShareToken}`
     : null
@@ -797,13 +799,14 @@ export function ContractDetail({ id }: { id: string }) {
               </FieldGroup>
               <FieldGroup label="Expires">
                 <input
+                  aria-label="Signing expiry date, New Zealand time"
                   type="date"
-                  value={contract.expiresAt ? contract.expiresAt.slice(0, 10) : ''}
+                  value={contractExpiryDay(contract.expiresAt)}
                   onChange={e => {
-                    const next = e.currentTarget.value ? `${e.currentTarget.value}T23:59:59.000Z` : null
+                    const next = e.currentTarget.value ? e.currentTarget.value : null
                     trackSave(patchContract({ expiresAt: next }))
                   }}
-                  disabled={isLocked}
+                  disabled={contract.status === 'signed' || contract.status === 'cancelled' || contract.status === 'expired'}
                   style={metaInputStyle}
                 />
               </FieldGroup>
@@ -1160,8 +1163,8 @@ function ActivityPane({
           {events.map((e, i) => {
             const accentColor =
               e.accent === 'brand' ? 'var(--color-brand)' :
-              e.accent === 'success' ? '#15803d' :
-              e.accent === 'info' ? '#1e40af' :
+              e.accent === 'success' ? 'var(--badge-positive-text)' :
+              e.accent === 'info' ? 'var(--badge-info-text)' :
               'var(--color-text-muted)'
             return (
               <li key={i} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>

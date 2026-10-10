@@ -734,11 +734,20 @@ export const TOOLS: ToolDef[] = [
   // ── Write: Invoices ───────────────────────────────────────────────────
   tool('create_invoice', 'Create a new invoice for a client. The invoice NUMBER is minted here from the studio sequence (the settings key invoice_number_prefix plus a global counter) and comes back as `number` alongside the id: it is not a field you supply, and it is what gets pushed to Xero as the InvoiceNumber if the invoice is later synced. A null number means the counter could not be reached and the row is unnumbered, which is safe but worth reporting. Note that lineItems is what the route actually bills from; orgId plus a bare amount is not enough to raise an invoice.', {
     orgId: prop('string', 'Client organisation ID'),
-    amountUsd: prop('number', 'Invoice amount in USD'),
-    totalUsd: prop('number', 'Total amount in USD (after tax/discount)'),
+    lineItems: {
+      type: 'array', minItems: 1, description: 'Items billed in the invoice currency. Amounts are major units (dollars), not cents.',
+      items: { type: 'object', properties: {
+        description: prop('string', 'What is being billed'),
+        quantity: prop('number', 'Quantity'),
+        unitAmount: prop('number', 'Price per unit in the invoice currency'),
+      }, required: ['description', 'quantity', 'unitAmount'], additionalProperties: false },
+    },
+    currency: { type: 'string', enum: ['NZD', 'USD', 'AUD', 'GBP', 'EUR'], description: 'Invoice currency, default NZD' },
+    source: { type: 'string', enum: ['manual', 'stripe', 'xero'], description: 'Intended invoice rail, default manual. Creates a draft only.' },
+    subscriptionId: prop('string', 'Optional related subscription ID'),
     notes: prop('string', 'Invoice notes'),
     dueDate: prop('string', 'Due date in YYYY-MM-DD format'),
-  }, ['orgId', 'amountUsd', 'totalUsd']),
+  }, ['orgId', 'lineItems']),
   tool('backfill_invoice_numbers', 'Recover the invoice number an IMPORTED invoice was born with, for rows raised before invoice numbering existed. It reads the number back out of what the importer of the day recorded: the ManyRequests key (which IS the invoice number on that system), or the number the Xero and Stripe importers wrote into the notes. It NEVER mints a number from the studio sequence for a historical row, never renumbers a row that already has one, and never guesses: anything it cannot recover comes back in `refused` with a reason and a sentence. DEFAULTS TO A DRY RUN, because this writes a money column under a unique index: it returns the exact plan and touches nothing unless you pass dryRun false.', {
     dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually write the recovered numbers.'),
   }),
@@ -1171,7 +1180,6 @@ export const TOOLS: ToolDef[] = [
     subject: prop('string', 'Email subject'),
     bodyHtml: prop('string', 'Email body HTML'),
     sendNow: prop('boolean', 'Send immediately (true) or save as draft (false)'),
-    scheduledAt: prop('string', 'ISO timestamp to schedule send (alternative to sendNow)'),
   }, ['dealId', 'contactEmails', 'subject', 'bodyHtml']),
   tool('list_deal_nudges', 'List all nudges for a specific deal', {
     dealId: prop('string', 'Deal ID'),
@@ -1735,6 +1743,12 @@ export const TOOLS: ToolDef[] = [
   }, ['before']),
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
   tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),
+  tool('recover_paid_stripe_invoice', 'Recover a known paid live Stripe invoice into an existing client after contact identity and duplicate checks. Dry run by default. Apply requires the previewKey returned by a fresh preview. Sends no email and makes no Stripe changes. Requires a human super_admin session; this MCP service identity is admin and returns 403 by design. Run from Invoices > Recover paid Stripe invoice as Liam or Staci.', {
+    orgId: prop('string', 'Existing client organisation id'),
+    stripeInvoiceId: prop('string', 'Paid live Stripe invoice id beginning in_'),
+    dryRun: prop('boolean', 'Defaults to true, preview first'),
+    previewKey: prop('string', 'Required for apply; returned by the preview'),
+  }, ['orgId', 'stripeInvoiceId']),
   tool('import_stripe_payments', 'Import one-off Stripe payments (charges without invoices) as paid records'),
   tool('dedupe_stripe_charge_twins', 'Remove the Stripe charge twins: a subscription payment imported twice, once as the Stripe invoice (in_...) and once as the charge that settled it (ch_.../py_...), which doubles the client\'s billed total. Pairs a charge row with an invoice row on the same client, amount, currency and a created date within three days. DEFAULTS TO A DRY RUN: it lists every pair with both ids, amounts, dates and notes and writes nothing unless you pass dryRun false. The apply is super-admin only, deletes the CHARGE row and its line items (never the invoice row), refuses any row a time entry or an AI reply draft points at, and writes one audit row with every id removed.', {
     dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually delete the charge twins.'),
@@ -3104,6 +3118,8 @@ async function executeTool(
       return json(await apiGet('/api/admin/integrations/xero/match-contacts', token))
     case 'import_stripe_invoices':
       return json(await apiWrite('/api/admin/integrations/stripe/import-invoices', token, 'POST'))
+    case 'recover_paid_stripe_invoice':
+      return json(await apiWrite('/api/admin/integrations/stripe/recover-invoice', token, 'POST', { ...args, dryRun: args.dryRun !== false }))
     case 'import_stripe_payments':
       return json(await apiWrite('/api/admin/integrations/stripe/import-payments', token, 'POST'))
     case 'dedupe_stripe_charge_twins':

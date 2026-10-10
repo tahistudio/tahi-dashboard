@@ -60,6 +60,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const denied = await requireDealAccess(database, { userId, orgId }, dealId)
   if (denied) return denied
 
+  if (body.scheduledAt) {
+    return NextResponse.json({ error: 'Scheduled nudges are not available. Send now or save a draft.' }, { status: 409 })
+  }
+
   const now = new Date().toISOString()
   const nudgeId = crypto.randomUUID()
 

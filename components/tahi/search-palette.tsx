@@ -22,7 +22,7 @@ import { Loader2 } from 'lucide-react'
 import { ShellIcon } from '@/components/tahi/shell-icons'
 import type { ShellIconName } from '@/components/tahi/shell-icons'
 import { apiPath } from '@/lib/api'
-import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/app/api/admin/search/route'
+import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/lib/global-search'
 
 interface SearchPaletteProps {
   open: boolean

@@ -1,3 +1,5 @@
+import { requireFeature } from '@/lib/require-feature'
+import { normalizeContractExpiry } from '@/lib/contract-expiry'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -12,6 +14,8 @@ type RouteContext = { params: Promise<{ id: string }> }
 export async function GET(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
@@ -44,6 +48,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   const body = await req.json() as {
@@ -106,11 +112,12 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (deniedTarget) return deniedTarget
   }
 
+  if (body.expiresAt !== undefined && body.expiresAt !== null && body.expiresAt !== '' && !normalizeContractExpiry(body.expiresAt)) return NextResponse.json({ error: 'expiresAt must be a valid date or timestamp.' }, { status: 400 })
   if (body.name !== undefined) updates.name = body.name.trim()
   if (body.status !== undefined) updates.status = body.status
   if (body.bodyHtml !== undefined) updates.bodyHtml = body.bodyHtml
   if (body.variableValues !== undefined) updates.variableValues = JSON.stringify(body.variableValues)
-  if (body.expiresAt !== undefined) updates.expiresAt = body.expiresAt
+  if (body.expiresAt !== undefined) updates.expiresAt = normalizeContractExpiry(body.expiresAt)
   if (body.orgId !== undefined) updates.orgId = body.orgId
   if (body.dealId !== undefined) updates.dealId = body.dealId
   if (body.leadId !== undefined) updates.leadId = body.leadId
@@ -156,6 +163,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
   const { id } = await ctx.params
   const database = await db() as unknown as D1
   const denied = await requireContractAccess(database, { userId, orgId }, id)

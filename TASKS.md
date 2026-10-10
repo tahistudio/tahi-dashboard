@@ -28,6 +28,30 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
 - An item only flips to `[x]` when the evidence names a commit AND a live
   observation. Merged with no live look stays `[~]` with the commit named.
 
+## Execution update, 2026-10-11
+
+Liam approved the eight grouped priorities. The first repair batch is ready
+for commit and not deployed: scoped search and nested permission guards,
+bounded suggestion reads, valid overview route exports, contract expiry,
+truthful nudge/review actions, MCP invoice arguments and targeted dark repairs.
+The final source checks passed type-check, lint, all 399 Vitest files (6,660
+tests), and the production build. The first suite exposed seven permission
+test failures; source fixes resolved them, rather than retries hiding them.
+Feature guards now cover all 65 contract, proposal and schedule handlers,
+with 205 new route tests including real SQLite CRUD for permitted identities.
+SW.1 has a preview/apply route with contact identity, live/paid status, duplicate,
+fresh-preview and concurrent import checks. No Lingorama data has changed.
+The local QA snapshot is backed up and repaired. Rollback-only fixture tests
+proved seven tables and eight cascade edges, orphan rejection and sibling
+survival in both shards. Contract cards pass at 375 in light and dark and at
+768 in dark; the populated 1280 table fits without horizontal scrolling.
+Overview, request list/board, client search and create/cancel smoke checks pass.
+Time search and filter controls measure at least 44px at 375 in dark.
+The signed-in PC Chrome connection is unavailable, so production data recovery,
+changed email previews and live QA are still pending. CN.3 and bounded ports
+follow this repair batch. Existing checkboxes stay unchanged until deployment
+and live evidence.
+
 ## Current triage, 2026-10-10
 
 Execution order and evidence:

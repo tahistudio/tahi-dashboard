@@ -1,0 +1,454 @@
+import { schema } from '@/db/d1'
+import { eq, and, inArray, notInArray, gte, isNotNull, desc, asc, like, lt } from 'drizzle-orm'
+import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
+import { resolvePermissions, can, type ResolvedAccess } from '@/lib/permissions'
+import { resolveAccessScoping } from '@/lib/access-scoping'
+import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
+import { owedStatusList } from '@/lib/invoice-status'
+import { formatCallPrepBriefRow } from '@/lib/call-brief-item'
+import { formatCurrency } from '@/lib/currency'
+
+
+export type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+// Settings key for the once-per-day cached brief. Mirrors the AI briefing's
+// 'ai_briefing_latest' cadence: computed once each morning (7/8am NZ cron),
+// re-runnable on demand, and served from cache on every page load in between.
+export const BRIEF_CACHE_KEY = 'overview_brief_latest'
+
+// Each brief row maps to the design's DailyBrief accordion row:
+//   tone -> the coloured status dot ('' = neutral, used by "While you slept")
+//   verb -> the optional action button label (null = no action)
+//   to   -> the nav id the action routes to (go(to))
+//   text -> the assembled, human-readable line (money baked NZD, wire-style)
+interface BriefRow {
+  tone: 'risk' | 'warn' | 'ok' | ''
+  verb: string | null
+  to: string
+  text: string
+}
+
+export interface BriefResult {
+  urgent: BriefRow[]
+  week: BriefRow[]
+  slept: BriefRow[]
+}
+
+interface CachedBrief extends BriefResult {
+  generatedAt: string
+}
+
+// Server-side NZD formatting. Amounts are already converted to NZD upstream
+// (this is presentation, NOT an FX rate). Uses the same lib/currency.ts
+// formatter the overview cards format through (via useOvFormat -> format ->
+// formatCurrency), so the brief reads "NZ$3,668" like every card beside it,
+// not the bare "$3,668" a hand-rolled formatter used to print.
+function fmtNzd(n: number): string {
+  return formatCurrency(Math.round(n), 'NZD')
+}
+
+function plural(n: number, one: string, many: string): string {
+  return n === 1 ? one : many
+}
+
+// ── computeBrief ──────────────────────────────────────────────────────────────
+// Assembles the owner "Daily brief" from REAL signals, permission-gated per
+// source. Every section returns an honest empty array when nothing qualifies;
+// nothing is fabricated. Every query is wrapped so a missing table/column can
+// never blow up the caller. Shared by the GET recompute path and the refresh
+// endpoint so there is exactly one source of truth.
+//
+// `auth` is the resolved (userId, orgId). The scheduled cron passes the
+// unrestricted owner identity (api-service + Tahi org) so it produces the full
+// owner brief; a live admin GET passes their own auth (same gating as before).
+export async function computeBrief(
+  drizzle: D1,
+  auth: { userId: string | null; orgId: string | null },
+  // The GET resolves both of these to build the cache key, so it hands them
+  // back rather than paying for a second resolvePermissions +
+  // resolveAccessScoping round on every cache miss. Omitted by the cron and
+  // the refresh endpoint, which resolve nothing up front.
+  prepared?: { access: ResolvedAccess; allowedOrgs: string[] | null },
+): Promise<BriefResult> {
+  const access = prepared?.access ?? await resolvePermissions(drizzle, auth)
+  const canSeeInvoices = can(access, 'invoices')
+  const canSeeContracts = can(access, 'contracts')
+  const canSeeCalls = can(access, 'calls')
+  const canSeeRequests = can(access, 'requests')
+  const canSeeMessages = can(access, 'messages')
+
+  // Org scoping: null = unrestricted (admin / all_clients); [] = deny all;
+  // otherwise the allowed org ids. Client/request/invoice rows are filtered.
+  const allowedOrgs = prepared ? prepared.allowedOrgs : await resolveAccessScoping(drizzle, auth.userId)
+  const denyAll = Array.isArray(allowedOrgs) && allowedOrgs.length === 0
+
+  const rateMap: RateMap = await (async () => {
+    try {
+      const rates = await drizzle.select().from(schema.exchangeRates)
+      return buildRateMap(rates)
+    } catch {
+      return buildRateMap([])
+    }
+  })()
+
+  const now = new Date()
+  const nowIso = now.toISOString()
+  const since = overnightCutoff(now)
+
+  const urgent: BriefRow[] = []
+  const week: BriefRow[] = []
+  const slept: BriefRow[] = []
+
+  // ── URGENT: oldest overdue invoices (gated on invoices) ────────────────────
+  if (canSeeInvoices && !denyAll) {
+    try {
+      // Issued and unpaid only: the brief nudges the client about money they
+      // owe, and a draft is not something anyone can be nudged about.
+      const conditions = [inArray(schema.invoices.status, owedStatusList())]
+      if (allowedOrgs) conditions.push(inArray(schema.invoices.orgId, allowedOrgs))
+      const rows = await drizzle
+        .select({
+          totalUsd: schema.invoices.totalUsd,
+          currency: schema.invoices.currency,
+          dueDate: schema.invoices.dueDate,
+          orgName: schema.organisations.name,
+        })
+        .from(schema.invoices)
+        .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
+        .where(and(...conditions))
+
+      const overdue = rows
+        .map(r => ({
+          amountNzd: toNzd(r.totalUsd, r.currency ?? 'USD', rateMap),
+          days: daysPastDue(r.dueDate ?? null, now),
+          orgName: r.orgName,
+        }))
+        .filter(r => r.days > 0)
+        .sort((a, b) => b.days - a.days)
+        .slice(0, 2)
+
+      for (const r of overdue) {
+        urgent.push({
+          tone: 'risk',
+          verb: 'Nudge',
+          to: 'invoices',
+          text: `${r.orgName ?? 'A client'} · ${fmtNzd(r.amountNzd)} overdue ${r.days} ${plural(r.days, 'day', 'days')}`,
+        })
+      }
+    } catch {
+      // Invoices table missing , skip this source.
+    }
+  }
+
+  // ── URGENT: today's discovery calls, prep note status (gated on calls) ──────
+  if (canSeeCalls) {
+    try {
+      // NZ studio day, so a "2:30pm today" call is grouped correctly regardless
+      // of the UTC offset baked into scheduledAt by the calendar sync.
+      const nzDay = now.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
+      const calls = await drizzle
+        .select({
+          id: schema.discoveryCalls.id,
+          title: schema.discoveryCalls.title,
+          scheduledAt: schema.discoveryCalls.scheduledAt,
+          prepNote: schema.discoveryCalls.prepNote,
+          status: schema.discoveryCalls.status,
+        })
+        .from(schema.discoveryCalls)
+        .where(eq(schema.discoveryCalls.status, 'scheduled'))
+        .orderBy(asc(schema.discoveryCalls.scheduledAt))
+        .limit(60)
+
+      const todayCalls = calls
+        .filter(c => {
+          const d = new Date(c.scheduledAt)
+          if (!Number.isFinite(d.getTime())) return false
+          const callDay = d.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
+          return callDay === nzDay
+        })
+        .slice(0, 2)
+
+      for (const c of todayCalls) {
+        const time = new Date(c.scheduledAt).toLocaleTimeString('en-NZ', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'Pacific/Auckland',
+        })
+        urgent.push(formatCallPrepBriefRow(c, time))
+      }
+    } catch {
+      // Discovery calls table missing , skip this source.
+    }
+  }
+
+  // ── WEEK: unsigned contracts expiring within 21 days (gated on contracts) ───
+  if (canSeeContracts && !denyAll) {
+    try {
+      const horizon = new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000).toISOString()
+      const conditions = [
+        inArray(schema.contractDocuments.status, ['draft', 'sent', 'partially_signed']),
+        isNotNull(schema.contractDocuments.expiresAt),
+        gte(schema.contractDocuments.expiresAt, nowIso),
+      ]
+      if (allowedOrgs) conditions.push(inArray(schema.contractDocuments.orgId, allowedOrgs))
+      const rows = await drizzle
+        .select({
+          name: schema.contractDocuments.name,
+          expiresAt: schema.contractDocuments.expiresAt,
+          orgName: schema.organisations.name,
+        })
+        .from(schema.contractDocuments)
+        .leftJoin(schema.organisations, eq(schema.contractDocuments.orgId, schema.organisations.id))
+        .where(and(...conditions))
+        .orderBy(asc(schema.contractDocuments.expiresAt))
+        .limit(10)
+
+      const soon = rows
+        .filter(r => r.expiresAt != null && r.expiresAt <= horizon)
+        .slice(0, 3)
+
+      for (const r of soon) {
+        const days = Math.max(
+          0,
+          Math.ceil((new Date(r.expiresAt as string).getTime() - now.getTime()) / (24 * 60 * 60 * 1000)),
+        )
+        urgentContractText(week, r.orgName, r.name, days)
+      }
+    } catch {
+      // Contract documents table missing , skip this source.
+    }
+  }
+
+  // ── WEEK: overdue requests (gated on requests + org scoping) ────────────────
+  if (canSeeRequests && !denyAll) {
+    try {
+      const conditions = [
+        isNotNull(schema.requests.dueDate),
+        notInArray(schema.requests.status, ['delivered', 'archived', 'cancelled', 'draft']),
+      ]
+      if (allowedOrgs) conditions.push(inArray(schema.requests.orgId, allowedOrgs))
+      const rows = await drizzle
+        .select({
+          title: schema.requests.title,
+          dueDate: schema.requests.dueDate,
+          orgName: schema.organisations.name,
+        })
+        .from(schema.requests)
+        .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
+        .where(and(...conditions))
+        .orderBy(asc(schema.requests.dueDate))
+        .limit(50)
+
+      const overdue = rows
+        .map(r => ({ title: r.title, orgName: r.orgName, days: daysPastDue(r.dueDate ?? null, now) }))
+        .filter(r => r.days > 0)
+        .sort((a, b) => b.days - a.days)
+        .slice(0, 3)
+
+      for (const r of overdue) {
+        const lead = r.orgName ? `${r.orgName} , ` : ''
+        week.push({
+          tone: 'warn',
+          verb: 'Open',
+          to: 'requests',
+          text: `${lead}${r.title} ${r.days} ${plural(r.days, 'day', 'days')} overdue`,
+        })
+      }
+    } catch {
+      // Requests table missing , skip this source.
+    }
+  }
+
+  // ── SLEPT: payments cleared overnight (gated on invoices) ───────────────────
+  if (canSeeInvoices && !denyAll) {
+    try {
+      const conditions = [eq(schema.invoices.status, 'paid'), gte(schema.invoices.paidAt, since)]
+      if (allowedOrgs) conditions.push(inArray(schema.invoices.orgId, allowedOrgs))
+      const rows = await drizzle
+        .select({
+          totalUsd: schema.invoices.totalUsd,
+          currency: schema.invoices.currency,
+          orgName: schema.organisations.name,
+          paidAt: schema.invoices.paidAt,
+        })
+        .from(schema.invoices)
+        .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
+        .where(and(...conditions))
+        .orderBy(desc(schema.invoices.paidAt))
+        .limit(4)
+
+      for (const r of rows) {
+        slept.push({
+          tone: '',
+          verb: null,
+          to: 'invoices',
+          text: `${r.orgName ?? 'A client'} paid ${fmtNzd(toNzd(r.totalUsd, r.currency ?? 'USD', rateMap))}`,
+        })
+      }
+    } catch {
+      // Invoices table missing , skip this source.
+    }
+  }
+
+  // ── SLEPT: deliveries completed overnight (gated on requests + scoping) ──────
+  if (canSeeRequests && !denyAll) {
+    try {
+      const conditions = [eq(schema.requests.status, 'delivered'), gte(schema.requests.updatedAt, since)]
+      if (allowedOrgs) conditions.push(inArray(schema.requests.orgId, allowedOrgs))
+      const rows = await drizzle
+        .select({
+          title: schema.requests.title,
+          orgName: schema.organisations.name,
+          updatedAt: schema.requests.updatedAt,
+        })
+        .from(schema.requests)
+        .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
+        .where(and(...conditions))
+        .orderBy(desc(schema.requests.updatedAt))
+        .limit(4)
+
+      for (const r of rows) {
+        const lead = r.orgName ? `${r.orgName} , ` : ''
+        slept.push({
+          tone: '',
+          verb: null,
+          to: 'requests',
+          text: `${lead}${r.title} delivered`,
+        })
+      }
+    } catch {
+      // Requests table missing , skip this source.
+    }
+  }
+
+  // ── SLEPT: client replies overnight (summary row) ───────────────────────────
+  if (canSeeMessages) {
+    try {
+      const replies = await drizzle
+        .select({ id: schema.messages.id })
+        .from(schema.messages)
+        .where(and(
+          inArray(schema.messages.authorType, ['contact', 'client']),
+          gte(schema.messages.createdAt, since),
+        ))
+      const n = replies.length
+      if (n > 0) {
+        slept.push({
+          tone: '',
+          verb: null,
+          to: 'messages',
+          text: `${n} client ${plural(n, 'reply', 'replies')} came in overnight`,
+        })
+      }
+    } catch {
+      // Messages table missing , skip this source.
+    }
+  }
+
+  return { urgent, week, slept }
+}
+
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+
+// Read the cached brief from settings. Returns null on a missing / corrupt /
+// shape-mismatched row so the caller safely falls through to a recompute.
+export async function readBriefCache(drizzle: D1, cacheKey: string = BRIEF_CACHE_KEY): Promise<CachedBrief | null> {
+  try {
+    const [row] = await drizzle
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, cacheKey))
+      .limit(1)
+    if (!row?.value) return null
+    const parsed = JSON.parse(row.value) as Partial<CachedBrief>
+    if (
+      typeof parsed.generatedAt !== 'string' ||
+      !Array.isArray(parsed.urgent) ||
+      !Array.isArray(parsed.week) ||
+      !Array.isArray(parsed.slept)
+    ) {
+      return null
+    }
+    return { urgent: parsed.urgent, week: parsed.week, slept: parsed.slept, generatedAt: parsed.generatedAt }
+  } catch {
+    return null
+  }
+}
+
+// Upsert the computed brief into settings in one statement. Two page loads
+// on a stale morning both recompute and both write; a select-then-insert
+// raced itself here and the loser died on the settings.key primary key.
+export async function writeBriefCache(
+  drizzle: D1,
+  result: BriefResult,
+  generatedAt: string,
+  cacheKey: string = BRIEF_CACHE_KEY,
+): Promise<void> {
+  const value = JSON.stringify({ ...result, generatedAt })
+  await drizzle
+    .insert(schema.settings)
+    .values({ key: cacheKey, value, updatedAt: generatedAt })
+    .onConflictDoUpdate({
+      target: schema.settings.key,
+      set: { value, updatedAt: generatedAt },
+    })
+}
+
+// Fresh when generated within ~20h OR on the same UTC calendar day. A future
+// timestamp (clock skew) is treated as stale so we recompute rather than trust
+// it. Keeps the once-daily cadence: one morning generation carries the whole day.
+export function isBriefFresh(generatedAt: string, now: Date): boolean {
+  const gen = new Date(generatedAt)
+  if (!Number.isFinite(gen.getTime())) return false
+  const ageHours = (now.getTime() - gen.getTime()) / (1000 * 60 * 60)
+  if (ageHours < 0) return false
+  if (ageHours <= 20) return true
+  return gen.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)
+}
+
+// ── GET /api/admin/overview/brief ─────────────────────────────────────────────
+// Serves the cached brief when it was generated today (same UTC day or <20h).
+// Otherwise recomputes with the caller's own permissions, caches it, and
+// returns it. Response shape is unchanged ({ urgent, week, slept }) plus a
+// generatedAt stamp the card uses for its "Updated ..." line.
+//
+// The cache is keyed on the caller's resolved scope (allowed orgs + granted
+// brief features), so a scoped team member can never be served the owner's
+// brief and can never overwrite it with their narrower one. The unrestricted
+// owner scope keeps the plain key the morning cron writes.
+/**
+ * Delete scope-suffixed brief rows that have not been rewritten for a day.
+ * Never touches the base key: that is the row the morning cron warms and the
+ * owner reads, and it is meant to persist between generations.
+ */
+export async function sweepStaleBriefCache(drizzle: D1, now: Date): Promise<void> {
+  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  try {
+    await drizzle
+      .delete(schema.settings)
+      .where(and(
+        like(schema.settings.key, `${BRIEF_CACHE_KEY}:%`),
+        lt(schema.settings.updatedAt, cutoff),
+      ))
+  } catch {
+    // Best effort. A sweep that fails must never fail the brief.
+  }
+}
+
+// Small helper so the contract row assembly stays out of the main flow.
+function urgentContractText(
+  target: BriefRow[],
+  orgName: string | null,
+  name: string,
+  days: number,
+): void {
+  const lead = orgName ? `${orgName} , ` : ''
+  const when = days === 0 ? 'expires today' : `expires in ${days} ${plural(days, 'day', 'days')}`
+  target.push({
+    tone: 'warn',
+    verb: 'Send',
+    to: 'contracts',
+    text: `${lead}${name} unsigned, ${when}`,
+  })
+}

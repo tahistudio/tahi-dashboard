@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -40,6 +41,8 @@ interface SectionBody {
 export async function POST(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'schedules')
+  if (featureDenied) return featureDenied
 
   const { id: scheduleId } = await ctx.params
   const body = await req.json() as SectionBody

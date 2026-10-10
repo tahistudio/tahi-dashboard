@@ -1,23 +1,23 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+vi.mock('@clerk/nextjs/server', () => ({ auth: vi.fn() }))
+vi.mock('@clerk/backend', () => ({ createClerkClient: vi.fn() }))
+vi.mock('next/headers', () => ({ cookies: vi.fn(), headers: vi.fn() }))
+vi.mock('@/lib/db', () => ({ db: vi.fn() }))
+vi.mock('@/lib/permissions', () => ({ resolvePermissions: vi.fn() }))
+vi.mock('@/lib/acting-eligibility', () => ({ resolveActEligibility: vi.fn() }))
+vi.mock('@/lib/portal-identity', () => ({ resolvePreviewContactId: vi.fn() }))
+
+import { isTahiAdmin, type RequestAuthResult } from '@/lib/server-auth'
 
 // Mock environment variable before importing module
 const TAHI_ORG_ID = 'org_tahi_test_123'
 
 beforeEach(() => {
-  process.env.NEXT_PUBLIC_TAHI_ORG_ID = TAHI_ORG_ID
+  vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', TAHI_ORG_ID)
 })
 
-// We cannot import the full server-auth module since it depends on
-// @clerk/nextjs/server and next/headers which are not available in
-// a pure Node test environment. Instead we test the pure function
-// isTahiAdmin by extracting and re-implementing its logic here,
-// then verifying the actual source matches.
-
-// The function under test (copied from server-auth.ts for isolated testing):
-function isTahiAdmin(orgId: string | null): boolean {
-  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
-  return !!(tahiOrgId && orgId === tahiOrgId)
-}
+afterEach(() => vi.unstubAllEnvs())
 
 describe('isTahiAdmin', () => {
   it('returns true when orgId matches NEXT_PUBLIC_TAHI_ORG_ID', () => {
@@ -50,7 +50,7 @@ describe('isTahiAdmin', () => {
 describe('RequestAuthResult type contract', () => {
   // Verify the shape that getRequestAuth and getServerAuth must return
   it('defines the expected auth result shape', () => {
-    const result = {
+    const result: RequestAuthResult = {
       userId: 'user_123',
       orgId: 'org_456',
       sessionId: 'sess_789',
@@ -61,7 +61,7 @@ describe('RequestAuthResult type contract', () => {
   })
 
   it('allows null values in auth result', () => {
-    const result = {
+    const result: RequestAuthResult = {
       userId: null,
       orgId: null,
       sessionId: null,

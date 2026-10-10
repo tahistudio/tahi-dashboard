@@ -1,9 +1,11 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgScopeSql } from '@/lib/org-scope-sql'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sql, eq } from 'drizzle-orm'
+import { sql, eq, and } from 'drizzle-orm'
 import { isNonLinearStage, buildJourneyMap, inferStagesVisited, type StageInfo, type ActivityStageEvent } from '@/lib/pipeline-probability'
 
 // ── GET /api/admin/reports/close-rates ─────────────────────────────────────
@@ -16,6 +18,7 @@ export async function GET(req: NextRequest) {
   const featureDenied = await requireFeature({ userId, orgId }, 'sales_analytics')
   if (featureDenied) return featureDenied
 
+  const scope = await scopedOrgIds({ userId, orgId })
   const database = await db()
 
   // 1. Get all pipeline stages ordered by position
@@ -38,6 +41,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.deals)
     .innerJoin(schema.pipelineStages, sql`${schema.deals.stageId} = ${schema.pipelineStages.id}`)
+    .where(orgScopeSql(scope, schema.deals.orgId, scope.kind === 'some'))
 
   // 3. Compute stage conversion rates.
   //
@@ -58,13 +62,13 @@ export async function GET(req: NextRequest) {
   // Pull stage events from activity log (Decision #041).
   let stageEvents: ActivityStageEvent[] = []
   try {
-    const dealIds = allDeals.map(d => d.id).filter(id => /^[a-f0-9-]{36}$/i.test(id))
+    const dealIds = allDeals.map(d => d.id)
     if (dealIds.length > 0) {
-      const list = dealIds.map(id => `'${id}'`).join(',')
-      const res = await database.all(sql.raw(
-        `SELECT deal_id, type, metadata, created_at FROM activities
-         WHERE type IN ('deal_created', 'stage_change') AND deal_id IN (${list})`,
-      )) as unknown as Array<{ deal_id: string; type: string; metadata: string | null; created_at: string }>
+      const res = await database.all(sql`
+        SELECT deal_id, type, metadata, created_at FROM activities
+        WHERE type IN ('deal_created', 'stage_change')
+        AND deal_id IN (SELECT value FROM json_each(${JSON.stringify(dealIds)}))
+      `) as unknown as Array<{ deal_id: string; type: string; metadata: string | null; created_at: string }>
         | { results?: Array<{ deal_id: string; type: string; metadata: string | null; created_at: string }> }
       const rows = Array.isArray(res) ? res : (res?.results ?? [])
       stageEvents = rows.map(r => ({ dealId: r.deal_id, type: r.type, metadata: r.metadata, createdAt: r.created_at }))
@@ -160,7 +164,7 @@ export async function GET(req: NextRequest) {
       description: schema.activities.description,
     })
     .from(schema.activities)
-    .where(eq(schema.activities.type, 'stage_change'))
+    .where(and(eq(schema.activities.type, 'stage_change'), sql`${schema.activities.dealId} IN (SELECT value FROM json_each(${JSON.stringify(allDeals.map(deal => deal.id))}))`))
     .orderBy(schema.activities.createdAt)
 
   // Group stage transitions by deal

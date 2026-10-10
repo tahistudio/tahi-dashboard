@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
+import { requireFeature } from '@/lib/require-feature'
 
 interface ImportPage {
   title: string
@@ -45,10 +46,12 @@ export async function POST(req: NextRequest) {
     // Fall back to Clerk admin auth.
     try {
       const { getRequestAuth, isTahiAdmin } = await import('@/lib/server-auth')
-      const { orgId } = await getRequestAuth(req)
+      const { orgId, userId } = await getRequestAuth(req)
       if (!isTahiAdmin(orgId)) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
+      const denied = await requireFeature({ orgId, userId }, 'docs')
+      if (denied) return denied
     } catch {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }

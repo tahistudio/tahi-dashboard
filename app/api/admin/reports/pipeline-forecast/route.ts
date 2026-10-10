@@ -1,3 +1,5 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgScopeSql } from '@/lib/org-scope-sql'
 /**
  * GET /api/admin/reports/pipeline-forecast
  *
@@ -27,7 +29,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, asc, sql } from 'drizzle-orm'
+import { asc, sql, and } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +41,7 @@ export async function GET(req: NextRequest) {
   const featureDenied = await requireFeature({ userId, orgId }, 'sales_analytics')
   if (featureDenied) return featureDenied
 
+  const scope = await scopedOrgIds({ userId, orgId })
   const database = await db()
 
   // Pull all stages + the deals attached to each.
@@ -58,7 +61,7 @@ export async function GET(req: NextRequest) {
       // Archived (soft-deleted) deals are hidden from the pipeline list; the
       // forecast must not count them either, or the weighted headline and the
       // stage bars carry money the board no longer shows.
-      .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`),
+      .where(and(orgScopeSql(scope, schema.deals.orgId, scope.kind === 'some'), sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)),
   ])
 
   // Aggregate deals per stage.

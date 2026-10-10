@@ -9,7 +9,7 @@ import {
   TrendingUp, DollarSign, Target,
   Calendar, User, Building2,
   ChevronDown, BarChart3, Award,
-  Trophy, XCircle, Filter, X, Bell, BellOff,
+  Trophy, XCircle, Filter, X,
 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { getInitials } from '@/lib/utils'
@@ -1390,15 +1390,7 @@ function DealCard({ deal, displayCurrency, toDisplay }: { deal: Deal; displayCur
               {days}d
             </span>
           )}
-          {deal.stageName === 'Stalled' && (
-            <span title={deal.autoNudgesDisabled ? 'Auto-nudges paused' : 'Auto-nudges active'}>
-              {deal.autoNudgesDisabled
-                ? <BellOff style={{ width: '0.625rem', height: '0.625rem', color: 'var(--color-text-subtle)', opacity: 0.5 }} />
-                : <Bell style={{ width: '0.625rem', height: '0.625rem', color: 'var(--color-brand)' }} />
-              }
-            </span>
-          )}
-        </div>
+       </div>
       </div>
     </Link>
   )

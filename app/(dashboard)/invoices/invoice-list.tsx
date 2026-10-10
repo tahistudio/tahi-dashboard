@@ -45,6 +45,7 @@ import { type BadgeTone } from '@/components/tahi/badge'
 // Shared with the invoice detail page so the two surfaces cannot disagree
 // about what raised a bill, or about what state it is in.
 import { SourceBadge } from './source-badge'
+import { StripeInvoiceRecovery } from './stripe-invoice-recovery'
 import {
   InvoiceStatusBadge,
   effectiveInvoiceStatus,
@@ -1285,6 +1286,7 @@ export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
             >
               Export CSV
             </TahiButton>
+            <StripeInvoiceRecovery onImported={handleCreated} />
             <TahiButton
               variant="secondary"
               size="sm"

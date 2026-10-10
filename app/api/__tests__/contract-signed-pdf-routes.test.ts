@@ -43,6 +43,9 @@ function makeDb(selectResults: unknown[] = []) {
   return { handle, calls }
 }
 
+// Feature decisions are exercised through real handlers in sales-artifact-feature-guards.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' }),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),

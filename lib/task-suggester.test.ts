@@ -12,8 +12,8 @@
  *      drop is counted rather than swallowed.
  *   2. A transcript read twice. The high-water mark is stamped on every
  *      transcript the sweep LOOKS at, including the ones the gate skipped and
- *      the ones the model failed on, because the alternative is paying for the
- *      same call every thirty minutes forever.
+ *      ordinary model failures. A timed-out first read stays unstamped for
+ *      retry because it never produced an answer to persist.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { SQL } from 'drizzle-orm'
@@ -26,6 +26,7 @@ import {
   DEFER_MARGIN_DAYS,
   MAX_SUGGESTIONS,
   MAX_SWEEP_BATCH,
+  MODEL_READ_TIMEOUT_MS,
   READ_ESTIMATE_MS,
   SUGGESTER_SYSTEM_PROMPT,
   SWEEP_BATCH,
@@ -44,6 +45,7 @@ import {
   sweepWillReach,
   validateSuggestionItems,
   type SuggestFromTranscriptInput,
+  type SuggestResult,
   type SuggestionContext,
   type SuggestionDraft,
 } from '@/lib/task-suggester'
@@ -54,13 +56,20 @@ import { REQUEST_CATEGORIES, REQUEST_PRIORITIES, REQUEST_TYPES } from '@/lib/req
 // other test either has no key (so no SDK) or injects its own suggest.
 const sdk = vi.hoisted(() => ({
   calls: [] as Array<Record<string, unknown>>,
+  clientOptions: [] as Array<Record<string, unknown>>,
+  requestOptions: [] as Array<{ signal?: AbortSignal }>,
   reply: '',
 }))
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class {
+    constructor(options: Record<string, unknown>) {
+      sdk.clientOptions.push(options)
+    }
+
     messages = {
-      create: async (params: Record<string, unknown>) => {
+      create: async (params: Record<string, unknown>, options: { signal?: AbortSignal } = {}) => {
         sdk.calls.push(params)
+        sdk.requestOptions.push(options)
         return {
           content: [{ type: 'text', text: sdk.reply }],
           usage: { input_tokens: 300, output_tokens: 200, cache_read_input_tokens: 4000 },
@@ -1509,15 +1518,173 @@ describe('runSuggestionSweep inside its time budget', () => {
     expect(sweepWillReach(daysAgo(SWEEP_WINDOW_DAYS + 5), at)).toBe(false)
   })
 
-  it('never starves: a spent budget still reads the oldest call', async () => {
+  it('defers every unread call without preparing or stamping it when the budget is spent', async () => {
     const { suggest, clock } = slowReads([1_000])
-    const { handle } = makeDb(clientTranscripts(1))
+    const beforeRead = vi.fn(async () => {})
+    const { handle, inserts, updates } = makeDb([rows, [], []])
 
-    const summary = await runSuggestionSweep(handle, { suggest, clock, budgetMs: 0, now: NOW_CN1C })
+    const summary = await runSuggestionSweep(handle, { suggest, clock, beforeRead, budgetMs: 0, now: NOW_CN1C })
 
-    expect(summary.looked).toBe(1)
-    expect(summary.secondPass?.skipped).toEqual([{ transcriptId: 'ct-1', reason: 'out_of_time' }])
-    expect(summary.deferred).toBe(2)
+    expect(suggest).not.toHaveBeenCalled()
+    expect(beforeRead).not.toHaveBeenCalled()
+    expect(summary.looked).toBe(0)
+    expect(summary.eligible).toBe(0)
+    expect(summary.inserted).toBe(0)
+    expect(summary.secondPass).toMatchObject({ ran: 0, failed: [], skipped: [] })
+    expect(summary.deferred).toBe(3)
+    expect(summary.deferredIds).toEqual(['ct-1', 'ct-2', 'ct-3'])
+    expect(stamps(updates)).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
+  describe('model deadlines', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(NOW_CN1C)
+    })
+
+    afterEach(() => { vi.useRealTimers() })
+
+    it('aborts a never-resolving first read at 30 seconds and leaves it and the rest for retry', async () => {
+      const suggest = vi.fn<(input: SuggestFromTranscriptInput) => Promise<SuggestResult>>(() => new Promise(() => {}))
+      const { handle, inserts, updates } = makeDb([
+        rows,
+        [{ orgId: 'org-a', meetingType: null }],
+        ...contextSelects(),
+        [], [],
+      ])
+      let settled = false
+      const pending = runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+        .then(summary => { settled = true; return summary })
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(MODEL_READ_TIMEOUT_MS).toBe(30_000)
+      expect(suggest).toHaveBeenCalledTimes(1)
+      const input = suggest.mock.calls[0][0]
+      expect(input.timeoutMs).toBe(30_000)
+      expect(input.signal).toBeInstanceOf(AbortSignal)
+      expect(input.signal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(settled).toBe(false)
+      expect(stamps(updates)).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      const summary = await pending
+
+      expect(input.signal?.aborted).toBe(true)
+      expect(suggest).toHaveBeenCalledTimes(1)
+      expect(summary).toMatchObject({
+        inserted: 0,
+        deferred: 3,
+        deferredIds: ['ct-1', 'ct-2', 'ct-3'],
+        secondPass: { ran: 0, failed: [], skipped: [] },
+      })
+      expect(summary.skipped).toEqual([{ transcriptId: 'ct-1', reason: expect.stringMatching(/timed out/i) }])
+      expect(stamps(updates)).toEqual([])
+      expect(inserts).toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('clamps a first-read deadline after preparation to the remaining budget minus five seconds', async () => {
+      const suggest = vi.fn<(input: SuggestFromTranscriptInput) => Promise<SuggestResult>>(() => new Promise(() => {}))
+      const beforeRead = vi.fn(async () => {
+        vi.setSystemTime(Date.now() + 55_000)
+      })
+      const { handle, inserts, updates } = makeDb([
+        rows,
+        [{ orgId: 'org-a', meetingType: null }],
+        ...contextSelects(),
+        [], [],
+      ])
+      let settled = false
+      const pending = runSuggestionSweep(handle, { suggest, beforeRead, now: NOW_CN1C })
+        .then(summary => { settled = true; return summary })
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(SWEEP_BUDGET_MS).toBe(75_000)
+      expect(suggest.mock.calls[0][0].timeoutMs).toBe(15_000)
+      await vi.advanceTimersByTimeAsync(14_999)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      const summary = await pending
+
+      expect(Date.now() - NOW_CN1C.getTime()).toBe(70_000)
+      expect(suggest.mock.calls[0][0].signal?.aborted).toBe(true)
+      expect(summary.deferredIds).toEqual(['ct-1', 'ct-2', 'ct-3'])
+      expect(beforeRead.mock.calls).toEqual([['ct-1']])
+      expect(stamps(updates)).toEqual([])
+      expect(inserts).toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it.each([
+      { elapsed: 0, timeout: 30_000 },
+      { elapsed: 40_000, timeout: 29_000 },
+    ])('persists the first proposals when a second read times out with $elapsed ms already spent', async ({ elapsed, timeout }) => {
+      const suggest = vi.fn((input: SuggestFromTranscriptInput): Promise<SuggestResult> => {
+        if (input.alreadyProposed !== undefined) return new Promise(() => {})
+        return new Promise(resolve => {
+          setTimeout(() => resolve({ suggestions: [FAQ], usage: USAGE, dropped: [] }), 1_000)
+        })
+      })
+      const { handle, inserts, updates } = makeDb(clientTranscripts(1))
+      let settled = false
+      const pending = runSuggestionSweep(handle, {
+        suggest,
+        startedAt: Date.now() - elapsed,
+        now: NOW_CN1C,
+      }).then(summary => { settled = true; return summary })
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(suggest).toHaveBeenCalledTimes(2)
+      const [first, second] = suggest.mock.calls.map(call => call[0])
+      expect(second).toMatchObject({ alreadyProposed: [FAQ], timeoutMs: timeout })
+      expect(second.signal).toBeInstanceOf(AbortSignal)
+      expect(second.signal).not.toBe(first.signal)
+      expect(first.signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(timeout - 1)
+      expect(settled).toBe(false)
+      expect(inserts.filter(i => i.table === schema.taskSuggestions)).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      const summary = await pending
+
+      expect(second.signal?.aborted).toBe(true)
+      expect(first.signal?.aborted).toBe(false)
+      expect(summary.inserted).toBe(1)
+      expect(summary.skipped).toEqual([])
+      expect(summary.secondPass).toMatchObject({
+        ran: 0,
+        proposed: 0,
+        failed: [{ transcriptId: 'ct-1', reason: expect.stringMatching(/timed out/i) }],
+        skipped: [],
+      })
+      expect(inserts.filter(i => i.table === schema.taskSuggestions)).toHaveLength(1)
+      expect(await lastDrafts()).toMatchObject([{ transcriptId: 'ct-1', proposal: FAQ.proposal }])
+      expect(stamps(updates)).toEqual([{ table: schema.callTranscripts, set: { suggestedAt: '2026-09-19T00:00:00Z' } }])
+      expect(summary.deferredIds).toEqual(['ct-2', 'ct-3'])
+      expect(inserts.filter(i => i.table === schema.aiCostLog).map(i => (i.values as { stage: string }).stage)).toEqual(['suggest'])
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it.each([75_000, 70_000])('starts no model call when $elapsed ms has already consumed the usable budget', async elapsed => {
+      const suggest = vi.fn<(input: SuggestFromTranscriptInput) => Promise<SuggestResult>>(() => new Promise(() => {}))
+      const beforeRead = vi.fn(async () => {})
+      const { handle, inserts, updates } = makeDb([rows, [], []])
+
+      const summary = await runSuggestionSweep(handle, {
+        suggest,
+        beforeRead,
+        startedAt: Date.now() - elapsed,
+        now: NOW_CN1C,
+      })
+
+      expect(suggest).not.toHaveBeenCalled()
+      expect(beforeRead).not.toHaveBeenCalled()
+      expect(summary).toMatchObject({ looked: 0, eligible: 0, inserted: 0, deferred: 3, deferredIds: ['ct-1', 'ct-2', 'ct-3'] })
+      expect(stamps(updates)).toEqual([])
+      expect(inserts).toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+    })
   })
 })
 
@@ -1532,6 +1699,8 @@ describe('suggestFromTranscript, the request each read sends', () => {
 
   beforeEach(() => {
     sdk.calls.length = 0
+    sdk.clientOptions.length = 0
+    sdk.requestOptions.length = 0
     sdk.reply = [
       'One more thing came up.',
       '<suggestions>[',
@@ -1546,6 +1715,23 @@ describe('suggestFromTranscript, the request each read sends', () => {
 
   type Block = { type: string; text: string; cache_control?: { type: string } }
   const userContent = (index: number) => (sdk.calls[index].messages as Array<{ content: string | Block[] }>)[0].content
+
+  it('caps the SDK read at 30 seconds without retries and forwards the cancellation signal', async () => {
+    const controller = new AbortController()
+    await suggestFromTranscript({ ...INPUT, signal: controller.signal })
+
+    expect(sdk.clientOptions).toEqual([{ apiKey: 'test-key', timeout: 30_000, maxRetries: 0 }])
+    expect(sdk.requestOptions).toEqual([{ signal: controller.signal }])
+    expect(sdk.calls).toHaveLength(1)
+  })
+
+  it('passes a shorter sweep deadline to the SDK without retries', async () => {
+    const controller = new AbortController()
+    await suggestFromTranscript({ ...INPUT, timeoutMs: 12_000, signal: controller.signal })
+
+    expect(sdk.clientOptions).toEqual([{ apiKey: 'test-key', timeout: 12_000, maxRetries: 0 }])
+    expect(sdk.requestOptions).toEqual([{ signal: controller.signal }])
+  })
 
   it('sends the notes as plain text when no second read follows', async () => {
     await suggestFromTranscript(INPUT)

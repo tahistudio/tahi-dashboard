@@ -1,7 +1,20 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-10** by Codex (task triage refreshed; Stripe delivery restored, invoice reconciliation open; older sections retain their dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-11** by Codex (approved repair batch verified locally; deployment and signed-in checks pending; older sections retain their dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
+
+## Work in progress, 2026-10-11
+
+The approved repair batch is ready for commit and not live. Type-check, lint,
+all 6,660 tests across 399 files, and the production build pass. Permission
+review covers 65 sales artifact handlers. Local browser checks cover the
+populated overview, requests, clients, contracts and time, with phone/tablet
+and dark checks on the changed surfaces. Local QA cascades are repaired with
+backups and rollback-only fixture proof. No production invoice was imported
+or client mapping changed. The PC Chrome session is disconnected; signed-in
+production QA, Lingorama recovery and the changed email preview still need
+that session. CN.3 and bounded ports follow the repair batch. TASKS.md and the
+run log carry the detailed evidence and remaining limits.
 
 ## The plan (2026-08-18)
 

@@ -14,39 +14,17 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { or, like, sql, desc } from 'drizzle-orm'
+import { and, or, like, sql, desc, isNull, type SQL } from 'drizzle-orm'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import { resolvePermissions, can } from '@/lib/permissions'
+import { scopedOrgIds } from '@/lib/access-scope'
+import type { SQLiteColumn } from 'drizzle-orm/sqlite-core'
+import type { SearchGroupType, SearchResultItem, SearchResponse } from '@/lib/global-search'
 
 const PER_GROUP_LIMIT = 6
 const SUGGESTIONS_LIMIT = 5
-
-export type SearchGroupType =
-  | 'request' | 'task' | 'client' | 'brand' | 'contact'
-  | 'deal' | 'invoice' | 'contract' | 'proposal' | 'schedule'
-  | 'doc' | 'call' | 'service' | 'announcement'
-  | 'automation' | 'team'
-
-export interface SearchResultItem {
-  type: SearchGroupType
-  id: string
-  title: string
-  sub?: string
-  badge?: string
-  href: string
-}
-
-export interface SearchResponse {
-  query: string
-  totalCount: number
-  suggestions: SearchResultItem[]
-  groups: Array<{
-    type: SearchGroupType
-    label: string
-    items: SearchResultItem[]
-  }>
-}
 
 const GROUP_LABEL: Record<SearchGroupType, string> = {
   request: 'Requests',
@@ -94,6 +72,28 @@ export async function GET(req: NextRequest) {
   const needle = `%${q.replace(/[%_]/g, m => `\\${m}`)}%`
   const database = await db()
 
+  const access = await resolvePermissions(database, { userId, orgId })
+  const scope = await scopedOrgIds({ userId, orgId }, access)
+  const features: Record<SearchGroupType, string> = {
+    request: 'requests', task: 'tasks', client: 'clients', brand: 'clients', contact: 'clients',
+    deal: 'deals', invoice: 'invoices', contract: 'contracts', proposal: 'proposals',
+    schedule: 'schedules', doc: 'docs', call: 'calls', service: 'settings',
+    announcement: 'announcements', automation: 'settings', team: 'team',
+  }
+  const run = <T,>(type: SearchGroupType, query: () => PromiseLike<T[]>): Promise<T[]> =>
+    can(access, features[type]) ? Promise.resolve(query()) : Promise.resolve([])
+
+  // Bind the whole scope once per predicate, staying below D1's parameter cap.
+  const owned = (column: SQLiteColumn | SQL, includeNull = false): SQL | undefined => {
+    if (scope.kind === 'all') return undefined
+    const match = scope.kind === 'none'
+      ? sql`0 = 1`
+      : sql`${column} IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))`
+    return includeNull ? or(match, isNull(column)) : match
+  }
+  const artifactOwned = (org: SQLiteColumn, deal: SQLiteColumn): SQL | undefined =>
+    owned(sql`coalesce(${org}, (SELECT org_id FROM deals WHERE id = ${deal}))`)
+
   // Run every group query in parallel. A failure in one group must not
   // sink the whole search; we Promise.allSettled and silently drop
   // groups that errored.
@@ -102,66 +102,72 @@ export async function GET(req: NextRequest) {
     dealsRes, invoicesRes, contractsRes, proposalsRes, schedulesRes,
     docsRes, callsRes, servicesRes, announcementsRes, automationsRes, teamRes,
   ] = await Promise.allSettled([
-    database.select({
+    run('request', () => database.select({
       id: schema.requests.id,
       title: schema.requests.title,
       status: schema.requests.status,
       orgId: schema.requests.orgId,
-    }).from(schema.requests).where(
+    }).from(schema.requests).where(and(
+      owned(schema.requests.orgId),
       or(
         like(schema.requests.title, needle),
         like(schema.requests.description, needle),
       ),
-    ).orderBy(desc(schema.requests.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.requests.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('task', () => database.select({
       id: schema.tasks.id,
       title: schema.tasks.title,
       status: schema.tasks.status,
-    }).from(schema.tasks).where(
+    }).from(schema.tasks).where(and(
+      owned(schema.tasks.orgId, true),
       or(
         like(schema.tasks.title, needle),
         like(schema.tasks.description, needle),
       ),
-    ).orderBy(desc(schema.tasks.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.tasks.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('client', () => database.select({
       id: schema.organisations.id,
       name: schema.organisations.name,
       status: schema.organisations.status,
-    }).from(schema.organisations).where(
+    }).from(schema.organisations).where(and(
+      owned(schema.organisations.id),
       like(schema.organisations.name, needle),
-    ).orderBy(desc(schema.organisations.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.organisations.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('brand', () => database.select({
       id: schema.brands.id,
       name: schema.brands.name,
       orgId: schema.brands.orgId,
-    }).from(schema.brands).where(
+    }).from(schema.brands).where(and(
+      owned(schema.brands.orgId),
       like(schema.brands.name, needle),
-    ).orderBy(desc(schema.brands.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.brands.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('contact', () => database.select({
       id: schema.contacts.id,
       name: schema.contacts.name,
       email: schema.contacts.email,
       orgId: schema.contacts.orgId,
-    }).from(schema.contacts).where(
+    }).from(schema.contacts).where(and(
+      owned(schema.contacts.orgId),
       or(
         like(schema.contacts.name, needle),
         like(schema.contacts.email, needle),
       ),
-    ).orderBy(desc(schema.contacts.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.contacts.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('deal', () => database.select({
       id: schema.deals.id,
       title: schema.deals.title,
       stageId: schema.deals.stageId,
-    }).from(schema.deals).where(
+    }).from(schema.deals).where(and(
+      scope.kind === 'none' ? sql`0 = 1` : owned(schema.deals.orgId, true),
       like(schema.deals.title, needle),
-    ).orderBy(desc(schema.deals.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.deals.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('invoice', () => database.select({
       id: schema.invoices.id,
       number: schema.invoices.number,
       stripeInvoiceId: schema.invoices.stripeInvoiceId,
@@ -169,7 +175,8 @@ export async function GET(req: NextRequest) {
       status: schema.invoices.status,
       orgId: schema.invoices.orgId,
       notes: schema.invoices.notes,
-    }).from(schema.invoices).where(
+    }).from(schema.invoices).where(and(
+      owned(schema.invoices.orgId),
       or(
         // The number goes FIRST because it is the only one of these a human
         // types: it is what the client quotes, what the email prints and what
@@ -180,34 +187,37 @@ export async function GET(req: NextRequest) {
         like(schema.invoices.xeroInvoiceId, needle),
         like(schema.invoices.id, needle),
       ),
-    ).orderBy(desc(schema.invoices.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.invoices.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
-      id: schema.contracts.id,
-      name: schema.contracts.name,
-      status: schema.contracts.status,
-      orgId: schema.contracts.orgId,
-    }).from(schema.contracts).where(
-      like(schema.contracts.name, needle),
-    ).orderBy(desc(schema.contracts.updatedAt)).limit(PER_GROUP_LIMIT),
+    run('contract', () => database.select({
+      id: schema.contractDocuments.id,
+      name: schema.contractDocuments.name,
+      status: schema.contractDocuments.status,
+      orgId: schema.contractDocuments.orgId,
+    }).from(schema.contractDocuments).where(and(
+      artifactOwned(schema.contractDocuments.orgId, schema.contractDocuments.dealId),
+      like(schema.contractDocuments.name, needle),
+    )).orderBy(desc(schema.contractDocuments.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('proposal', () => database.select({
       id: schema.proposals.id,
       title: schema.proposals.title,
       status: schema.proposals.status,
-    }).from(schema.proposals).where(
+    }).from(schema.proposals).where(and(
+      artifactOwned(schema.proposals.orgId, schema.proposals.dealId),
       like(schema.proposals.title, needle),
-    ).orderBy(desc(schema.proposals.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.proposals.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('schedule', () => database.select({
       id: schema.projectSchedules.id,
       title: schema.projectSchedules.title,
       orgId: schema.projectSchedules.orgId,
-    }).from(schema.projectSchedules).where(
+    }).from(schema.projectSchedules).where(and(
+      artifactOwned(schema.projectSchedules.orgId, schema.projectSchedules.dealId),
       like(schema.projectSchedules.title, needle),
-    ).orderBy(desc(schema.projectSchedules.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.projectSchedules.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('doc', () => database.select({
       id: schema.docPages.id,
       title: schema.docPages.title,
       slug: schema.docPages.slug,
@@ -216,50 +226,53 @@ export async function GET(req: NextRequest) {
         like(schema.docPages.title, needle),
         like(schema.docPages.contentText, needle),
       ),
-    ).orderBy(desc(schema.docPages.updatedAt)).limit(PER_GROUP_LIMIT),
+    ).orderBy(desc(schema.docPages.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('call', () => database.select({
       id: schema.scheduledCalls.id,
       title: schema.scheduledCalls.title,
       status: schema.scheduledCalls.status,
       orgId: schema.scheduledCalls.orgId,
-    }).from(schema.scheduledCalls).where(
+    }).from(schema.scheduledCalls).where(and(
+      owned(schema.scheduledCalls.orgId),
       or(
         like(schema.scheduledCalls.title, needle),
         like(schema.scheduledCalls.description, needle),
       ),
-    ).orderBy(desc(schema.scheduledCalls.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.scheduledCalls.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('service', () => database.select({
       id: schema.services.id,
       name: schema.services.name,
-    }).from(schema.services).where(
+    }).from(schema.services).where(and(
+      owned(schema.services.orgId, true),
       or(
         like(schema.services.name, needle),
         like(schema.services.description, needle),
       ),
-    ).orderBy(desc(schema.services.updatedAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.services.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('announcement', () => database.select({
       id: schema.announcements.id,
       title: schema.announcements.title,
       type: schema.announcements.type,
-    }).from(schema.announcements).where(
+    }).from(schema.announcements).where(and(
+      scope.kind === 'all' ? undefined : sql`(${schema.announcements.targetType} != 'org' OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${schema.announcements.targetIds}) AND json_type(${schema.announcements.targetIds}) = 'array' THEN ${schema.announcements.targetIds} ELSE '[]' END) AS target WHERE ${scope.kind === 'some' ? sql`target.value IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))` : sql`0 = 1`}))`,
       or(
         like(schema.announcements.title, needle),
         like(schema.announcements.body, needle),
       ),
-    ).orderBy(desc(schema.announcements.createdAt)).limit(PER_GROUP_LIMIT),
+    )).orderBy(desc(schema.announcements.createdAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('automation', () => database.select({
       id: schema.automationRules.id,
       name: schema.automationRules.name,
       enabled: schema.automationRules.enabled,
     }).from(schema.automationRules).where(
       like(schema.automationRules.name, needle),
-    ).orderBy(desc(schema.automationRules.updatedAt)).limit(PER_GROUP_LIMIT),
+    ).orderBy(desc(schema.automationRules.updatedAt)).limit(PER_GROUP_LIMIT)),
 
-    database.select({
+    run('team', () => database.select({
       id: schema.teamMembers.id,
       name: schema.teamMembers.name,
       email: schema.teamMembers.email,
@@ -269,7 +282,7 @@ export async function GET(req: NextRequest) {
         like(schema.teamMembers.name, needle),
         like(schema.teamMembers.email, needle),
       ),
-    ).orderBy(desc(schema.teamMembers.updatedAt)).limit(PER_GROUP_LIMIT),
+    ).orderBy(desc(schema.teamMembers.updatedAt)).limit(PER_GROUP_LIMIT)),
   ])
 
   // Fetch org names referenced by any of the results so we can render
@@ -313,7 +326,7 @@ export async function GET(req: NextRequest) {
       type: 'request',
       id: r.id,
       title: r.title,
-      sub: orgNameById.get(r.orgId),
+      sub: r.orgId ? orgNameById.get(r.orgId) : undefined,
       badge: r.status,
       href: `/requests/${r.id}`,
     })),
@@ -335,7 +348,7 @@ export async function GET(req: NextRequest) {
       type: 'brand',
       id: r.id,
       title: r.name,
-      sub: orgNameById.get(r.orgId),
+      sub: r.orgId ? orgNameById.get(r.orgId) : undefined,
       href: `/clients/brands/${r.id}`,
     })),
     contact: fromResult(contactsRes, r => ({
@@ -359,7 +372,7 @@ export async function GET(req: NextRequest) {
         ?? r.stripeInvoiceId
         ?? r.xeroInvoiceId
         ?? `Invoice ${r.id.slice(0, 8)}`,
-      sub: orgNameById.get(r.orgId),
+      sub: r.orgId ? orgNameById.get(r.orgId) : undefined,
       badge: r.status,
       href: `/invoices/${r.id}`,
     })),
@@ -367,7 +380,7 @@ export async function GET(req: NextRequest) {
       type: 'contract',
       id: r.id,
       title: r.name,
-      sub: orgNameById.get(r.orgId),
+      sub: r.orgId ? orgNameById.get(r.orgId) : undefined,
       badge: r.status,
       href: `/contracts/${r.id}`,
     })),

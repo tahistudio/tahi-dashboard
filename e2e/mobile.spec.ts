@@ -25,11 +25,11 @@ test.describe('Mobile viewport', () => {
     await expect(bottomNav).toBeVisible()
   })
 
-  test('bottom nav has overview, requests, messages links', async ({ page }) => {
+  test('client bottom nav has overview and requests, with Messages hidden by default', async ({ page }) => {
     await page.goto('/overview')
     await expect(page.locator('nav.fixed.bottom-0 a[href="/overview"]')).toBeVisible()
     await expect(page.locator('nav.fixed.bottom-0 a[href="/requests"]')).toBeVisible()
-    await expect(page.locator('nav.fixed.bottom-0 a[href="/messages"]')).toBeVisible()
+    await expect(page.locator('nav.fixed.bottom-0 a[href="/messages"]')).toHaveCount(0)
   })
 
   test('requests page renders at 375px without horizontal overflow', async ({ page }) => {

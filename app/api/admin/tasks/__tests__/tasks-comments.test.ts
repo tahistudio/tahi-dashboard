@@ -14,6 +14,10 @@ import { NextResponse } from 'next/server'
 let guardResult: NextResponse | null = null
 const guardCalls: Array<{ userId: string | null; taskId: string }> = []
 
+// Feature access is granted for these task behaviour fixtures.
+// Denial wiring is exercised with the real guard in permission-write-guards.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async (req: Request) => {
     const auth = req.headers.get('x-test-auth')

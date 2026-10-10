@@ -310,7 +310,7 @@ function LogTimeSlideOver({
               />
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minHeight: '2.75rem' }}>
             <input
               id="lt-billable"
               type="checkbox"
@@ -318,7 +318,7 @@ function LogTimeSlideOver({
               onChange={e => setBillable(e.target.checked)}
               style={{ width: '1rem', height: '1rem', accentColor: 'var(--color-brand)' }}
             />
-            <label htmlFor="lt-billable" style={{ fontSize: '0.8125rem', color: 'var(--color-text)' }}>Billable</label>
+            <label htmlFor="lt-billable" style={{ display: 'flex', alignItems: 'center', minHeight: '2.75rem', flex: 1, fontSize: '0.8125rem', color: 'var(--color-text)' }}>Billable</label>
           </div>
           <div>
             <label style={labelStyle} htmlFor="lt-notes">Notes</label>
@@ -985,12 +985,13 @@ export function TimeList() {
               key={tab.value}
               role="tab"
               aria-selected={isActive}
+              className="tahi-focus-ring min-h-11"
               onClick={() => setViewTab(tab.value)}
               style={{
                 padding: '0.4375rem 0.875rem',
                 fontSize: '0.8125rem',
                 fontWeight: isActive ? 600 : 500,
-                color: isActive ? '#ffffff' : 'var(--color-text-muted)',
+                color: isActive ? 'var(--color-text-on-dark)' : 'var(--color-text-muted)',
                 background: isActive ? 'var(--color-brand)' : 'var(--color-bg)',
                 border: `1px solid ${isActive ? 'var(--color-brand)' : 'var(--color-border)'}`,
                 borderRadius: 'var(--radius-md)',
@@ -1025,7 +1026,7 @@ export function TimeList() {
             onChange: setSearch,
             placeholder: 'Search client, member, request or notes',
           }}
-          size="sm"
+          size="lg"
         />
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           <DateRangePicker value={dateRange} onChange={setDateRange} label="Entry date" />

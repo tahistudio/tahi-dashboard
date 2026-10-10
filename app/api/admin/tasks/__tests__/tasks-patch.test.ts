@@ -24,6 +24,10 @@ let current: Links | null = null
 let requestOrgs: Record<string, string> = {}
 let deniedOrgIds: string[] = []
 
+// Feature access is granted for these task behaviour fixtures.
+// Denial wiring is exercised with the real guard in permission-write-guards.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
   isTahiAdmin: () => true,

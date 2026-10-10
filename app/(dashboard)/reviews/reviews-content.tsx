@@ -4,7 +4,7 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import {
   Star, Copy,
-  Send, CheckCircle2, ExternalLink, Video, Globe,
+  CheckCircle2, ExternalLink, Video, Globe,
   MessageSquare, ThumbsUp, Sparkles, FileText,
   AlertCircle, ChevronDown,
 } from 'lucide-react'
@@ -16,6 +16,7 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { PageToolbar } from '@/components/tahi/page-toolbar'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
+import { useToast } from '@/components/tahi/toast'
 
 // Types
 
@@ -103,6 +104,7 @@ function isVideoUrl(url: string | null): boolean {
 // Component
 
 export function ReviewsContent() {
+  const { showToast } = useToast()
   const { data, isLoading: loading, mutate: mutateReviews } = useSWR<{ reviews: ReviewItem[] }>('/api/admin/reviews')
   const reviews = data?.reviews ?? []
   const [search, setSearch] = useState('')
@@ -151,12 +153,13 @@ export function ReviewsContent() {
   const copyReviewLink = (token: string | null) => {
     if (!token) return
     const base = typeof window !== 'undefined' ? window.location.origin : ''
-    const url = `${base}/review?token=${token}`
+    const url = `${base}/review/${encodeURIComponent(token)}`
     navigator.clipboard.writeText(url).then(() => {
       setCopiedToken(token)
+      showToast('Review link copied.', 'success')
       setTimeout(() => setCopiedToken(null), 2000)
     }).catch(() => {
-      // Clipboard write failed
+      showToast('The link could not be copied. Check clipboard permissions and try again.', 'error')
     })
   }
 
@@ -269,7 +272,7 @@ export function ReviewsContent() {
                 >
                   {/* Main row */}
                   <div
-                    className="flex items-center gap-3 cursor-pointer transition-colors"
+                    className="flex flex-wrap items-center gap-3 cursor-pointer transition-colors"
                     style={{
                       padding: '0.75rem 1rem',
                       background: isHovered ? 'var(--color-bg-secondary)' : 'transparent',
@@ -324,16 +327,16 @@ export function ReviewsContent() {
                     <Badge tone={cfg.tone} variant="soft" leader="dot">{cfg.label}</Badge>
 
                     {/* Quick actions */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex w-full items-center justify-end gap-1 sm:w-auto flex-shrink-0">
                       {review.outreachStatus === 'not_sent' && (
                         <TahiButton
                           variant="ghost"
                           size="sm"
                           loading={isUpdating}
                           onClick={(e) => { e.stopPropagation(); updateStatus(review.orgId, 'asked') }}
-                          iconLeft={<Send size={14} aria-hidden="true" />}
+                          iconLeft={<CheckCircle2 size={14} aria-hidden="true" />}
                           aria-label="Mark as asked"
-                        />
+                        >Mark as asked</TahiButton>
                       )}
                       {review.submissionToken && (
                         <TahiButton
@@ -343,7 +346,7 @@ export function ReviewsContent() {
                           iconLeft={copiedToken === review.submissionToken
                             ? <CheckCircle2 size={14} aria-hidden="true" style={{ color: 'var(--color-success)' }} />
                             : <Copy size={14} aria-hidden="true" />}
-                          aria-label="Copy review link"
+                          aria-label={copiedToken === review.submissionToken ? 'Review link copied' : 'Copy review link'}
                         />
                       )}
                       <ChevronDown

@@ -10,6 +10,10 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// Feature access is granted for these task behaviour fixtures.
+// Denial wiring is exercised with the real guard in permission-write-guards.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({ userId: 'u_admin', orgId: 'org_tahi' }),
   isTahiAdmin: vi.fn((o: string | null) => o === 'org_tahi'),

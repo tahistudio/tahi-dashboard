@@ -42,6 +42,7 @@ import {
 } from '@/lib/preview-cookie'
 import { resolveActEligibility } from '@/lib/acting-eligibility'
 import { resolvePreviewContactId } from '@/lib/portal-identity'
+import { resolvePermissions } from '@/lib/permissions'
 
 export interface RequestAuthResult {
   userId: string | null
@@ -362,14 +363,17 @@ export async function getPortalAuth(req: NextRequest): Promise<PortalAuthResult>
   if (clerkOrgId && tahiOrgId && clerkOrgId === tahiOrgId) {
     const target = resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)
     if (target) {
-      // Paid only when the browser asks to act AND the request could actually
-      // write. Nothing reads `actingAs` on a GET: `refusePreviewWrite` and
-      // `actingIdentity` are called from POST / PATCH / PUT handlers only, and
-      // the resolution is not free (resolvePermissions alone is a roster read,
-      // a roles join and two feature_visibility reads, then the seat select on
-      // top). The client overview fans out about ten portal GETs in parallel,
-      // so charging every one of them for an answer no reader consumes made
-      // simply LOOKING at a client in act mode cost roughly seventy queries.
+      // A browser-written cookie is a requested lens, never an access grant.
+      // Client preview is reserved for the studio's super admins, just like
+      // Act as client. Check reads too, before selecting any client identity.
+      try {
+        const access = await resolvePermissions(await db(), result)
+        if (!access.isSuperAdmin) return { ...result, orgId: null, clerkOrgId, impersonating: false }
+      } catch {
+        return { ...result, orgId: null, clerkOrgId, impersonating: false }
+      }
+      // Every preview checks the operator's permission above. Resolve the
+      // additional audited acting identity only for a possible write.
       // HEAD rides with GET because Next serves it from the GET handler.
       const isRead = req.method === 'GET' || req.method === 'HEAD'
       const wantsAct =

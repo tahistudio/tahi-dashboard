@@ -780,7 +780,7 @@ function Column({
                       border: 'none',
                       borderRadius: 'var(--radius-sm)',
                       fontSize: 'var(--text-sm)',
-                      color: a.tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text)',
+                      color: a.tone === 'danger' ? 'var(--color-danger-ink)' : 'var(--color-text)',
                       cursor: 'pointer',
                       textAlign: 'left',
                     }}
@@ -793,7 +793,7 @@ function Column({
                   >
                     {a.icon && (
                       <span style={{
-                        color: a.tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text-muted)',
+                        color: a.tone === 'danger' ? 'var(--color-danger-ink)' : 'var(--color-text-muted)',
                         display: 'inline-flex',
                       }}>
                         {a.icon}

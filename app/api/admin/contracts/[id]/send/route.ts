@@ -1,9 +1,11 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, ne, and } from 'drizzle-orm'
 import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
+import { isContractPastExpiry } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -25,6 +27,8 @@ function mintToken(): string {
 export async function POST(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
@@ -35,11 +39,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (denied) return denied
 
   const [doc] = await database
-    .select({ id: schema.contractDocuments.id, token: schema.contractDocuments.publicShareToken, status: schema.contractDocuments.status })
+    .select({ id: schema.contractDocuments.id, token: schema.contractDocuments.publicShareToken, status: schema.contractDocuments.status, expiresAt: schema.contractDocuments.expiresAt })
     .from(schema.contractDocuments)
     .where(eq(schema.contractDocuments.id, id))
     .limit(1)
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (doc.status === 'signed' || doc.status === 'cancelled' || isContractPastExpiry(doc.status, doc.expiresAt)) {
+    return NextResponse.json({ error: 'This contract is closed or lapsed. Extend a lapsed deadline before sharing it.' }, { status: 409 })
+  }
 
   let token = doc.token
   const now = new Date().toISOString()
@@ -80,6 +87,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
   const { id } = await ctx.params
   const database = await db() as unknown as D1
   const denied = await requireContractAccess(database, { userId, orgId }, id)

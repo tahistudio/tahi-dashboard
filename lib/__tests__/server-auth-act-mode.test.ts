@@ -10,8 +10,8 @@
  *   - a Tahi admin who is not a super admin is ignored;
  *   - a super admin with no team_members row is ignored, because an acting
  *     write has to be attributable to somebody on the roster;
- *   - and in every refusal the session stays a read-only preview rather than
- *     falling back to something more permissive.
+ *   - preview itself requires super-admin access; a refused lens has no org;
+ *   - a refused acting identity after an authorised lens stays read-only.
  *
  * The property that matters most is the last assertion in the happy path:
  * `impersonating` stays TRUE in act mode. Roughly twenty-one portal writes
@@ -137,9 +137,10 @@ describe('getPortalAuth: Act as client', () => {
     const auth = await getPortalAuth(req(actingCookies))
     expect(auth.canWriteAsClient).toBeUndefined()
     expect(auth.actingAs).toBeUndefined()
-    // Still previewing, so they keep the read-only lens they had.
-    expect(auth.impersonating).toBe(true)
-    expect(auth.orgId).toBe(CLIENT_D1_ORG)
+    expect(auth.impersonating).toBe(false)
+    expect(auth.orgId).toBeNull()
+    expect(auth.contactId).toBeUndefined()
+    expect(auth.previewContact).toBeUndefined()
     expect(resolveTeamMember).not.toHaveBeenCalled()
   })
 
@@ -154,23 +155,23 @@ describe('getPortalAuth: Act as client', () => {
 
   it('ignores the mode cookie for a client session, cookies and all', async () => {
     clerkAuth.mockResolvedValue({ userId: 'user_bob', orgId: 'org_client', sessionId: 's' })
-    selectQueue.push([{ id: CLIENT_D1_ORG }]) // their own org resolution
+    const ownOrgId = '5c07ff11-bbb1-412f-9ce0-d2d2c066845c'
+    selectQueue.push([{ id: ownOrgId }])
     const auth = await getPortalAuth(req(actingCookies))
     expect(auth.impersonating).toBe(false)
     expect(auth.canWriteAsClient).toBeUndefined()
     expect(auth.actingAs).toBeUndefined()
     // Their own org, not the one the forged cookie named.
-    expect(auth.orgId).toBe(CLIENT_D1_ORG)
+    expect(auth.orgId).toBe(ownOrgId)
+    expect(auth.orgId).not.toBe(CLIENT_D1_ORG)
     expect(resolvePermissions).not.toHaveBeenCalled()
   })
 
-  it('does not even look for an identity in read-only preview', async () => {
-    // The extra reads are paid only when the browser asks to act, so an
-    // ordinary preview costs exactly what it did before this feature.
+  it('authorises read-only preview without resolving an acting roster identity', async () => {
     const auth = await getPortalAuth(req({ [IMPERSONATE_ORG_COOKIE]: CLIENT_D1_ORG }))
     expect(auth.impersonating).toBe(true)
     expect(auth.canWriteAsClient).toBeUndefined()
-    expect(resolvePermissions).not.toHaveBeenCalled()
+    expect(resolvePermissions).toHaveBeenCalledTimes(1)
     expect(resolveTeamMember).not.toHaveBeenCalled()
   })
 
@@ -196,7 +197,7 @@ describe('getPortalAuth: Act as client', () => {
       expect(auth.orgId).toBe(CLIENT_D1_ORG)
       expect(auth.canWriteAsClient).toBeUndefined()
       expect(auth.actingAs).toBeUndefined()
-      expect(resolvePermissions).not.toHaveBeenCalled()
+      expect(resolvePermissions).toHaveBeenCalledTimes(1)
       expect(resolveTeamMember).not.toHaveBeenCalled()
     }
   })
@@ -235,7 +236,34 @@ describe('getPortalAuth: Act as client', () => {
     resolvePermissions.mockRejectedValue(new Error('D1 unavailable'))
     const auth = await getPortalAuth(req(actingCookies))
     expect(auth.canWriteAsClient).toBeUndefined()
+    expect(auth.impersonating).toBe(false)
+    expect(auth.orgId).toBeNull()
+    expect(auth.contactId).toBeUndefined()
+    expect(resolveTeamMember).not.toHaveBeenCalled()
+  })
+
+  it('keeps an authorised lens read-only if acting permission is revoked on recheck', async () => {
+    resolvePermissions.mockResolvedValueOnce({ isSuperAdmin: true })
+      .mockResolvedValueOnce({ isSuperAdmin: false })
+    selectQueue.push([{ id: 'contact_1' }])
+    const auth = await getPortalAuth(req(actingCookies))
+    expect(auth.orgId).toBe(CLIENT_D1_ORG)
     expect(auth.impersonating).toBe(true)
+    expect(auth.contactId).toBe('contact_1')
+    expect(auth.canWriteAsClient).toBeUndefined()
+    expect(auth.actingAs).toBeUndefined()
+    expect(resolvePermissions).toHaveBeenCalledTimes(2)
+    expect(resolveTeamMember).not.toHaveBeenCalled()
+  })
+
+  it('keeps an authorised lens read-only when acting identity resolution fails', async () => {
+    resolveTeamMember.mockRejectedValueOnce(new Error('Roster unavailable'))
+    selectQueue.push([{ id: 'contact_1' }])
+    const auth = await getPortalAuth(req(actingCookies))
+    expect(auth.orgId).toBe(CLIENT_D1_ORG)
+    expect(auth.impersonating).toBe(true)
+    expect(auth.canWriteAsClient).toBeUndefined()
+    expect(auth.actingAs).toBeUndefined()
   })
 
   it('still acts when the org has no contact row to name', async () => {

@@ -342,3 +342,107 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
   (existing warnings); whitespace and edited-id uniqueness checks passed.
   Previous documentation deploy 6f47476c is green (run 38043210208).
   This change contains only the triage report and backlog/status/run-log edits.
+
+## 2026-10-11, approved repair batch in progress (Codex)
+
+Liam approved the eight grouped triage priorities. Main started at 1171d9e5.
+Current uncommitted changes cover scoped search, nested feature guards and
+super-admin client preview, report scoping, bounded suggestion reads, overview
+brief helpers moved out of route.ts, studio contract expiry and signing email
+deadlines, truthful manual nudges and review links, MCP invoice lineItems,
+and targeted dark/mobile CSS repairs. Search regression: 52 tests pass.
+Suggestion/brief regression: 126 tests pass. The first complete gate passed
+type-check, lint, 398 files / 6,455 tests, and the production build. No commit,
+deployment or live proof yet. Subsequent audit added feature guards to 65
+contract/proposal/schedule handlers. Their QA passed 205 new tests, including
+real SQLite CRUD for granted members, super admins and the API service. Full
+suite after those guards: 399 files / 6,660 tests passed. Final UI touch repairs
+and their gate follow before committing.
+
+SW.1 now has a draft preview/apply route and UI for a paid live Stripe invoice
+matched to an existing client contact. Stripe QA passed 103 tests, including
+both concurrent insert orderings, existing-row races and rollback. A found
+open-first / paid-second race was fixed by reconciliation after an insert
+conflict and a guarded status update. Contract QA passed 199 tests across
+12 files, including send guards; 117 expiry tests also passed with the host
+timezone set to Los Angeles. No Lingorama data changed. CN.3 and bounded ports
+remain queued. Previous agent IDs disappeared after tool refresh; resumed QA
+agents continued with disjoint test ownership, and UIUX was read-only.
+
+Local UI checks use Codex's in-app browser and the dead-Resend server on 3179.
+The populated overview renders; requests list and board render at 375 in dark.
+Contract cards fit 375 in light and dark. The 768 check found a cramped header
+and inaccessible table actions, prompting shared header wrapping and opt-in
+tablet cards. Recovery fields and both close targets measure approximately
+44px and fit 375 in dark. UIUX source review caught and resolved feedback,
+focus, palette and overflow issues. The PC Chrome connection is absent;
+signed-in production QA, SW.1 application and the signing email preview remain
+pending. Liam was asked to reconnect that session. No production writes made.
+
+The populated contract rechecks pass in dark at 768 (cards, actions visible)
+and 1280 (table width equals its 895px available content width, no horizontal
+scroll). Search on Clients narrowed to Giant Group, and its new-client panel
+opened and cancelled without saving. Requests list/board and new-request
+open/cancel passed. Time's search input measured 44.5px, Add filter 46px and
+all three filter-type menu items approximately 44px at 375 in dark. Recovery
+client options loaded, and no preview/apply request was submitted. Source UIUX
+review is clear. The desktop Wire had no current events in this old snapshot,
+so its long-item rendering remains a production observation to collect.
+
+- Permission QA and local cascade review (accepted by the Codex lead before the first
+  commit): read-only review of `scripts/repair-local-qa-cascades.mjs` confirmed
+  SQLite backups precede each shard's rebuild transaction, existing DDL and
+  explicit indexes/triggers are retained, and FK checks precede commit.
+  `node scripts/repair-local-qa-cascades.mjs` reported zero pending repairs on
+  both local shards. QA did not rerun `--apply`.
+- Evidence paths: `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/`, shards
+  `3c9bc9ebbf8d47b6582e4d8b0a036070724f940ae907dc856bcd6db3600bc2d6.sqlite`
+  and `8f2e8e3d5e8d43e0415c7bc1d0343cc341493bd608416d324bf664c09389af98.sqlite`;
+  backups under `.wrangler/qa-backups/cascades-1791671526628/`.
+  Read-only `node:sqlite` checks via a PowerShell here-string piped to
+  `node --input-type=module` found identical row contents, columns, indexes
+  and triggers for all seven rebuilt tables (163 preserved rows per shard).
+  `PRAGMA quick_check` returned `ok` and `PRAGMA foreign_key_check` returned
+  zero violations on each shard.
+- Transaction fixture proof used the same stdin Node command with
+  `PRAGMA foreign_keys = ON`, `BEGIN IMMEDIATE` and guaranteed `ROLLBACK`,
+  restricted to those verified local paths. Unique fixture parents/children
+  proved all seven child tables and eight cascade edges, including signer-only
+  deletion, contract descendants, proposal sections/variants/acceptances and
+  schedule sections/rows. Each shard rejected eight orphan insert attempts;
+  unrelated fixture siblings survived. SHA-256 fingerprints of every table's
+  contents and all schema objects matched before/after rollback, with zero
+  fixture residue. No existing row was explicitly deleted or updated.
+- Validation: owned permission tests passed (14 files, 326 tests), as did
+  type-check and lint (existing warnings). Final full-suite summary verified in
+  `.wrangler/repair-full-vitest-final.log`: 398 files, 6455 tests passed.
+  `.wrangler/repair-full-vitest.log` retains the first seven failures; source
+  scope fixes and the missing raw metadata fixture column addressed them,
+  without weakening assertions or rerunning away a load-only flake.
+- Regression limits: the cascade proof is local SQLite evidence, not a route,
+  deployed-role or visual check. No persistent cascade test was added. Auth
+  preview, docs/tasks/proposal-section guards and scoped reports are the owned
+  permission coverage; artifact per-ID feature guards remain incompletely
+  audited. T1.6/T1.16 are not blanket complete and still need live proof.
+  Existing deliverable follow-up is `e2e/sales-publish.spec.ts` and
+  `e2e/public-viewers.spec.ts` (three cases each), one file at a time with
+  `npx playwright test -c playwright.local.config.ts <spec> --project=chromium --workers=1`.
+  Their local server must use a dead `RESEND_API_KEY` before setting the
+  runner's `E2E_DEAD_RESEND_KEY=1`; they write disposable local fixtures and
+  the contract spec leaves local R2 PDFs. Main owns CLI execution. This QA
+  agent remains read-only outside this log. Its browser tool requires
+  `cua_repl` for UI actions and reported no connected browser; no independent
+  Playwright runner or browser regression was performed.
+
+Final repair source gate: type-check and lint passed, 399 files / 6,660 tests
+passed, and production build passed. The whitespace check caught CRLF in the
+new TASKS section and one extra EOF blank line; both were corrected before
+commit. Sales artifact feature guards are now fully audited across 65 handlers
+with 205 new tests, superseding the earlier per-ID audit limitation. Remaining
+limits are signed-in production evidence, changed email previews and the
+Lingorama recovery operation. No production data or configuration changed.
+
+Staging also caught two extra EOF blank lines in newly tracked files, which
+the unstaged diff check had not covered. The first local commit was created
+before that failure was handled. Those whitespace-only defects were corrected
+and the local commit amended before pushing; no failed gate was deployed.

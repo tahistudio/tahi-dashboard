@@ -28,9 +28,11 @@ test.describe('Portal flow', () => {
     }
   })
 
-  test('can view messages', async ({ page }) => {
-    await page.goto('/messages')
-    await expect(page.locator('h1')).toContainText('Messages')
+  test('client Messages is absent by default', async ({ page }) => {
+    await page.goto('/overview')
+    await expect(page.locator('nav a[href="/messages"]')).toHaveCount(0)
+    const response = await page.request.get('/api/portal/messages')
+    expect(response.status()).toBe(403)
   })
 
   test('can view invoices', async ({ page }) => {

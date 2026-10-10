@@ -83,7 +83,7 @@ interface FilterBarProps {
   }
   className?: string
   /** Compact = smaller chip + button heights. */
-  size?: 'md' | 'sm'
+  size?: 'md' | 'sm' | 'lg'
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ export function FilterBar({
   // When the user just added a filter we auto-open its editor.
   const [autoEditId, setAutoEditId] = React.useState<string | null>(null)
 
-  const fieldHeight = size === 'sm' ? '1.875rem' : '2.25rem'
+  const fieldHeight = size === 'sm' ? '1.875rem' : size === 'lg' ? '2.875rem' : '2.25rem'
   const fieldFont = size === 'sm' ? 'var(--text-xs)' : 'var(--text-sm)'
 
   const availableFilters = filters.filter(f => !active.some(a => a.id === f.id))
@@ -173,6 +173,7 @@ export function FilterBar({
             style={{
               flex: 1,
               minWidth: 0,
+              height: '100%',
               border: 'none',
               outline: 'none',
               background: 'transparent',
@@ -189,6 +190,10 @@ export function FilterBar({
                 background: 'transparent',
                 border: 'none',
                 padding: '0 0.125rem',
+                width: size === 'lg' ? '2.75rem' : undefined,
+                height: size === 'lg' ? '2.75rem' : undefined,
+                alignItems: 'center',
+                justifyContent: 'center',
                 color: 'var(--color-text-subtle)',
                 cursor: 'pointer',
                 display: 'inline-flex',
@@ -297,7 +302,7 @@ export function FilterBar({
                   type="button"
                   role="menuitem"
                   onClick={() => addFilter(f)}
-                  className="w-full text-left"
+                  className={`w-full text-left${size === 'lg' ? ' min-h-11' : ''}`}
                   style={{
                     padding: '0.4375rem 0.625rem',
                     background: 'transparent',
@@ -338,7 +343,7 @@ function FilterChip({
   onValueChange: (next: string) => void
   onRemove: () => void
   onEditorClosed: () => void
-  size: 'md' | 'sm'
+  size: 'md' | 'sm' | 'lg'
 }) {
   const ref = React.useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = React.useState(initialOpen)
@@ -346,7 +351,7 @@ function FilterChip({
     if (initialOpen) setOpen(true)
   }, [initialOpen])
 
-  const chipHeight = size === 'sm' ? '1.875rem' : '2.25rem'
+  const chipHeight = size === 'sm' ? '1.875rem' : size === 'lg' ? '2.75rem' : '2.25rem'
   const chipFont = size === 'sm' ? 'var(--text-xs)' : 'var(--text-sm)'
   const selected = def.options.find(o => o.value === value)
 
@@ -405,8 +410,8 @@ function FilterChip({
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '1.25rem',
-              height: '1.25rem',
+              width: size === 'lg' ? '2.75rem' : '1.25rem',
+              height: size === 'lg' ? '2.75rem' : '1.25rem',
               borderRadius: 'var(--radius-sm)',
               color: 'var(--color-text-subtle)',
               transition: 'background-color 120ms ease, color 120ms ease',
@@ -446,7 +451,7 @@ function FilterChip({
                   setOpen(false)
                   onEditorClosed()
                 }}
-                className="w-full inline-flex items-center"
+                className={`w-full inline-flex items-center${size === 'lg' ? ' min-h-11' : ''}`}
                 style={{
                   gap: '0.5rem',
                   padding: '0.4375rem 0.625rem',
@@ -495,7 +500,7 @@ function MultiSelectChip({
   onValuesChange: (next: string[]) => void
   onRemove: () => void
   onEditorClosed: () => void
-  size: 'md' | 'sm'
+  size: 'md' | 'sm' | 'lg'
 }) {
   const ref = React.useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = React.useState(initialOpen)
@@ -503,7 +508,7 @@ function MultiSelectChip({
     if (initialOpen) setOpen(true)
   }, [initialOpen])
 
-  const chipHeight = size === 'sm' ? '1.875rem' : '2.25rem'
+  const chipHeight = size === 'sm' ? '1.875rem' : size === 'lg' ? '2.75rem' : '2.25rem'
   const chipFont = size === 'sm' ? 'var(--text-xs)' : 'var(--text-sm)'
   const selected = def.options.filter(o => values.includes(o.value))
 
@@ -576,8 +581,8 @@ function MultiSelectChip({
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '1.25rem',
-              height: '1.25rem',
+              width: size === 'lg' ? '2.75rem' : '1.25rem',
+              height: size === 'lg' ? '2.75rem' : '1.25rem',
               borderRadius: 'var(--radius-sm)',
               color: 'var(--color-text-subtle)',
               transition: 'background-color 120ms ease, color 120ms ease',
@@ -618,7 +623,7 @@ function MultiSelectChip({
                 type="button"
                 onClick={() => toggle(opt.value)}
                 aria-pressed={isSelected}
-                className="w-full inline-flex items-center"
+                className={`w-full inline-flex items-center${size === 'lg' ? ' min-h-11' : ''}`}
                 style={{
                   gap: '0.5rem',
                   padding: '0.4375rem 0.625rem',
@@ -663,7 +668,7 @@ function MultiSelectChip({
             <button
               type="button"
               onClick={() => { onValuesChange([]); }}
-              className="w-full"
+              className={`w-full${size === 'lg' ? ' min-h-11' : ''}`}
               style={{
                 marginTop: '0.1875rem',
                 padding: '0.4375rem 0.625rem',
@@ -707,7 +712,7 @@ function DateRangeChip({
   onRangeChange: (from: string | null, to: string | null) => void
   onRemove: () => void
   onEditorClosed: () => void
-  size: 'md' | 'sm'
+  size: 'md' | 'sm' | 'lg'
 }) {
   const ref = React.useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = React.useState(initialOpen)
@@ -715,7 +720,7 @@ function DateRangeChip({
     if (initialOpen) setOpen(true)
   }, [initialOpen])
 
-  const chipHeight = size === 'sm' ? '1.875rem' : '2.25rem'
+  const chipHeight = size === 'sm' ? '1.875rem' : size === 'lg' ? '2.75rem' : '2.25rem'
   const chipFont = size === 'sm' ? 'var(--text-xs)' : 'var(--text-sm)'
 
   const displayLabel: React.ReactNode = (!from && !to)
@@ -788,8 +793,8 @@ function DateRangeChip({
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '1.25rem',
-              height: '1.25rem',
+              width: size === 'lg' ? '2.75rem' : '1.25rem',
+              height: size === 'lg' ? '2.75rem' : '1.25rem',
               borderRadius: 'var(--radius-sm)',
               color: 'var(--color-text-subtle)',
               transition: 'background-color 120ms ease, color 120ms ease',
@@ -824,7 +829,7 @@ function DateRangeChip({
                 key={p.label}
                 type="button"
                 onClick={() => { onRangeChange(p.from, p.to); setOpen(false); onEditorClosed() }}
-                className="w-full inline-flex items-center"
+                className={`w-full inline-flex items-center${size === 'lg' ? ' min-h-11' : ''}`}
                 style={{
                   gap: '0.5rem',
                   padding: '0.4375rem 0.625rem',
@@ -866,7 +871,7 @@ function DateRangeChip({
                 value={from ?? ''}
                 onChange={(e) => onRangeChange(e.target.value || null, to)}
                 aria-label="From date"
-                style={dateInputStyle}
+                style={{ ...dateInputStyle, height: size === 'lg' ? '2.75rem' : dateInputStyle.height }}
               />
               <span style={{ color: 'var(--color-text-subtle)', fontSize: '0.75rem' }}>to</span>
               <input
@@ -874,7 +879,7 @@ function DateRangeChip({
                 value={to ?? ''}
                 onChange={(e) => onRangeChange(from, e.target.value || null)}
                 aria-label="To date"
-                style={dateInputStyle}
+                style={{ ...dateInputStyle, height: size === 'lg' ? '2.75rem' : dateInputStyle.height }}
               />
             </div>
           </div>
@@ -882,7 +887,7 @@ function DateRangeChip({
             <button
               type="button"
               onClick={() => onRangeChange(null, null)}
-              className="w-full"
+              className={`w-full${size === 'lg' ? ' min-h-11' : ''}`}
               style={{
                 marginTop: '0.1875rem',
                 padding: '0.4375rem 0.625rem',

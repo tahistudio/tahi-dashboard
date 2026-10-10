@@ -347,8 +347,8 @@ function SlideOverRoot({
                 aria-label="Close"
                 className="flex items-center justify-center"
                 style={{
-                  width: '2rem',
-                  height: '2rem',
+                  width: '2.75rem',
+                  height: '2.75rem',
                   borderRadius: 'var(--radius-md)',
                   border: 'none',
                   background: 'transparent',

@@ -1345,7 +1345,7 @@ function BuilderRail({
                 Open
               </a>
             </div>
-            <button onClick={onUnshare} className="inline-flex items-center" style={{ ...railBtn, color: 'var(--color-danger)', justifyContent: 'center' }}>
+            <button onClick={onUnshare} className="inline-flex items-center" style={{ ...railBtn, color: 'var(--color-danger-ink)', justifyContent: 'center' }}>
               Revoke link
             </button>
           </div>

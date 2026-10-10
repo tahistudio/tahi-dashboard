@@ -26,6 +26,9 @@ type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 vi.mock('@/lib/access-scope', () => ({ scopedOrgIds: vi.fn() }))
 vi.mock('@/lib/access-scoping', () => ({ resolveAccessScoping: vi.fn() }))
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
+// Feature decisions are exercised through real handlers in sales-artifact-feature-guards.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({
     userId: 'user_pm',

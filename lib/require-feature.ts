@@ -122,14 +122,8 @@ export interface PortalFeatureAuth {
  *     previewing a client portal (`impersonating`), and previewing is
  *     read-only elsewhere, so it can only ever read.
  *
- * KNOWN RESIDUE (pre-existing, out of this slice): that second short-circuit is
- * Tahi-org MEMBERSHIP, and the `tahi-impersonate-org` cookie `getPortalAuth`
- * trusts is written client-side by impersonation-banner.tsx rather than by a
- * permission-checked endpoint. So a roleless or narrowly scoped team member who
- * is now refused every admin route can still set that cookie by hand and READ a
- * client's portal data. Closing it means gating the impersonation branch on an
- * actual grant and moving the cookie write behind an API route that checks the
- * same thing.
+ * getPortalAuth verifies super-admin permission before accepting a preview
+ * cookie. This guard receives only that resolved, permitted client lens.
  *
  * @returns a 403 `NextResponse` when the client's org (or their own contact
  *          row) denies `featureKey`, else `null` (allowed - continue).

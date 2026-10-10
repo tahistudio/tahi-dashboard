@@ -271,6 +271,8 @@ interface DataTableProps<Row> {
    *  including its own hairline; the loading, empty and pagination chrome
    *  around it stays shared. */
   mobileCard?: (row: Row) => React.ReactNode
+  /** Use cards below this breakpoint when the sidebar leaves too little room. */
+  cardBreakpoint?: 'md' | 'lg' | 'xl'
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -304,6 +306,7 @@ export function DataTable<Row>({
   paginate,
   defaultPageSize = 20,
   mobileCard,
+  cardBreakpoint = 'md',
 }: DataTableProps<Row>) {
   const isControlledSort = sort !== undefined
   const [internalSort, setInternalSort] = React.useState<DataTableSort | null>(defaultSort)
@@ -471,12 +474,12 @@ export function DataTable<Row>({
     // need to know the width and never take a listener.
     if (!wantsCards) return
     if (typeof window === 'undefined' || !window.matchMedia) return
-    const mql = window.matchMedia('(max-width: 767px)')
+    const mql = window.matchMedia({ md: '(width < 48rem)', lg: '(width < 64rem)', xl: '(width < 80rem)' }[cardBreakpoint])
     const update = () => setNarrow(mql.matches)
     update()
     mql.addEventListener?.('change', update)
     return () => mql.removeEventListener?.('change', update)
-  }, [wantsCards])
+  }, [wantsCards, cardBreakpoint])
   const showCards = narrow !== false
   const showTable = !mobileCard || narrow !== true
 
@@ -504,7 +507,7 @@ export function DataTable<Row>({
       {/* Card layout below md, when the caller opted in. Same rows, same
           pagination; only the shape of one record changes. */}
       {mobileCard && showCards && (
-        <div className="md:hidden" style={{ width: '100%' }}>
+        <div className={{ md: 'md:hidden', lg: 'lg:hidden', xl: 'xl:hidden' }[cardBreakpoint]} style={{ width: '100%' }}>
           {loading ? (
             <div style={{ padding: '2.5rem 1rem' }}>
               <TableStatusBlock>
@@ -525,7 +528,7 @@ export function DataTable<Row>({
       )}
 
       {showTable && (
-        <div className={mobileCard ? 'h-scroll hidden md:block' : 'h-scroll'} style={{ width: '100%' }}>
+        <div className={mobileCard ? { md: 'h-scroll hidden md:block', lg: 'h-scroll hidden lg:block', xl: 'h-scroll hidden xl:block' }[cardBreakpoint] : 'h-scroll'} style={{ width: '100%' }}>
           <table
             role="table"
             aria-label={ariaLabel}
@@ -583,6 +586,7 @@ export function DataTable<Row>({
                       style={{
                         ...thStyle(stickyOffset),
                         textAlign: align,
+                        padding: col.sortable ? '0 1rem' : '0.75rem 1rem',
                         width: col.width,
                         minWidth: col.minWidth,
                       }}
@@ -599,7 +603,7 @@ export function DataTable<Row>({
                         <button
                           type="button"
                           onClick={() => handleSortClick(col)}
-                          className="inline-flex items-center"
+                          className="tahi-focus-ring inline-flex min-h-11 min-w-11 items-center"
                           style={{
                             gap: '0.25rem',
                             padding: 0,

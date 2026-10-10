@@ -12,6 +12,9 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useToast } from '@/components/tahi/toast'
+import { SlideOver } from '@/components/tahi/slide-over'
+import { TahiButton } from '@/components/tahi/tahi-button'
+import { Input, Select, Textarea } from '@/components/tahi/input'
 import { EngagementHealthCard } from '@/components/tahi/engagement-health-card'
 import { Gate } from '@/components/tahi/permissions-context'
 import { parseActivityMetadata } from '@/lib/activity-meta'
@@ -820,39 +823,9 @@ export function DealDetail({ dealId }: { dealId: string }) {
             <EngagementEditor dealId={dealId} deal={deal} onUpdated={() => { void mutate() }} />
           </SidebarCard>
 
-          {/* Auto-nudge toggle (only in Stalled stage) */}
           {deal.stageName === 'Stalled' && (
-            <SidebarCard title="Auto Nudges">
-              <div className="flex items-center justify-between">
-                <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                  {deal.autoNudgesDisabled ? 'Paused' : 'Active'}
-                </span>
-                <button
-                  onClick={async () => {
-                    await fetch(apiPath(`/api/admin/deals/${dealId}`), {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ autoNudgesDisabled: !deal.autoNudgesDisabled }),
-                    })
-                    void mutate()
-                  }}
-                  className="inline-flex items-center gap-1.5 font-medium transition-colors rounded-full"
-                  style={{
-                    padding: '0.25rem 0.625rem',
-                    fontSize: '0.6875rem',
-                    background: deal.autoNudgesDisabled ? 'var(--color-bg-tertiary)' : 'var(--color-brand-50)',
-                    color: deal.autoNudgesDisabled ? 'var(--color-text-subtle)' : 'var(--color-brand)',
-                    border: `1px solid ${deal.autoNudgesDisabled ? 'var(--color-border)' : 'var(--color-brand-light)'}`,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {deal.autoNudgesDisabled ? (
-                    <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Enable</>
-                  ) : (
-                    <><BellOff style={{ width: '0.625rem', height: '0.625rem' }} /> Pause</>
-                  )}
-                </button>
-              </div>
+            <SidebarCard title="Auto nudges">
+              <p className="text-sm text-[var(--color-text-muted)]">Automatic follow-ups are not available. Use Nudge to send one yourself.</p>
             </SidebarCard>
           )}
 
@@ -2844,213 +2817,75 @@ function NudgeDialog({ dealId, dealTitle, contacts, onClose, onSent }: {
 }) {
   const contactEmails = contacts.map(c => c.contactEmail).filter(Boolean) as string[]
   const [to, setTo] = useState(contactEmails.join(', '))
-  const [subject, setSubject] = useState(`Following up: ${dealTitle}`)
-  const [body, setBody] = useState(
-    `Hi,\n\nJust wanted to check in on this. Happy to answer any questions or jump on a quick call if it helps.\n\nCheers`
-  )
-  const [scheduleDate, setScheduleDate] = useState('')
+  const [subject, setSubject] = useState('Following up: ' + dealTitle)
+  const [body, setBody] = useState('Hi,\n\nJust wanted to check in on this. Happy to answer any questions or jump on a quick call if it helps.\n\nCheers')
   const [sending, setSending] = useState(false)
-  const [mode, setMode] = useState<'now' | 'schedule'>('now')
-
+  const [error, setError] = useState('')
+  const [heldCount, setHeldCount] = useState(0)
+  const { showToast } = useToast()
   const { data: templatesData } = useSWR<{ items?: { id: string; name: string; subject: string; bodyHtml: string }[] }>('/api/admin/nudge-templates')
   const templates = templatesData?.items ?? []
-
   const handleTemplate = (templateId: string) => {
-    const t = templates.find(tp => tp.id === templateId)
-    if (t) {
-      setSubject(t.subject.replace(/\{\{dealTitle\}\}/g, dealTitle))
-      setBody(t.bodyHtml.replace(/\{\{dealTitle\}\}/g, dealTitle))
+    const template = templates.find(t => t.id === templateId)
+    if (template) {
+      setSubject(template.subject.replace(/\{\{dealTitle\}\}/g, dealTitle))
+      setBody(template.bodyHtml.replace(/\{\{dealTitle\}\}/g, dealTitle))
     }
   }
-
   const handleSend = async () => {
-    const emails = to.split(',').map(e => e.trim()).filter(Boolean)
-    if (!emails.length || !subject.trim() || !body.trim()) return
-
+    const emails = to.split(',').map(email => email.trim()).filter(Boolean)
+    if (!emails.length || !subject.trim() || !body.trim() || sending) return
     setSending(true)
+    setError('')
     try {
-      const res = await fetch(apiPath(`/api/admin/deals/${dealId}/nudges`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contactEmails: emails,
-          subject: subject.trim(),
-          bodyHtml: body.trim().replace(/\n/g, '<br>'),
-          sendNow: mode === 'now',
-          scheduledAt: mode === 'schedule' && scheduleDate ? new Date(scheduleDate).toISOString() : undefined,
-        }),
+      const res = await fetch(apiPath('/api/admin/deals/' + dealId + '/nudges'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactEmails: emails, subject: subject.trim(), bodyHtml: body.trim().replace(/\n/g, '<br>'), sendNow: true }),
       })
-      if (res.ok) onSent()
-    } catch { /* silent */ } finally {
-      setSending(false)
-    }
+      const result = await res.json() as { error?: string; suppressedCount?: number }
+      if (!res.ok) throw new Error(result.error ?? 'The nudge could not be sent.')
+      if (result.suppressedCount) {
+        setHeldCount(result.suppressedCount)
+        return
+      }
+      showToast('Nudge sent.', 'success')
+      onSent()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The nudge could not be sent. Check before retrying.')
+    } finally { setSending(false) }
   }
-
+  const fieldStyle = { minHeight: '2.75rem', minWidth: 0, width: '100%' }
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.4)', padding: '0' }}
-      onClick={onClose}
-    >
-      <div
-        className="rounded-t-xl sm:rounded-xl shadow-lg border flex flex-col w-full"
-        style={{
-          maxWidth: '32rem',
-          maxHeight: '92dvh',
-          background: 'var(--color-bg)',
-          borderColor: 'var(--color-border)',
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-3" style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--color-border)' }}>
-          <h2 className="font-semibold flex items-center gap-2 min-w-0" style={{ fontSize: '1rem', color: 'var(--color-text)' }}>
-            <Send className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--color-brand)' }} />
-            <span className="truncate">Send Nudge</span>
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="flex items-center justify-center flex-shrink-0 transition-colors rounded-md"
-            style={{
-              width: '2.25rem',
-              height: '2.25rem',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--color-text-subtle)',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex flex-col gap-3 overflow-y-auto" style={{ padding: '1.25rem' }}>
-          {/* Template picker */}
-          {templates.length > 0 && (
-            <div>
-              <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
-                Template
-              </label>
-              <select
-                onChange={e => handleTemplate(e.target.value)}
-                className="w-full rounded-lg"
-                style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-              >
-                <option value="">Custom message</option>
-                {templates.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* To */}
-          <div>
-            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
-              To
-            </label>
-            <input
-              type="text"
-              value={to}
-              onChange={e => setTo(e.target.value)}
-              placeholder="email@example.com"
-              className="w-full rounded-lg"
-              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-            />
-          </div>
-
-          {/* Subject */}
-          <div>
-            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
-              Subject
-            </label>
-            <input
-              type="text"
-              value={subject}
-              onChange={e => setSubject(e.target.value)}
-              className="w-full rounded-lg"
-              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-            />
-          </div>
-
-          {/* Body */}
-          <div>
-            <label className="block font-medium" style={{ fontSize: '0.75rem', color: 'var(--color-text-subtle)', marginBottom: '0.25rem' }}>
-              Message
-            </label>
-            <textarea
-              value={body}
-              onChange={e => setBody(e.target.value)}
-              rows={6}
-              className="w-full rounded-lg resize-none"
-              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'inherit' }}
-            />
-          </div>
-
-          {/* Send mode */}
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 cursor-pointer" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-              <input type="radio" name="nudgeMode" checked={mode === 'now'} onChange={() => setMode('now')} />
-              Send now
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer" style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-              <input type="radio" name="nudgeMode" checked={mode === 'schedule'} onChange={() => setMode('schedule')} />
-              Schedule
-            </label>
-          </div>
-
-          {mode === 'schedule' && (
-            <input
-              type="datetime-local"
-              value={scheduleDate}
-              onChange={e => setScheduleDate(e.target.value)}
-              className="rounded-lg"
-              style={{ padding: '0.5rem', fontSize: '0.8125rem', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)' }}
-            />
-          )}
-        </div>
-
-        <div className="flex flex-wrap justify-end gap-2" style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--color-border)' }}>
-          <button
-            onClick={onClose}
-            className="rounded-lg font-medium transition-colors"
-            style={{
-              flex: '1 1 auto',
-              minHeight: '2.5rem',
-              padding: '0.5rem 1rem',
-              fontSize: '0.8125rem',
-              background: 'var(--color-bg-tertiary)',
-              color: 'var(--color-text-muted)',
-              border: '1px solid var(--color-border)',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSend}
-            disabled={sending || !to.trim() || !subject.trim() || !body.trim()}
-            className="rounded-lg font-medium transition-colors inline-flex items-center justify-center gap-1.5"
-            style={{
-              flex: '2 1 auto',
-              minHeight: '2.5rem',
-              padding: '0.5rem 1rem',
-              fontSize: '0.8125rem',
-              background: sending ? 'var(--color-text-subtle)' : 'var(--color-brand)',
-              color: 'white',
-              border: 'none',
-              cursor: sending ? 'default' : 'pointer',
-              opacity: (!to.trim() || !subject.trim() || !body.trim()) ? 0.5 : 1,
-            }}
-          >
-            <Send className="w-3.5 h-3.5" />
-            {sending ? 'Sending...' : mode === 'now' ? 'Send Now' : 'Schedule'}
-          </button>
-        </div>
-      </div>
-    </div>
+    <SlideOver open variant="center" contentKey={heldCount ? 'result' : 'compose'} title={heldCount ? 'Nudge delivery result' : 'Send nudge'} icon={<Send size={16} />} onClose={() => { if (!sending) { if (heldCount) onSent(); else onClose() } }} maxWidth="32rem">
+      <SlideOver.Body>
+        {heldCount ? <p role="status" aria-live="polite" className="text-sm text-[var(--color-text)]">
+          {heldCount} recipient(s) were held by the email delivery gate and did not receive this nudge. Other recipients were sent the message. The deal history records the delivery result.
+        </p> : <div className="flex min-w-0 flex-col gap-4">
+          {templates.length > 0 && <label className="flex min-w-0 flex-col gap-2 text-sm">Template
+            <Select className="w-full min-w-0" style={fieldStyle} disabled={sending} defaultValue="" onChange={event => handleTemplate(event.target.value)} options={[
+              { value: '', label: 'Custom message' }, ...templates.map(template => ({ value: template.id, label: template.name })),
+            ]} />
+          </label>}
+          <label className="flex flex-col gap-2 text-sm">To
+            <Input style={fieldStyle} value={to} disabled={sending} onChange={event => setTo(event.target.value)} placeholder="email@example.com" />
+          </label>
+          <label className="flex flex-col gap-2 text-sm">Subject
+            <Input style={fieldStyle} value={subject} disabled={sending} onChange={event => setSubject(event.target.value)} />
+          </label>
+          <label className="flex flex-col gap-2 text-sm">Message
+            <Textarea value={body} disabled={sending} onChange={event => setBody(event.target.value)} rows={6} />
+          </label>
+          <p className="text-xs text-[var(--color-text-muted)]">Sends immediately. Scheduled follow-ups are not available.</p>
+          {error && <p role="alert" className="break-words text-sm text-[var(--color-danger-ink)]">{error}</p>}
+        </div>}
+      </SlideOver.Body>
+      <SlideOver.Footer>
+        {heldCount ? <TahiButton onClick={onSent}>Done</TahiButton> : <>
+        <TahiButton variant="secondary" disabled={sending} onClick={onClose}>Cancel</TahiButton>
+        <TahiButton loading={sending} disabled={sending || !to.trim() || !subject.trim() || !body.trim()} onClick={handleSend} iconLeft={<Send size={14} />}>{sending ? 'Sending...' : 'Send now'}</TahiButton>
+        </>}
+      </SlideOver.Footer>
+    </SlideOver>
   )
 }
 

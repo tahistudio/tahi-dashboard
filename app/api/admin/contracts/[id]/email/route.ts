@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -15,6 +16,7 @@ import {
   resolveOrgRecipientScope,
 } from '@/lib/email-delivery'
 import { requireContractAccess } from '@/app/api/admin/_sales-access/artifact-scope'
+import { isContractPastExpiry } from '@/lib/contract-signing-state'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ id: string }> }
@@ -44,6 +46,8 @@ function mintToken(): string {
 export async function POST(req: NextRequest, ctx: RouteContext) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   const body = await req.json().catch(() => ({})) as {
@@ -80,11 +84,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       name: schema.contractDocuments.name,
       status: schema.contractDocuments.status,
       token: schema.contractDocuments.publicShareToken,
+      expiresAt: schema.contractDocuments.expiresAt,
     })
     .from(schema.contractDocuments)
     .where(eq(schema.contractDocuments.id, id))
     .limit(1)
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (isContractPastExpiry(doc.status, doc.expiresAt)) {
+    return NextResponse.json({ error: 'This contract has lapsed. Extend its signing deadline before sending another link.' }, { status: 409 })
+  }
   if (doc.status === 'cancelled' || doc.status === 'expired' || doc.status === 'signed') {
     return NextResponse.json({ error: 'This contract is not open for signing.' }, { status: 409 })
   }
@@ -170,6 +178,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         signUrl,
         fromName,
         customMessage,
+        expiresAt: doc.expiresAt,
       }))
       const outcome = await deliverEmail({
         from: emailFromAddress(),

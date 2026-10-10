@@ -21,6 +21,10 @@ const notified: Record<string, unknown>[] = []
 let template: Record<string, unknown> | null = null
 let callerTeamMemberId: string | null = null
 
+// Feature access is granted for these task behaviour fixtures.
+// Denial wiring is exercised with the real guard in permission-write-guards.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
   isTahiAdmin: () => true,

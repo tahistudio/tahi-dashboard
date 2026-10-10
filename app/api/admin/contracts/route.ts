@@ -1,3 +1,5 @@
+import { requireFeature } from '@/lib/require-feature'
+import { normalizeContractExpiry } from '@/lib/contract-expiry'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -34,6 +36,8 @@ function substituteVariables(bodyHtml: string, values: Record<string, string>): 
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
 
   const scope = await scopedOrgIds({ userId, orgId })
   if (scope.kind === 'none') return NextResponse.json({ items: [] })
@@ -123,6 +127,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'contracts')
+  if (featureDenied) return featureDenied
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json() as {
@@ -144,6 +150,7 @@ export async function POST(req: NextRequest) {
     }>
   }
 
+  if (body.expiresAt !== undefined && body.expiresAt !== null && body.expiresAt !== '' && !normalizeContractExpiry(body.expiresAt)) return NextResponse.json({ error: 'expiresAt must be a valid date or timestamp.' }, { status: 400 })
   if (!body.name?.trim()) return NextResponse.json({ error: 'name required' }, { status: 400 })
 
   const database = await db() as unknown as D1
@@ -185,7 +192,7 @@ export async function POST(req: NextRequest) {
     status: 'draft',
     bodyHtml: resolvedBodyHtml,
     variableValues: body.variableValues ? JSON.stringify(body.variableValues) : null,
-    expiresAt: body.expiresAt ?? null,
+    expiresAt: normalizeContractExpiry(body.expiresAt ?? null),
     createdById: userId,
     createdAt: now,
     updatedAt: now,

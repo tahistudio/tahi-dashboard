@@ -22,10 +22,10 @@ interface PageHeaderProps {
 export function PageHeader({ title, subtitle, children, className, style }: PageHeaderProps) {
   return (
     <div
-      className={`flex flex-col sm:flex-row sm:items-end sm:justify-between ${className ?? ''}`}
+      className={`flex flex-col flex-wrap sm:flex-row sm:items-end sm:justify-between ${className ?? ''}`}
       style={{ gap: 'var(--space-3)', ...style }}
     >
-      <div>
+      <div className="min-w-0 sm:flex-1 sm:basis-64">
         <h1
           style={{
             fontSize: 'var(--text-xl)',
@@ -49,7 +49,7 @@ export function PageHeader({ title, subtitle, children, className, style }: Page
         )}
       </div>
       {children && (
-        <div className="flex items-center flex-wrap" style={{ gap: 'var(--space-2)', flexShrink: 0 }}>
+        <div className="flex min-w-0 max-w-full items-center flex-wrap" style={{ gap: 'var(--space-2)', flexShrink: 0 }}>
           {children}
         </div>
       )}

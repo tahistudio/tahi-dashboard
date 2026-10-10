@@ -56,7 +56,7 @@
 
 import { db } from '@/lib/db'
 import { resolveAccessScoping } from '@/lib/access-scoping'
-import { resolvePermissions } from '@/lib/permissions'
+import { resolvePermissions, type ResolvedAccess } from '@/lib/permissions'
 import { SERVICE_USER_ID } from '@/lib/team-identity'
 import type { RequestAuthResult } from '@/lib/server-auth'
 
@@ -92,6 +92,7 @@ export type OrgScope =
  */
 export async function scopedOrgIds(
   auth: Pick<RequestAuthResult, 'userId' | 'orgId'>,
+  preparedAccess?: ResolvedAccess,
 ): Promise<OrgScope> {
   const database = await db()
 
@@ -114,7 +115,7 @@ export async function scopedOrgIds(
   //    This is STRICTLY SAFER than the old `null -> all` mapping: even if a
   //    misconfiguration made resolveAccessScoping return [] for the owner, they
   //    still resolve to { all } here instead of being denied.
-  const access = await resolvePermissions(database as DrizzleDB, {
+  const access = preparedAccess ?? await resolvePermissions(database as DrizzleDB, {
     userId: auth.userId,
     orgId: auth.orgId,
   })

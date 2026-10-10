@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -7,10 +8,12 @@ import { eq, desc, like, and, inArray } from 'drizzle-orm'
 // GET /api/admin/docs - list all doc pages
 // Query: ?category=brand&search=onboarding
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'docs')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const category = url.searchParams.get('category')
@@ -111,6 +114,8 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'docs')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     title?: string

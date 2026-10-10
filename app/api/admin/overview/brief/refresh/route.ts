@@ -22,7 +22,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logCronRun } from '@/lib/cron-runs'
-import { computeBrief, writeBriefCache, readBriefCache, BRIEF_CACHE_KEY, type D1 } from '@/app/api/admin/overview/brief/route'
+import { computeBrief, writeBriefCache, readBriefCache, BRIEF_CACHE_KEY, type D1 } from '@/lib/overview-brief'
 import { resolveBriefCacheKey } from '@/lib/brief-cache-key'
 
 export const dynamic = 'force-dynamic'

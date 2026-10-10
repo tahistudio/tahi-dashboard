@@ -1,3 +1,5 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgScopeSql } from '@/lib/org-scope-sql'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -13,9 +15,10 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId }, 'reports')
+  const featureDenied = await requireFeature({ userId, orgId }, ['reports', 'invoices'])
   if (featureDenied) return featureDenied
 
+  const scope = await scopedOrgIds({ userId, orgId })
   const database = await db()
 
   // Monthly request trend window (last 6 months)
@@ -40,15 +43,16 @@ export async function GET(req: NextRequest) {
     database
       .select({ count: count() })
       .from(schema.organisations)
-      .where(eq(schema.organisations.status, 'active')),
+      .where(and(orgScopeSql(scope, schema.organisations.id), eq(schema.organisations.status, 'active'))),
     database
       .select({ count: count() })
-      .from(schema.requests),
+      .from(schema.requests).where(orgScopeSql(scope, schema.requests.orgId)),
     database
       .select({ count: count() })
       .from(schema.requests)
       .where(
         and(
+          orgScopeSql(scope, schema.requests.orgId),
           ne(schema.requests.status, 'delivered'),
           ne(schema.requests.status, 'archived')
         )
@@ -60,6 +64,7 @@ export async function GET(req: NextRequest) {
       .from(schema.requests)
       .where(
         and(
+          orgScopeSql(scope, schema.requests.orgId),
           eq(schema.requests.status, 'delivered'),
           sql`${schema.requests.deliveredAt} IS NOT NULL`,
           sql`${schema.requests.createdAt} IS NOT NULL`,
@@ -69,24 +74,25 @@ export async function GET(req: NextRequest) {
     database
       .select({ total: sum(schema.timeEntries.hours) })
       .from(schema.timeEntries)
-      .where(eq(schema.timeEntries.billable, true)),
+      .where(and(orgScopeSql(scope, schema.timeEntries.orgId), eq(schema.timeEntries.billable, true))),
     database
       .select({ total: sum(schema.invoices.totalUsd) })
       .from(schema.invoices)
       // Issued and unpaid. Drafts are excluded by OWED_STATUSES: a
       // placeholder is not an outstanding invoice.
-      .where(inArray(schema.invoices.status, owedStatusList())),
+      .where(and(orgScopeSql(scope, schema.invoices.orgId), inArray(schema.invoices.status, owedStatusList()))),
     database
       .select({
         status: schema.requests.status,
         count: count(),
       })
       .from(schema.requests)
+      .where(orgScopeSql(scope, schema.requests.orgId))
       .groupBy(schema.requests.status),
     database
       .select({ createdAt: schema.requests.createdAt })
       .from(schema.requests)
-      .where(sql`${schema.requests.createdAt} >= ${sixMonthsAgoStr}`),
+      .where(and(orgScopeSql(scope, schema.requests.orgId), sql`${schema.requests.createdAt} >= ${sixMonthsAgoStr}`)),
   ])
 
   const totalClients = activeClientsResult[0]?.count ?? 0

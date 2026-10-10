@@ -68,12 +68,12 @@ interface RowDraft {
 // renders the visual; we just hand it the right colours per status. Keep
 // in sync with the schedule list page chip palette.
 const STATUS_PALETTE: Record<Schedule['status'], { bg: string; fg: string; bd: string }> = {
-  draft:     { bg: '#f7f9f6', fg: '#5a6657', bd: '#e8f0e6' },
-  shared:    { bg: '#eff6ff', fg: '#1e40af', bd: '#bfdbfe' },
-  sent:      { bg: '#eef2ff', fg: '#4338ca', bd: '#c7d2fe' },
-  signed:    { bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0' },
-  completed: { bg: '#ecfdf5', fg: '#047857', bd: '#a7f3d0' },
-  archived:  { bg: '#f5f5f4', fg: '#525252', bd: '#e7e5e4' },
+  draft: { bg: 'var(--badge-neutral-bg)', fg: 'var(--badge-neutral-text)', bd: 'var(--badge-neutral-border)' },
+  shared: { bg: 'var(--badge-info-bg)', fg: 'var(--badge-info-text)', bd: 'var(--badge-info-border)' },
+  sent: { bg: 'var(--badge-purple-bg)', fg: 'var(--badge-purple-text)', bd: 'var(--badge-purple-border)' },
+  signed: { bg: 'var(--badge-positive-bg)', fg: 'var(--badge-positive-text)', bd: 'var(--badge-positive-border)' },
+  completed: { bg: 'var(--badge-brand-bg)', fg: 'var(--badge-brand-text)', bd: 'var(--badge-brand-border)' },
+  archived: { bg: 'var(--badge-neutral-bg)', fg: 'var(--badge-neutral-text)', bd: 'var(--badge-neutral-border)' },
 }
 
 const OWNER_LABEL: Record<RowOwner, string> = {

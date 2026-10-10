@@ -673,6 +673,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     'contract-sign': {
       subject: `Please sign: ${CLIENT_ORG} Statement of Work`,
       react: createElement(ContractSignEmail, {
+        expiresAt: '2026-12-20T10:59:59.999Z',
         signerName: firstName,
         signerRole: 'client',
         contractName: `${CLIENT_ORG} Statement of Work`,
@@ -699,6 +700,7 @@ function buildSamples({ to, firstName }: BuildSamplePreviewsInput): Record<
     'contract-sign-tahi': {
       subject: `Please sign: ${contractName}`,
       react: createElement(ContractSignEmail, {
+        expiresAt: '2026-12-20T10:59:59.999Z',
         signerName: firstName,
         signerRole: 'tahi',
         contractName,

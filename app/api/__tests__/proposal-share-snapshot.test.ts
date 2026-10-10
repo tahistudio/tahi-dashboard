@@ -25,6 +25,9 @@ type Row = Record<string, unknown>
 const queue: Row[][] = []
 const updates: Record<string, unknown>[] = []
 
+// Feature decisions are exercised through real handlers in sales-artifact-feature-guards.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
   isTahiAdmin: () => true,

@@ -90,6 +90,34 @@ export const SWEEP_BUDGET_MS = 75_000
  *  the slowest read it has actually seen. */
 export const READ_ESTIMATE_MS = 30_000
 
+export const MODEL_READ_TIMEOUT_MS = 30_000
+const WRITE_RESERVE_MS = 5_000
+
+export class SuggesterTimeoutError extends Error {
+  constructor() {
+    super('Model read timed out. The transcript remains available for retry.')
+    this.name = 'SuggesterTimeoutError'
+  }
+}
+
+async function boundedRead<T>(read: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      read(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new SuggesterTimeoutError())
+          controller.abort()
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * A transcript left for the scheduled sweep has to still be inside the
  * sweep's window when its turn comes, and a queue of deferred calls drains
@@ -239,6 +267,9 @@ export interface SuggestResult {
 }
 
 export interface SuggestFromTranscriptInput {
+  /** Per-read deadline, clamped by the sweep's remaining budget. */
+  timeoutMs?: number
+  signal?: AbortSignal
   transcript: string
   wrapUp: string | null
   callTitle: string | null
@@ -904,7 +935,11 @@ export async function suggestFromTranscript(input: SuggestFromTranscriptInput): 
   }
 
   const Anthropic = (await import('@anthropic-ai/sdk')).default
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    timeout: input.timeoutMs ?? MODEL_READ_TIMEOUT_MS,
+    maxRetries: 0,
+  })
 
   const notes = buildUserMessage(input)
   const secondRead = input.alreadyProposed !== undefined
@@ -922,7 +957,7 @@ export async function suggestFromTranscript(input: SuggestFromTranscriptInput): 
     max_tokens: MAX_OUTPUT_TOKENS,
     system: [{ type: 'text', text: SUGGESTER_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content }],
-  }) as unknown as AnthropicResponse
+  }, { signal: input.signal }) as unknown as AnthropicResponse
 
   const text = response.content
     .filter(block => block.type === 'text')
@@ -986,7 +1021,7 @@ function deterministicFallback(input: SuggestFromTranscriptInput, source: string
 // ── The sweep ────────────────────────────────────────────────────────────────
 
 export interface SweepSummary {
-  /** Transcripts this run took on and stamped: read, skipped by the gate, or failed. */
+  /** Transcripts this run examined, including reads deferred after a timeout. */
   looked: number
   /**
    * Transcripts the run found but did not start, because starting one more
@@ -1063,8 +1098,8 @@ export interface SweepOptions {
   /**
    * The time budget, in milliseconds from `startedAt`. Defaults to
    * SWEEP_BUDGET_MS. A transcript is started only when its reads are
-   * expected to finish inside it, except the first one to need the model,
-   * which is always started so a run can never make no progress at all.
+   * expected to finish inside it. The first model read may use the remaining
+   * read budget, but never starts after the write reserve has been reached.
    */
   budgetMs?: number
   /** When the budget started counting, by `clock`. Defaults to the moment the sweep began; a route that did work first passes its own start. */
@@ -1183,6 +1218,12 @@ export async function runSuggestionSweep(
   }
   const readsPerCall = secondPass.enabled ? 2 : 1
   const fits = (reads: number): boolean => clock() - startedAt + reads * slowestRead <= budgetMs
+  const readTimeout = (): number => Math.min(MODEL_READ_TIMEOUT_MS, budgetMs - (clock() - startedAt) - WRITE_RESERVE_MS)
+  const read = (input: SuggestFromTranscriptInput): Promise<SuggestResult> => {
+    const timeoutMs = readTimeout()
+    if (timeoutMs <= 0) throw new SuggesterTimeoutError()
+    return timed(() => boundedRead(signal => suggest({ ...input, signal, timeoutMs }), timeoutMs))
+  }
   let started = 0
 
   const summary: SweepSummary = {
@@ -1235,7 +1276,7 @@ export async function runSuggestionSweep(
     // Everything from here on is left exactly as it was found: unread,
     // unstamped, and first in line for the next run, which also reads
     // oldest first.
-    if (started > 0 && !fits(readsPerCall)) {
+    if (readTimeout() <= 0 || (started > 0 && !fits(readsPerCall))) {
       summary.deferredIds = transcripts.slice(index).map(t => t.id)
       summary.deferred = summary.deferredIds.length
       break
@@ -1265,13 +1306,18 @@ export async function runSuggestionSweep(
         context: await buildSuggestionContext(database, gate.orgId, at),
       }
       const first = base
-      result = await timed(() => suggest(secondPass.enabled ? { ...first, cacheSource: true } : first))
+      result = await read(secondPass.enabled ? { ...first, cacheSource: true } : first)
     } catch (err) {
       // The summary has one slot for "this transcript produced nothing and
       // why", so a failure is reported there rather than in a field the
       // contract does not have. The stamp still goes on.
       const message = err instanceof Error ? err.message : String(err)
       summary.skipped.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
+      if (err instanceof SuggesterTimeoutError || (err instanceof Error && /timeout|timed out|aborted/i.test(err.message))) {
+        summary.deferredIds = transcripts.slice(index).map(t => t.id)
+        summary.deferred = summary.deferredIds.length
+        break
+      }
       await stamp(database, transcript.id, nowIso)
       continue
     }
@@ -1301,7 +1347,7 @@ export async function runSuggestionSweep(
       } else {
         try {
           const firstDrafts = drafts
-          const again = await timed(() => suggest({ ...base, cacheSource: true, alreadyProposed: firstDrafts, maxNew: room }))
+          const again = await read({ ...base, cacheSource: true, alreadyProposed: firstDrafts, maxNew: room })
           summary.costCents += await recordSpend(database, transcript, again.usage, 'second_pass')
           const merged = mergeSecondRead(drafts, again, room)
           tally(merged.dropped)

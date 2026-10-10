@@ -4,12 +4,12 @@
  * Shared logic for importing a single Stripe invoice into the local DB.
  * Used by:
  *   - POST /api/admin/integrations/stripe/import-invoices  (bulk pull)
- *   - POST /api/webhooks/stripe (invoice.paid self-heal — creates the local
+ *   - POST /api/webhooks/stripe (invoice.paid self-heal, creates the local
  *     row if it didn't exist when the payment fires)
  */
 
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { importedInvoiceNumber } from '@/lib/invoice-number'
 import { mapStripeStatus, decideStripeStatus } from '@/lib/stripe-status'
 
@@ -37,7 +37,7 @@ export interface StripeInvoiceLike {
   due_date?: number | null
   created?: number
   status_transitions?: { paid_at?: number | null } | null
-  lines?: { data?: Array<{ description?: string | null; quantity?: number | null; amount?: number }> }
+  lines?: { has_more?: boolean; data?: Array<{ id?: string; description?: string | null; quantity?: number | null; amount?: number }> }
 }
 
 export interface ImportResult {
@@ -55,7 +55,7 @@ export interface ImportResult {
  *   stripeCustomerId. Only as a last resort do we auto-create an org
  *   from the Stripe customer name to avoid the "Evan Kwan duplicate orgs"
  *   pattern. Callers can pass { autoCreateOrg: false } to skip that
- *   behaviour (webhook caller sets false — if we can't match, the payment
+ *   behaviour (webhook caller sets false, if we can't match, the payment
  *   just waits for a manual import to create the org).
  */
 export async function importStripeInvoice(
@@ -85,7 +85,10 @@ export async function importStripeInvoice(
     await database
       .update(schema.invoices)
       .set({
-        ...(nextStatus ? { status: nextStatus } : {}),
+        ...(nextStatus ? { status: nextStatus === 'paid' ? nextStatus : sql`CASE
+          WHEN ${schema.invoices.status} = 'paid' THEN ${schema.invoices.status}
+          WHEN ${nextStatus} IN ('draft', 'sent') AND ${schema.invoices.status} IN ('written_off', 'viewed', 'overdue', 'pending', 'sent') THEN ${schema.invoices.status}
+          ELSE ${nextStatus} END` } : {}),
         ...(paidAt ? { paidAt } : {}),
         // Refresh the client's pay link, but never clobber a stored one with a
         // null (a webhook payload for a paid invoice may omit it).
@@ -96,7 +99,7 @@ export async function importStripeInvoice(
     return { localInvoiceId: existing[0].id, created: false, orgId: existing[0].orgId }
   }
 
-  // 2. No local row — need to import. Find org by stripeCustomerId.
+  // 2. No local row, need to import. Find org by stripeCustomerId.
   let matchedOrgId: string | null = null
   if (inv.customer) {
     const orgs = await database
@@ -136,11 +139,17 @@ export async function importStripeInvoice(
   }
 
   // 4. Create the local invoice row + line items.
-  const invoiceId = crypto.randomUUID()
+  // Stable primary keys make concurrent webhook/import retries converge.
+  // Existing historical UUIDs are still found by stripeInvoiceId above.
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`stripe-invoice:${inv.id}`)))
+  bytes[6] = (bytes[6] & 0x0f) | 0x50
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes.slice(0, 16), byte => byte.toString(16).padStart(2, '0')).join('')
+  const invoiceId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
   const subtotal = inv.subtotal ?? 0
   const total = inv.total ?? 0
 
-  await database.insert(schema.invoices).values({
+  const invoiceInsert = database.insert(schema.invoices).values({
     id: invoiceId,
     orgId: matchedOrgId,
     stripeInvoiceId: inv.id,
@@ -167,20 +176,26 @@ export async function importStripeInvoice(
     notes: `Imported from Stripe: ${inv.number ?? inv.id}`,
     createdAt: inv.created ? new Date(inv.created * 1000).toISOString() : now,
     updatedAt: now,
-  })
+  }).onConflictDoNothing({ target: schema.invoices.id }).returning({ id: schema.invoices.id })
 
-  if (inv.lines?.data) {
-    for (const line of inv.lines.data) {
-      await database.insert(schema.invoiceItems).values({
-        id: crypto.randomUUID(),
+  const lineInserts = (inv.lines?.data ?? []).map((line, index) =>
+      database.insert(schema.invoiceItems).values({
+        id: `${invoiceId}:${index}`,
         invoiceId,
         description: line.description ?? 'Line item',
         quantity: line.quantity ?? 1,
-        unitPriceUsd: ((line.amount ?? 0) / 100) / (line.quantity ?? 1),
+        unitPriceUsd: ((line.amount ?? 0) / 100) / (line.quantity || 1),
         totalUsd: (line.amount ?? 0) / 100,
-      })
-    }
+      }).onConflictDoNothing({ target: schema.invoiceItems.id }),
+  )
+  // D1 batch is transactional. A failed line must not leave a paid invoice
+  // whose items disappeared; a second click must not insert another invoice.
+  const results = await database.batch([invoiceInsert, ...lineInserts])
+  if (!results[0].length) {
+    // Another import won the insert. Reconcile this payload against that
+    // row, so a concurrent paid event cannot be lost behind an older open one.
+    return importStripeInvoice(database, inv, opts)
   }
 
-  return { localInvoiceId: invoiceId, created: true, orgId: matchedOrgId }
+  return { localInvoiceId: invoiceId, created: results[0].length > 0, orgId: matchedOrgId }
 }

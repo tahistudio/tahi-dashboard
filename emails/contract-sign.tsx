@@ -23,6 +23,7 @@ import {
   PrimaryButton,
   SignOff,
 } from './_components'
+import { contractExpiryLabel } from '@/lib/contract-expiry'
 
 interface ContractSignEmailProps {
   signerName: string
@@ -32,6 +33,7 @@ interface ContractSignEmailProps {
   signUrl: string
   fromName: string // who is sending, e.g. "Liam Miller"
   customMessage?: string | null
+  expiresAt?: string | null
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -51,6 +53,7 @@ export function ContractSignEmail({
   signUrl,
   fromName,
   customMessage,
+  expiresAt,
 }: ContractSignEmailProps) {
   const isInternal = signerRole === 'tahi'
   const typeLabel = TYPE_LABEL[contractType] ?? 'contract'
@@ -76,6 +79,7 @@ export function ContractSignEmail({
             <LedgerRow label="Contract" value={contractName} tone="brand" />
             <LedgerRow label="Type" value={typeLabel} />
             <LedgerRow label="Signing as" value={signerName} />
+            {expiresAt && <LedgerRow label="Sign by" value={contractExpiryLabel(expiresAt)} />}
           </LedgerRows>
 
           {customMessage ? (
@@ -90,8 +94,8 @@ export function ContractSignEmail({
 
           <EmailParagraph variant="small">
             Confidential to the named recipient. Each signature is anchored to a tamper-evident{' '}
-            <Mono>SHA-256</Mono> chain, and your IP is hashed, never stored in plain text. The link
-            expires when the contract is fully signed or cancelled.
+            <Mono>SHA-256</Mono> chain, and your IP is hashed, never stored in plain text. The link{' '}
+            {expiresAt ? `expires on ${contractExpiryLabel(expiresAt)}, or earlier when the contract is fully signed or cancelled.` : 'expires when the contract is fully signed or cancelled.'}
           </EmailParagraph>
         </EmailBody>
         <SignOff name={fromName} />
