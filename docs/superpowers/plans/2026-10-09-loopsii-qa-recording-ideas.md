@@ -10,6 +10,12 @@ This is an ideas log, not a scope. Nothing here is scheduled. The ids live in
 TASKS.md under "(f) North star and the long pool", "Ideas pool, 2026-10-09":
 WQA.0 (section 2), REC.0 (section 3) and LP.1 to LP.12 (section 4).
 
+**Scope correction, Liam, 2026-10-10 (Decision #068):** "i do not care about
+video recording, just detecting meetings in my calendar, recording the pc
+audio, and transcribing really well, and really cheap." Calendar detection,
+PC audio capture, transcript accuracy and very low cost are the requirements.
+The original screen recorder and Loom replacement recommendation is withdrawn.
+
 Research by a Sonnet researcher (vendor pages read 2026-10-09, sources at the
 bottom); dashboard inventory by a Sonnet explorer against the tree at e69b21f0.
 The Loopsii app sits behind a signup, so anything about its in-app UX comes
@@ -38,7 +44,7 @@ capacity, change requests and Gantt are all "up next".
 | Notes, chapters and suggested tasks after a call | Built and stronger: CN.1 suggestions inbox with a verbatim-quote rule and an approval gate; no chapters |
 | Suggests which project a call belongs to | Partial: the Drive sync matches by time and attendee; unmatched notes park as unlinked with no suggestion |
 | Pre-meeting brief (past calls plus open tasks) | Partial: cron_pre_call_digest covers discovery calls (lead context) only, not client calls |
-| Loom-style screen recordings with share link, transcript, summary, timecoded comments | **Absent** (no getDisplayMedia anywhere) |
+| Loom-style screen recordings with share link, transcript, summary, timecoded comments | Absent; **out of scope per Liam, 2026-10-10** |
 | Share notes or recordings by link, public or invite-only, timecoded comments, no account to watch | Partial: token share links exist for proposals, contracts and schedules only, with view analytics (app/review/[token] is the testimonial form, not a share) |
 | "Ask Loopsii" (Cmd+J): answers about any call or project, quoting the transcript with a play-at-timestamp link | **Absent.** Cmd+K is a search palette, not an assistant |
 | MCP for Claude, ChatGPT, Codex, Cursor; OAuth consent, one-hour tokens, no delete permission, revoke screen | Built and far larger (about 340 tools), but admin only; per-client scoped MCP is an open idea (Giant Group, 2026-09-13) |
@@ -114,53 +120,57 @@ and whether an html2canvas-style screenshot renders Webflow pages faithfully.
 
 ---
 
-## 3. Call recordings and direct recordings
+## 3. Calendar-aware meeting audio and transcription
+
+### Liam's requirements, 2026-10-10
+
+- Detect meetings in Liam's calendar and associate transcripts with the meeting
+  and, where known, the client.
+- Capture PC system audio plus microphone so both sides are transcribed.
+  Windows PC support is required, across Google Meet, Microsoft Teams and Zoom,
+  including browser and desktop apps.
+- Transcribe really well and really cheaply. Transcript quality and very low
+  total cost are the selection criteria. Transcript is the primary output.
+- No video capture, screen recorder, Loom replacement, video playback or video
+  sharing in this scope.
+- Calendar detection is required. Automatic recording versus a prompt, and
+  audio retention after transcription, remain scope choices. No provider,
+  desktop SDK or transcription model has been selected.
 
 ### Today
 
 Only Google Meet calls that Gemini took notes on, pulled from Drive
-(`lib/gemini-transcript-parser.ts`, `call_transcripts`). No audio or video is
-stored. Whisper on Workers AI is already bound and in use for Slack voice notes
-(`lib/slack/voice.ts`, `@cf/openai/whisper`), so the transcription half is
-already in the stack.
+(lib/gemini-transcript-parser.ts, call_transcripts). No audio or video is
+stored. Whisper on Workers AI is already bound for Slack voice notes
+(lib/slack/voice.ts, @cf/openai/whisper). It is a candidate to evaluate, not
+proof that it meets long-call accuracy requirements.
 
-### Options for Meet, Teams and Zoom
+### Direction for the next scope
 
-| Route | How | Cost | Trade-off |
-|---|---|---|---|
-| Recall.ai Meeting Bot API | A bot joins Zoom, Meet, Teams, Webex, Slack huddles | $0.50 an hour plus $0.15 transcription (startup rate $0.25) | One integration covers all three; the bot is visible in the call |
-| Recall.ai Desktop Recording SDK | No bot; mic plus system audio on Mac and Windows; real speaker names from participant events | Included in tiers, no separate price found | It is an Electron app we would ship to ourselves |
-| Our own Mac menu-bar app | Core Audio process taps (macOS 14.4+) plus mic, the way Loopsii and Granola appear to work | Our time | Fully owned, highest effort |
-| Buy Granola or Loopsii for the two of us | They record; we pull transcripts in through their MCP or API | $14 or $12 a user | No build; data sits with a third party (Loopsii uses Z.ai) |
-| Zoom RTMS | Real-time media API, generally available | Zoom side | Zoom only; Meet's media API is beta-only and Teams has none (vendor blog, medium confidence) |
+1. Use the existing calendar integration for meeting detection. Scope a local
+   Windows desktop helper for system audio and mic capture across meeting
+   providers and desktop apps. A Mac-only app does not meet the PC requirement.
+2. Compare local transcription with inexpensive hosted models using the same
+   real meeting samples. Check names, accents, technical terms, overlapping
+   speech and missing words. Report accuracy alongside total cost per audio
+   hour and expected monthly usage, including capture/SDK fees, processing and
+   storage. Re-check pricing at scope time; the 2026-10-09 research estimates
+   are not an approved budget or a reason to sacrifice accuracy.
+3. Save into call_transcripts and reuse meeting/client linking, summaries, MCP
+   access and the existing human-approved suggestions flow. Audio upload may
+   help as a fallback or evaluation tool; it does not replace calendar
+   detection and PC audio capture.
 
-Transcription per audio hour: Whisper on Workers AI about $0.03 (no speaker
-labels), AssemblyAI $0.15 plus $0.02 diarization, ElevenLabs Scribe $0.22,
-Deepgram Nova-3 $0.26. At 40 call hours a month that is about $1 to $10.
+The original research considered Recall.ai's bot and desktop SDK, Granola,
+Loopsii, Workers AI Whisper, AssemblyAI, ElevenLabs and Deepgram. These remain
+candidates to assess against the requirements above, not selected solutions.
+Local transcription belongs in the comparison, with hardware, accuracy and
+processing time checked rather than assumed. A bot route is an alternative
+from the original research, not the chosen capture approach.
 
-Two separate streams (mic is us, system audio is them) give "Me" and "Them"
-labels with no diarization at all; Granola does this and upgrades to real names
-on Meet, Zoom and Teams.
-
-### Direct recordings (Loom replacement)
-
-Browser `getDisplayMedia` plus mic through `MediaRecorder`, uploaded to R2 in
-multipart chunks (5 MiB minimum part), transcribed by Whisper, summarised by
-Haiku. A browser gets tab audio and mic reliably but not audio from a desktop
-Zoom or Teams app, which is why the call route above is separate. Cloudflare
-Stream ($5 per 1,000 minutes stored, $1 per 1,000 delivered) gives adaptive
-playback if raw R2 files feel slow. R2 itself is $0.015 per GB-month with free
-egress.
-
-### Recommended order
-
-1. Upload a recording, transcribe it, file it like a Gemini transcript (days).
-   Every downstream piece (suggestions, unlinked parking, MCP) already works.
-2. Browser recorder with a share page and timecoded comments (about a week).
-   This doubles as video feedback for the QA tester.
-3. Calls: Liam picks one of Recall.ai bot, Recall.ai desktop SDK, or buying
-   Granola or Loopsii and syncing transcripts in. Build our own Mac app only if
-   the rest proves out.
+The original browser screen recorder, Cloudflare Stream playback and video
+feedback recommendation is withdrawn. Website QA pins and copy suggestions in
+section 2 remain a separate idea and do not require a video recorder.
 
 Recording consent stays with whoever records, in every route.
 
@@ -183,13 +193,14 @@ Recording consent stays with whoever records, in every route.
 7. **Income goal bar**: paid, invoiced, unbilled, in pipeline, gap to the
    take-home target.
 8. **Plain-words capacity line**: "Free about 60 hours a month, can start 8 Sep".
-9. **Share links for anything** (notes, transcripts, recordings, files), public
+9. **Share links for anything** (notes, transcripts, audio recordings, files), public
    or invite-only, with the view analytics we already have for proposals.
 10. **Client-scoped MCP** modelled on Loopsii's: OAuth consent, short-lived
     tokens, no delete, a Connected apps revoke screen.
 11. **Chapters** on call transcripts (cheap once the summariser runs).
-12. **Per-call recording choice** (Fathom): bot, bot-free, audio and transcript,
-    or transcript only.
+12. **Per-meeting audio controls**: skip a meeting or start/stop capture,
+    with transcript as the primary output. Recording automation remains for
+    scoping; no video or bot-selection UI (Liam, 2026-10-10).
 
 ---
 

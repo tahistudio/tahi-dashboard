@@ -1330,3 +1330,32 @@ So the lock MOVES rather than loosens. The cleanup asks "does it hold finance da
 **Implications:** No new bot identity and no second Slack app; pm_findings is the only new table sketched. Client-facing nudges stay behind a human unless the allowlist and Liam say otherwise.
 
 ---
+
+## #068 - Meeting Capture Prioritises Calendar Detection, PC Audio, Accurate Transcripts and Very Low Cost
+
+**Date:** 2026-10-10
+
+**Decision:** REC.0 detects meetings in Liam's calendar, captures PC system
+audio plus microphone, and produces highly accurate transcripts at very low
+cost across Google Meet, Microsoft Teams and Zoom, including desktop apps.
+Windows PC support is required. Transcript is the primary output. Video
+recording, a screen recorder, a Loom replacement and video sharing are out of
+scope. Compare local transcription with inexpensive hosted options against
+real calls for accuracy and total ongoing cost before choosing the approach.
+No provider, SDK, transcription model, automatic recording behaviour or audio
+retention policy has been selected.
+
+**Rationale:** Liam clarified: "i do not care about video recording, just
+detecting meetings in my calendar, recording the pc audio, and transcribing
+really well, and really cheap. make sure that is logged." The 2026-10-09
+research had expanded the idea into a browser screen recorder and video
+sharing; that recommendation is withdrawn.
+
+**Implications:** TASKS.md REC.0 and LP.12 and section 3 of
+docs/superpowers/plans/2026-10-09-loopsii-qa-recording-ideas.md carry this scope.
+Audio upload is a fallback, not the main workflow. Reuse call_transcripts and
+the existing human approval gate for task or request suggestions (Decision
+#064). Website QA comments and copy suggestions remain a separate idea.
+Nothing is scheduled or implemented by this decision.
+
+---

@@ -1027,12 +1027,17 @@ scheduled; each needs a scope before building.
   Reuses the beta feedback ball (feedback_comments, lib/feedback-anchor.ts).
   Interim with no build: pull Webflow comment-only guest comments into request
   suggestions.
-- [ ] REC.0 - [Scope] Recordings beyond Gemini: (1) upload a recording,
-  transcribe with Whisper on Workers AI (already bound for Slack voice), file it
-  as a call transcript; (2) a browser screen and mic recorder to R2 with a share
-  page and timecoded comments; (3) Meet, Teams and Zoom capture, Liam to pick
-  between the Recall.ai bot, the Recall.ai desktop SDK, or buying Granola or
-  Loopsii and syncing transcripts in.
+- [ ] REC.0 - [Scope] Calendar-aware meeting audio and transcription beyond
+  Gemini (Liam clarified 2026-10-10, Decision #068): detect meetings in Liam's
+  calendar, capture PC system audio plus microphone so both sides are heard,
+  and produce highly accurate transcripts at very low cost across Google Meet,
+  Microsoft Teams and Zoom, including desktop apps. Windows PC support is
+  required. Transcript is the primary output; no video, screen recorder, Loom
+  replacement or video sharing. Compare local transcription with inexpensive
+  hosted options on real calls for accuracy and total cost. No provider or
+  recording automation chosen yet. Feed call_transcripts and the existing
+  human-approved suggestions flow. Audio upload is a fallback, not the main
+  workflow.
 - [ ] LP.1 - [BE] Scope changes caught on a call: the suggester proposes a
   change request with the quote, included or billable, cost and days added
   (extends CN.1 and the scope-creep flag).
@@ -1047,16 +1052,18 @@ scheduled; each needs a scope before building.
 - [ ] LP.6 - [FE/BE] Weekly timesheet grid and a PDF time report.
 - [ ] LP.7 - [FE] Income goal bar: paid, invoiced, unbilled, pipeline, gap to
   the take-home target.
-- [ ] LP.8 - [BE/FE] Share links for notes, transcripts, recordings and files,
-  public or invite-only, with the existing share view analytics.
+- [ ] LP.8 - [BE/FE] Share links for notes, transcripts, audio recordings
+  and files, public or invite-only, with the existing share view analytics.
 - [ ] LP.9 - [BE] Client-scoped MCP on the Loopsii model: OAuth consent,
   short-lived tokens, no delete, a Connected apps revoke screen (folds into the
   Giant Group per-client MCP idea).
 - [ ] LP.10 - [FE] Plain-words capacity line on the capacity card: "Free about
   60 hours a month, can start 8 Sep" (the forecast and start-date routes exist).
 - [ ] LP.11 - [BE] Chapters on call transcripts, written by the summariser.
-- [ ] LP.12 - [BE/FE] Per-call recording choice once REC.0 lands: bot,
-  bot-free, audio and transcript, or transcript only.
+- [ ] LP.12 - [BE/FE] Per-meeting audio controls once REC.0 lands: skip a
+  meeting or start/stop capture; transcript is the primary output. Calendar
+  detection does not settle whether recording starts automatically; that
+  behaviour remains for scoping. No video or bot-selection UI.
 
 ---
 

@@ -228,3 +228,21 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
 - Gaps closed: STATUS.md gained the 2026-09-13 to 2026-09-20 section with refreshed known bugs and the operator list; DECISIONS.md #061 to #067 record the week's product and architecture calls (hidden Messages and Services, the migration-apply rule, hand-offs, the suggestion gate, the home money truth, MCP coercion, the PM AI direction); AGENTS.md now opens with the reading order, the people and facts that are not in the code, and Liam's standing working agreements (previously only in Claude's private memory); docs/local-dev-and-qa.md holds the QA worktree, local D1, migration and deploy recipes; the pay-rise analysis above was only in the chat; fifteen September audit and plan documents that were never committed are in; CLAUDE.md's built and not-built lists are marked as the March snapshot and rule 8 names the Cloudflare deploy; TASKS.md's operator section reflects Giant Group being allowed and lists what waits on Liam.
 - Rule from this: a session's decisions, facts and rules go into these files in the same session; a chat transcript or a tool's private memory is not a record.
 - 2026-09-22: Liam's call had no suggestions because GitHub dropped most scheduled runs (2 to 5 an hour of 12 or more); crons moved to a Cloudflare Worker (workers/cron-trigger, LW.43), every slot verified firing. Yield balances were stale in the setting (LW.42, updated by hand). content-gap-hunt overran its token cap (raised); schema-watchdog is a real finding, no JSON-LD on any live blog post (LW.45, needs a Webflow template change on Liam's go). The Slack app (CN.2) built in four slices and integrated: agent mode on the existing Tahi Dashboard app, identities by email with four levels, call suggestions as cards in founder DMs that rewrite in place, typed and voice notes as drafts the sender approves, client notes as request drafts, assignee suggestions. Deployed a2471632; the manifest, reinstall and two secrets are Liam's next step, then the live DM checks.
+
+## 2026-10-10: meeting audio scope clarified
+
+- Liam: "i do not care about video recording, just detecting meetings in my
+  calendar, recording the pc audio, and transcribing really well, and really
+  cheap. make sure that is logged."
+- Logged as Decision #068 and revised REC.0, LP.12 and the Loopsii research
+  notes. Required workflow: calendar meeting detection, Windows PC system audio
+  plus mic across Meet/Teams/Zoom, highly accurate transcripts at very low
+  total cost. Compare local and inexpensive hosted transcription on real calls.
+  Provider, capture automation and audio retention remain for scoping.
+- Removed the screen recorder/Loom/video recommendation; audio upload remains
+  a fallback. LP.8 explicitly covers audio recordings. Website QA pins and copy
+  suggestions remain a separate future idea. Docs only, nothing implemented,
+  scheduled or marked live, and no production data changes.
+- Validation: type-check and lint pass with zero errors (existing lint warnings).
+  Removed one stale generated .next/types entry for the absent suggestion-digest
+  route to unblock type-check; no tracked application code changed.
