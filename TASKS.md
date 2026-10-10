@@ -69,7 +69,8 @@ Readiness answered in chat 2026-09-13: Giant Group 95 percent, full daily driver
 
 # (a) NOW: Giant Group beta
 
-22 open ids in the original beta count, plus SW.0 and SW.1 added 2026-10-10.
+22 open ids in the original beta count, plus SW.1 added 2026-10-10.
+SW.0 was restored and verified on 2026-10-10.
 Everything here stands between today and Giant Group using the
 portal for real. The code half of the beta is merged; most of what is left is a
 live look by a human.
@@ -86,15 +87,16 @@ live look by a human.
 Investigation: docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md.
 These are live failures, ahead of feature work.
 
-- [ ] SW.0 - [BE] Restore live Stripe webhook delivery. The live destination
-  we_1TLwhCRx4rjcHALLRYDFBdan shows 14 failed attempts this week, all HTTP 400
-  "Webhook signature verification failed". A diagnostic retry of
-  invoice.payment_succeeded confirms the production signature mismatch before
-  billing handling. Likely wrong/pasted signing secret, not auth, reachability
-  or a synchronous crypto failure. Liam sets STRIPE_WEBHOOK_SECRET on worker
-  tahi-dashboard to this live endpoint's signing secret (AGENTS.md reserves
-  secrets for Liam); verify a real Stripe retry returns 200. Email retry cutoff:
-  14 October 2026, 07:56:25 NZDT. Do not disable the endpoint or signature check.
+- [x] SW.0 - [BE] Live Stripe webhook delivery restored 2026-10-10.
+  Tracking commit b361968f. Liam explicitly authorised applying the existing
+  live endpoint signing secret from his desktop PC while he was on his laptop.
+  Wrangler successfully updated STRIPE_WEBHOOK_SECRET on tahi-dashboard.
+  Real Stripe retry evt_1UMuaBRx4rjcHALL3v2Svc0u (invoice.payment_succeeded)
+  returned HTTP 200, {received:true}, at 22:53:17 NZDT. Stripe shows Delivered
+  and Recovered. This ignored event verifies signing without billing writes.
+  Production health probes passed and signed-in /overview rendered real data.
+  No application code, signature checks or UI changed; phone/dark checks are
+  not applicable to this configuration repair. SW.1 remains open separately.
 - [ ] SW.1 - [BE] Reconcile the missed Lingorama payment after SW.0: live
   Stripe invoice in_1UMcjRRx4rjcHALL0MTr5BjK (WEBL8VAA-0002, USD 1,000)
   is paid in the failed event but has no dashboard row by Stripe invoice id.

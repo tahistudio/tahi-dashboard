@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-10** by Codex (Stripe webhook investigation added; other status sections retain their recorded dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-10** by Codex (Stripe webhook delivery restored; invoice reconciliation remains open; other sections retain their recorded dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
 
 ## The plan (2026-08-18)
 
@@ -149,16 +149,18 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 
 ## Known live bugs (priority order)
 
-**New P1, 2026-10-10 (SW.0, SW.1):** live Stripe webhook attempts return
-400 "Webhook signature verification failed" before invoice handling. Stripe's
-live view showed 14 failed attempts this week; a diagnostic retry reproduced
-it in Worker logs. Likely signing-secret mismatch; Liam must set the production
-STRIPE_WEBHOOK_SECRET from the live destination. Email retry cutoff is
-14 October 2026, 07:56:25 NZDT. The failed event's paid Lingorama invoice is
-missing from the dashboard and its org has no Stripe customer mapping, so
-mapping/reconciliation is needed as well as restoring delivery. See TASKS.md
-and docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md. No fix or
-production data write has been applied.
+**P1, 2026-10-10 (SW.1):** the paid Lingorama Stripe invoice is missing from
+the dashboard and its existing org has no Stripe customer mapping. Link and
+reconcile through the app as Liam, checking for duplicate clients/invoices.
+A successful webhook response alone does not recover an unknown customer.
+See TASKS.md and docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md.
+
+**Resolved 2026-10-10 (SW.0, tracking commit b361968f):** Liam authorised
+applying the existing live endpoint secret from his PC. Wrangler updated
+STRIPE_WEBHOOK_SECRET on production worker tahi-dashboard. The real ignored
+invoice.payment_succeeded retry returned HTTP 200 at 22:53:17 NZDT and Stripe
+shows Delivered, Recovered. Public health probes passed; signed-in /overview
+loaded its real data. No billing data writes or application code changes.
 
 Older items refreshed 2026-09-26, kept below with their state.
 

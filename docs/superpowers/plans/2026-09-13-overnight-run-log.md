@@ -277,3 +277,30 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
   14 October 2026, 07:56:25 NZDT. No speculative code fix or secret change.
 - Investigation documentation gate: type-check and lint again pass with zero
   errors (existing warnings). Application code and schema remain unchanged.
+
+## 2026-10-10: Stripe webhook secret applied from Liam's desktop PC
+
+- Liam, on his laptop, explicitly asked the agent to put the signing secret
+  on his PC. Tools confirmed this session was running on desktop PC. This is
+  permission for this specific update, not a change to the standing rule that
+  Liam sets tokens and secrets.
+- Updated the existing production STRIPE_WEBHOOK_SECRET using the live
+  destination's existing secret, with Wrangler on worker tahi-dashboard.
+  Plaintext was not printed or saved; transferred encrypted between tool
+  runtimes, then passed through stdin. Temporary clipboard and memory cleared.
+  No secret rotation, application code change or signature bypass.
+- Live Stripe retry evt_1UMuaBRx4rjcHALL3v2Svc0u, invoice.payment_succeeded,
+  returned HTTP 200 with {received:true} at 22:53:17 NZDT. Stripe displayed
+  Delivered and Recovered. The handler ignores this event after verification,
+  so this recovery check made no invoice/subscription writes. Screenshot
+  capture timed out; the visible delivery status is the live evidence.
+- SW.0 is restored (investigation baseline b361968f). SW.1 remains open for
+  the missing Lingorama invoice and customer mapping. Updated TASKS.md,
+  STATUS.md and the investigation document to distinguish delivery from data
+  recovery. No production data mapping or payment action was performed.
+- Deploy dashboard run 38042102408 for b361968f is green. After the secret
+  update: / 307 to /sign-in, /sign-in 200, signed-out /overview branded HTML
+  404, and signed-in /overview rendered real data. No changed UI for phone or
+  dark checks. Documentation gate and push recorded with the follow-up commit.
+- Follow-up documentation gate: type-check and lint passed with zero errors
+  (existing lint warnings); git diff whitespace check passed.

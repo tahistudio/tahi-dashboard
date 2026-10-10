@@ -2,14 +2,17 @@
 
 ## Finding
 
-The endpoint is reachable and rejects deliveries at signature verification,
-before invoice or subscription handling. The leading cause is a signing secret
-that does not match this live endpoint (including possible pasted whitespace).
-The exact deployed secret has not been compared, so this is a diagnosis to
-verify, not a completed fix. TASKS.md SW.0 tracks restoration; SW.1 tracks
-recovery of missing data.
+Webhook signing is restored. After Liam explicitly asked the agent to apply
+the existing secret from his desktop PC, Wrangler updated the production
+Worker's STRIPE_WEBHOOK_SECRET. A real Stripe retry returned HTTP 200 with
+{received:true} at 2026-10-10 22:53:17 NZDT (09:53:17 UTC), and Stripe shows
+Delivered and Recovered. This confirms a signing-secret configuration issue;
+the previous secret's exact value was never exposed or compared.
 
-## Evidence
+SW.0 is complete. SW.1 remains open: delivery recovery does not import the
+missing Lingorama invoice without resolving its customer mapping.
+
+## Original failure evidence
 
 - Stripe live account: acct_1RMmvjRx4rjcHALL. Destination:
   https://dashboard.stripe.com/acct_1RMmvjRx4rjcHALL/workbench/webhooks/we_1TLwhCRx4rjcHALLRYDFBdan
@@ -27,24 +30,33 @@ recovery of missing data.
 - Stripe's email says retries end at 2026-10-13 18:56:25 UTC, which is
   14 October 2026, 07:56:25 NZDT.
 
-## Operator step, Liam
+## Completed configuration repair, 2026-10-10
 
-AGENTS.md (Codex specifics) says "Liam sets tokens and secrets". No secret was
-changed or copied into a tracked file during the investigation.
+Liam: "can you try and put that in my pc, i'm on my laptop right now."
+The tools were running on his desktop PC. This explicitly authorised this
+one secret update, overriding the standing operator-only guidance for this
+action. It does not change that standing guidance for future secrets.
 
-1. Open the live Stripe destination above, Overview, Signing secret. Copy that
-   endpoint's existing signing secret. Use the live endpoint secret rather
-   than an API key, a sandbox endpoint or a Stripe CLI listener secret.
-2. From the repo terminal, run:
-
-   npx wrangler secret put STRIPE_WEBHOOK_SECRET --name tahi-dashboard
-
-   Paste the signing secret into Wrangler's interactive prompt. It belongs on
-   production worker tahi-dashboard, not tahi-dashboard-staging.
-3. Retry the invoice.payment_succeeded event above in Stripe. The current
-   handler ignores it, so it verifies delivery without altering billing data.
-   Require HTTP 200 before moving on. If it still fails, capture a new Worker
-   error and compare the endpoint/secret pairing before changing code.
+- Copied the existing signing secret from live destination
+  we_1TLwhCRx4rjcHALLRYDFBdan, without rotating it.
+- Passed it to Wrangler's stdin and updated STRIPE_WEBHOOK_SECRET on worker
+  tahi-dashboard in Cloudflare account ccd4c7a3b9f7abdf566f0628579d3f4b.
+  Wrangler reported "Success! Uploaded secret STRIPE_WEBHOOK_SECRET".
+- Plaintext stayed in memory and process stdin. The tool boundary carried
+  RSA-OAEP ciphertext for a fresh local key held only in memory. No plaintext
+  secret was printed, written to a file or committed. Restored the clipboard
+  and cleared the temporary browser variable afterwards.
+- Retried only invoice.payment_succeeded, evt_1UMuaBRx4rjcHALL3v2Svc0u.
+  The current handler ignores it after validation, so this verifies delivery
+  without altering invoice/subscription data. Stripe reports HTTP 200,
+  {received:true}, Delivered and Recovered, at 22:53:17 NZDT.
+- Health: / returns 307 to /sign-in, /sign-in returns 200, signed-out
+  /overview returns the branded HTML 404. Signed-in /overview loaded real
+  Daily brief and financial data. No application or UI change was required.
+- A screenshot capture timed out in the browser backend. The visible Stripe
+  delivery status and response above are the recorded live observation.
+- Investigation baseline b361968f deployed successfully in GitHub Actions
+  run 38042102408. The deployment workflow preserves Worker runtime secrets.
 
 ## Reconcile after delivery is restored
 
