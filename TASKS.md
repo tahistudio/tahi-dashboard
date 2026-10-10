@@ -69,7 +69,8 @@ Readiness answered in chat 2026-09-13: Giant Group 95 percent, full daily driver
 
 # (a) NOW: Giant Group beta
 
-22 open ids. Everything here stands between today and Giant Group using the
+22 open ids in the original beta count, plus SW.0 and SW.1 added 2026-10-10.
+Everything here stands between today and Giant Group using the
 portal for real. The code half of the beta is merged; most of what is left is a
 live look by a human.
 
@@ -79,6 +80,32 @@ live look by a human.
   20 minutes; the only proof for the greeting, the bell, the invite path and the
   second seat. Everything marked `[~]` in this section is proved or disproved by
   this lap.
+
+## Stripe webhook failure, 2026-10-10
+
+Investigation: docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md.
+These are live failures, ahead of feature work.
+
+- [ ] SW.0 - [BE] Restore live Stripe webhook delivery. The live destination
+  we_1TLwhCRx4rjcHALLRYDFBdan shows 14 failed attempts this week, all HTTP 400
+  "Webhook signature verification failed". A diagnostic retry of
+  invoice.payment_succeeded confirms the production signature mismatch before
+  billing handling. Likely wrong/pasted signing secret, not auth, reachability
+  or a synchronous crypto failure. Liam sets STRIPE_WEBHOOK_SECRET on worker
+  tahi-dashboard to this live endpoint's signing secret (AGENTS.md reserves
+  secrets for Liam); verify a real Stripe retry returns 200. Email retry cutoff:
+  14 October 2026, 07:56:25 NZDT. Do not disable the endpoint or signature check.
+- [ ] SW.1 - [BE] Reconcile the missed Lingorama payment after SW.0: live
+  Stripe invoice in_1UMcjRRx4rjcHALL0MTr5BjK (WEBL8VAA-0002, USD 1,000)
+  is paid in the failed event but has no dashboard row by Stripe invoice id.
+  Lingorama exists as org e7d560e6-2416-4e7c-b610-09aa80c6e23d with no
+  stripeCustomerId; the event customer is cus_VFXeA5BxU9jgs7. The webhook
+  deliberately skips unknown customers, so a 200 alone will not recover it.
+  Confirm/link through the app as Liam before replay/import, check for twins,
+  and reconcile missed invoices/subscriptions. Recent daily Stripe syncs say
+  success with zero new imports despite this missing invoice; inspect the live
+  account/mode and import results rather than assuming cron success recovered
+  it. No direct production D1 edits; no data changed in the investigation.
 
 ## Operator steps waiting on Liam
 

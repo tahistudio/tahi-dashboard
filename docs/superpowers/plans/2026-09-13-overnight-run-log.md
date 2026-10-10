@@ -243,6 +243,37 @@ Read STATUS.md, TASKS.md and this file. `git log --oneline -15` for what landed.
   a fallback. LP.8 explicitly covers audio recordings. Website QA pins and copy
   suggestions remain a separate future idea. Docs only, nothing implemented,
   scheduled or marked live, and no production data changes.
+- Audio scope committed and pushed as 155f07f2. Deploy dashboard run
+  38041446892 is green; post-deploy probes: / 307 to /sign-in, /sign-in 200,
+  /overview signed out branded HTML 404. Signed-in /overview reloaded and
+  rendered its Daily brief. Documentation only, no new UI to verify.
 - Validation: type-check and lint pass with zero errors (existing lint warnings).
   Removed one stale generated .next/types entry for the absent suggestion-digest
   route to unblock type-check; no tracked application code changed.
+
+## 2026-10-10: Stripe webhook investigated, operator secret step remains
+
+- Liam supplied Stripe's live failure email for /api/webhooks/stripe, first
+  failure 2026-10-04 18:56:25 UTC. Stripe's live destination
+  we_1TLwhCRx4rjcHALLRYDFBdan showed 14 failed attempts this week, all 400
+  "Webhook signature verification failed". Retried only the ignored
+  invoice.payment_succeeded event evt_1UMuaBRx4rjcHALL3v2Svc0u for diagnosis;
+  Worker tail confirmed "No signatures found matching the expected signature
+  for payload". The production runtime computes the HMAC successfully; this
+  is not the async-only crypto error reproduced in a separate local SDK probe.
+- Handler reads req.text() unchanged and middleware permits /api/webhooks/.
+  Signing-secret mismatch or pasted whitespace is the leading diagnosis;
+  Cloudflare does not reveal the deployed secret, so its exact value was not
+  inspected or changed. AGENTS.md says Liam sets tokens and secrets. Prepared
+  the operator command and verification/recovery order in
+  docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md.
+- Read-only production SELECTs: Stripe invoice in_1UMcjRRx4rjcHALL0MTr5BjK is
+  absent, and Lingorama's existing org has no stripe_customer_id. The event is
+  paid in Stripe. Recent sync-stripe rows report success with zero new imports;
+  this does not prove recovery. SW.1 tracks mapping and reconciliation through
+  the app after the signing-secret step. No production data changed.
+- Logged SW.0 and SW.1 once in TASKS.md and added the current P1 to STATUS.md.
+  The webhook remains unresolved. Email retry cutoff in local time:
+  14 October 2026, 07:56:25 NZDT. No speculative code fix or secret change.
+- Investigation documentation gate: type-check and lint again pass with zero
+  errors (existing warnings). Application code and schema remain unchanged.

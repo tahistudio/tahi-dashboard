@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-09-26** by Claude (the 2026-09-21 to 2026-09-26 work written up, known bugs and operator steps refreshed). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-10** by Codex (Stripe webhook investigation added; other status sections retain their recorded dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
 
 ## The plan (2026-08-18)
 
@@ -149,7 +149,18 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 
 ## Known live bugs (priority order)
 
-Refreshed 2026-09-26. The older items are kept at the bottom with their state.
+**New P1, 2026-10-10 (SW.0, SW.1):** live Stripe webhook attempts return
+400 "Webhook signature verification failed" before invoice handling. Stripe's
+live view showed 14 failed attempts this week; a diagnostic retry reproduced
+it in Worker logs. Likely signing-secret mismatch; Liam must set the production
+STRIPE_WEBHOOK_SECRET from the live destination. Email retry cutoff is
+14 October 2026, 07:56:25 NZDT. The failed event's paid Lingorama invoice is
+missing from the dashboard and its org has no Stripe customer mapping, so
+mapping/reconciliation is needed as well as restoring delivery. See TASKS.md
+and docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md. No fix or
+production data write has been applied.
+
+Older items refreshed 2026-09-26, kept below with their state.
 
 1. **P1 - deployed, not yet seen live:** the three LW.40 fixes that failed the 2026-09-26 morning pass and the contract truth fixes (ed2d4385); the list is in TASKS.md under LIAM. The real-session lap (A5: greeting, bell, invite path, second seat) is Liam's or Staci's and has not happened.
 2. **P1 - `finance.yieldHoldings` may be stale** (last noted 2026-08-18: Xero showed Yield USD 33,956.89 / AUD 638.80 vs the setting's 20,014.13 / 531.51; not re-checked since). Confirm in the Airwallex UI and update through update_settings; the home cash figure (NZ$76.1k on 17 Sep) depends on it, and Liam quoted NZ$85k on 2026-09-19.
