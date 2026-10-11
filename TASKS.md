@@ -30,8 +30,8 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
 
 ## Execution update, 2026-10-11
 
-Liam approved the eight grouped priorities. The first repair batch is committed
-and deployed as 2f81243f, with signed-in live proof pending: scoped search and nested permission guards,
+Liam approved the eight grouped priorities. Both batches are deployed at
+511c7d5f (source 2f81243f and a14d0dea): scoped search and nested permission guards,
 bounded suggestion reads, valid overview route exports, contract expiry,
 truthful nudge/review actions, MCP invoice arguments and targeted dark repairs.
 The final source checks passed type-check, lint, all 399 Vitest files (6,660
@@ -47,9 +47,10 @@ survival in both shards. Contract cards pass at 375 in light and dark and at
 768 in dark; the populated 1280 table fits without horizontal scrolling.
 Overview, request list/board, client search and create/cancel smoke checks pass.
 Time search and filter controls measure at least 44px at 375 in dark.
-The signed-in PC Chrome connection is unavailable, so production data recovery,
-changed email previews and live QA are still pending. CN.3 and bounded ports
-are underway after this repair batch. Local invoice checks now pass at 375,
+Signed-in QA is working in the Codex browser. Lingorama's known paid invoice
+is recovered after Liam corrected the Stripe key; broader reconciliation and
+the changed email preview remain. CN.3 and bounded ports are deployed.
+Local invoice checks pass at 375,
 768 and 1280, including dark mode, all seven table fields and 44px controls.
 Client-home checks pass at 375 and 768 in the read-only lens. Integration review
 also found suggestion rebuild/count and old Slack delivery permission gaps;
@@ -60,10 +61,13 @@ no new task is marked complete without signed-in evidence.
 
 Cloudflare access is restored. Fresh backup/rehearsal passed, and migration
 0111 was applied and its eight objects verified on 2026-10-11 at 13:31 NZDT.
-Local merge a14d0dea has passed all source checks and is ready to push.
-Production remains on 2f81243f until the deployment completes.
+Merge a14d0dea is deployed at 511c7d5f. Dashboard/MCP/cron deploys and public
+health passed. Live invoice checks cover 120-row export/pagination, 375/768
+dark cards and fitted 1280 columns; Giant Group home passes 375 light/dark
+and 768 dark in read-only preview. Requests and clients regression checks
+pass. FU.10 is the small follow-up found during this lap.
 The existing CI=1 check mode skips the remote AI dev proxy; it grants no
-production access. Browser sign-in is separately needed for live QA and SW.1.
+production access. Vivaldi is Liam's main browser; it is not connected to Codex.
 
 ## Current triage, 2026-10-10
 
@@ -165,7 +169,17 @@ These are live failures, ahead of feature work.
   and reconcile missed invoices/subscriptions. Recent daily Stripe syncs say
   success with zero new imports despite this missing invoice; inspect the live
   account/mode and import results rather than assuming cron success recovered
-  it. No direct production D1 edits; no data changed in the investigation.
+  it. Live app preview on 2026-10-11 as Liam returned Stripe 404 and confirmed
+  the configured STRIPE_SECRET_KEY is test mode. Liam must enter the correct
+  account's live key through Wrangler; then rerun preview before applying.
+  No invoice or client mapping changed during the failed dry run. Liam then
+  saved the correct live key; a fresh preview matched identity/no duplicates.
+  Recovery through the live app succeeded at 13:39 NZDT on 2026-10-11 (source
+  2f81243f). Invoice d11e91e4-4e06-56d7-aaa5-6490d45d1ed3 is paid, USD 1,000,
+  with one line item and a stripe_invoice_recovered audit entry. The existing
+  Lingorama org now maps to cus_VFXeA5BxU9jgs7. Live detail and the deployed
+  paid-month filter show it. Broader reconciliation remains; the bulk importer
+  auto-creates organisations, so it was not used for this controlled recovery.
 
 ## Operator steps waiting on Liam
 
@@ -270,6 +284,12 @@ Reviewers' notes that were not blocking. Each names its file.
   Local repair 2f81243f preserves rows with backups. Rollback-only fixtures
   proved all eight edges in both shards; deliverable browser cleanup remains
   to be exercised. No production cascade/data operation was performed.
+- [ ] FU.10 - [FE/QA] Live QA on 2026-10-11 found paid invoice detail still
+  offering Delete Invoice although the API correctly refuses non-drafts.
+  The action is now draft-only inside the existing admin/preview guard.
+  Independent review, 44 existing tests and the fresh full gate pass (423
+  files / 7,532 tests, type-check, lint, build). Follow-up deploy and live
+  paid/draft checks remain before completion. No invoice was deleted.
 
 ## Liam's dummy-client walk-through, merged, live check owed
 
@@ -351,8 +371,8 @@ One table, task_suggestions, sits between "something was said" and "a task chang
 - [~] CN.1c - [BE/MCP] A rebuild should merge passes, not replace them: two reads of the same three Elevate calls gave five items and then none (sampling variance; Sonnet 5 rejects a temperature parameter, 400 "temperature is deprecated for this model"). Keep the union: on a re-read, rows from the previous pass that the model did not propose again stay pending instead of expiring, and only rows the human already decided are left alone. Also worth a second model pass per transcript with the first pass shown as context ("anything missed?") before the union. Built 2026-09-26 (opus, 7f6e8223), subsequently merged a6592326 and deployed ed2d4385; no migration. Live drain/union checks remain. A re-read is now a union: insertSuggestions compares each draft against everything its transcript already has on file except expired rows, through the new isRepeatOf in lib/task-suggestions.ts (a create at SIMILAR_BLOCK across both create kinds, a note on the same target, an update to the same fields, a subtask list with nothing new, a hand-off to the same person), counts a repeat as a duplicate and never touches the row on file; expired rows keep their retired keys and are not compared, so af5c2991 holds. The rebuild route expires nothing by default (pending and snoozed stay, applied, rejected and failed are never touched) and re-reads straight away through runSuggestionSweep with transcriptIds (oldest first, at most 20, no 30-day window, whatever the read mark), returning mode, transcripts, kept, expired, read, deferred and skipped; replace is the one path that still expires, for vocabulary changes. Every call is read twice (lib/task-suggester.ts: the second read is shown the first read's items with their quotes and asked only for what it missed, notes read back from the prompt cache, mergeSecondRead keeps both reads inside the twelve item ceiling); on by default, ?second_pass=0 on the cron and secondPass false on the rebuild switch it off per call; each read logs its own ai_cost_log row (stages suggest and second_pass). Expected extra spend roughly 3 cents per transcript at Sonnet 5 rates (the log line reads about 6, because the rate card prices cached input at the full rate). MCP: rebuild_task_suggestions gains replace, second_pass and read_now; cron_suggest_from_transcripts gains limit and second_pass, its mapping moved into task-suggestion-tools.ts so the parity test covers it; the guide says each call is read twice and a rebuild adds. Tests in lib/task-suggester.test.ts, lib/__tests__/task-suggestions.test.ts, the rebuild and cron route tests and the MCP parity test; full vitest 5771 green. Review follow-up 2026-09-26 (opus, same branch, after main gained 33f61601, the middleware fix that let the scheduled sweep run at all for the first time since 22 Sep): a time budget, because two reads of 20 to 27 seconds per call put a batch of five far past workers/cron-trigger's 120 second fetch timeout. The sweep only starts a call whose reads should finish inside SWEEP_BUDGET_MS (75 s), judged on the larger of READ_ESTIMATE_MS (30 s) and the slowest read it has timed, always taking the first so a run cannot starve; the rest are left unread and unstamped and reported as deferred and deferredIds, and a second read that would not fit is skipped (secondPass.skipped out_of_time; the first read is written and the call stamped). secondPass.ran now counts only second reads that came back; skipped also names full ones. The rebuild reads inside the same budget from the request start and prepares a call (count or expire, retire keys, clear) only through the sweep's new beforeRead hook, once the budget has admitted it; what the read did not reach is deferred (prepared and cleared) only when the sweep will find it: linked to a call and at least DEFER_MARGIN_DAYS (3) inside the 30-day window (sweepWillReach). Everything else is left untouched and listed in skipped: unlinked (all no longer clears transcripts with a null call_id), not_found, too_old_to_defer. replace is one rule for body and query (true, 1, or 1, true, yes in any case). The replace expiry runs in chunks of 80 ids. The oldest-first test now feeds rows out of order and the route sorts them itself; the route test renders each condition with Drizzle's SQLite dialect. Throughput is now about one call per half-hour run; the guide says so. Contract section 3 and both MCP descriptions updated. Tests: budget paths on an injected clock in lib/task-suggester.test.ts, route tests rewritten; full vitest 379 files, 5840 tests green; type-check and lint clean. Merged a6592326, deployed ed2d4385 (2026-09-26). Next: watch two scheduled runs in cron_runs (durationMs under 90 s, deferred counts draining), then rebuild the three Elevate transcripts and check nothing drops out of the inbox.
 - [x] CN.1d - [BE/FE/MCP] Suggestions never duplicate what exists (Liam, 2026-09-19: make sure it checks for requests that are close or similar). Similarity scoring in lib/text-similarity.ts; the inbox warns Looks like #226 with Use #226 instead and Approve anyway; approve is blocked at 0.8 without force; the sweep drops cross-call duplicates; the model also sees requests delivered in the last 90 days. Contract docs/superpowers/plans/2026-09-19-cn1d-duplicate-guard-contract.md. Built 2026-09-19 as workflow cn1d-duplicate-guard: D1 lib/text-similarity.ts, similar computed on read against the org's requests (open or delivered in 90 days), tasks and other pending suggestions, approve blocked at 0.8 without force, the attach action, the sweep dropping similar_pending, delivered requests marked in the model context, MCP arguments (opus, 766b0721); D2 the Looks like line with Use #NNN instead and Approve anyway behind a confirm, types mirror, guide (sonnet, ebfb2e6d); reviews non-blocking. Merged and deployed ad18431a. Live: the inbox was empty by then (Liam approved 8, all landed as Verandela requests #228 to #235 with bot lines and audit entries, and rejected 19), so the first warnings will show on the next call's suggestions; the guard is unit tested at all three points.
 - [~] CN.2 - [BE/Slack] The Slack app, DM first with permission levels (Liam, 2026-09-22). Built as workflow cn2-slack-app (S1 identity, verification, routes, opus c7e00396; S2 approvals in DMs with in-place rewrites, opus 171791cf; S3 notes and voice through Workers AI, opus acff94e1; A1 assignee suggestions, sonnet ea50d1e3; reviews non-blocking), integrated by one agent (19 stub mismatches, route wiring, voice size check before download, agent-mode events), merged b06b0d91, migration 0110 applied on tahi-db, deployed a2471632 after a CI fix (the AI binding forces a remote dev proxy, skipped on CI). Live: both webhook routes answer 401 to a bad signature. Waiting on Liam: apply the manifest to the existing Tahi Dashboard app, reinstall, set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, then the live DM checks. Loose ends closed in ebc7e0a3 plus a review fix 5fbe654b, merged dc73687b and deployed 33f61601 (2026-09-26): view_submission is done (the interactive route answers response_action clear, and a future modal plugs in through registerViewSubmissionHandler on the action registry), app_mention in a channel is done (one line in the thread pointing to a DM, the refusal line for a stranger, never a note; a file posted in a channel is ignored as well, so only a file in the 1:1 reaches the voice path), slack_events_seen sweep is done (rows older than seven days, a daily step of the snapshot-metrics cron; no migration, the 0110 seen_at index serves the delete). For the live DM checks: a voice note in the DM arrives twice (message.im with the file inline, and file_shared, under different event ids), so confirm one recording gives one card.
-- [~] CN.3 - [BE] Keeping in sync is merged locally as a14d0dea from
-  cn3-ready (branch tip 5955e851), not pushed or deployed.
+- [~] CN.3 - [BE] Keeping in sync is merged as a14d0dea from
+  cn3-ready (branch tip 5955e851), deployed at 511c7d5f on 2026-10-11.
   Includes Slack thread updates, weekly digest, rejection reasons and wizard
   learning from applied suggestions. Current roles/features/client scope are
   revalidated for old and new Slack deliveries; wizard context follows brands.
@@ -583,7 +603,8 @@ Overnight 2026-09-14: every module in this section has a fresh design in Claude 
   truthful paid-month totals, mobile/tablet cards and fitted desktop columns.
   Local phone/tablet/dark checks and independent source reviews pass. Detail
   and the rest of finance.md remain open; partial and ported, unchecked.
-  Source commit a14d0dea is ready to push after verified migration 0111.
+  Source a14d0dea is deployed at 511c7d5f after verified migration 0111.
+  Live checks pass at 375/768/1280 with dark mode, plus 120-row CSV export.
 
 ---
 

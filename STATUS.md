@@ -1,44 +1,41 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-11** by Codex (repair batch deployed and public health green; signed-in checks pending; older sections retain their dates). Triage snapshot below is still the 2026-08-18 audit. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-11** by Codex (both batches deployed; Lingorama recovered; live QA in progress). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## Work in progress, 2026-10-11
 
-Repair batch 2f81243f is deployed. Dashboard run 38094094878 and MCP worker
-run 38094094895 are green. Public health checks pass (root 307 to sign-in,
-sign-in 200, signed-out overview the branded HTML 404). Signed-in proof is
-still pending. Type-check, lint,
-all 6,660 tests across 399 files, and the production build pass. Permission
-review covers 65 sales artifact handlers. Local browser checks cover the
-populated overview, requests, clients, contracts and time, with phone/tablet
-and dark checks on the changed surfaces. Local QA cascades are repaired with
-backups and rollback-only fixture proof. No production invoice was imported
-or client mapping changed. The PC Chrome session is disconnected; signed-in
-production QA, Lingorama recovery and the changed email preview still need
-that session. CN.3 integration and bounded invoice/client-home ports are in
-progress locally. The integration's permission repairs and brand-scoped
-wizard context pass independent review and the full gate. The migration
-rehearsal preserved every existing table/record and index from the production
-backup. TASKS.md and the run log carry the detailed evidence and remaining limits.
+Repair source 2f81243f and integration a14d0dea are deployed at release
+511c7d5f. Dashboard 38098768474, MCP 38098768463 and cron worker 38098768460
+passed. Public health is green: root 307 to sign-in, sign-in 200 and signed-out
+overview the branded HTML 404. All 423 Vitest files / 7,532 tests, type-check,
+lint and production build passed. Migration 0111 was applied before the push,
+with a fresh backup/rehearsal preserving all 121 existing tables/data and
+indexes. Its eight named objects and column constraints are verified.
 
-Further integration review found empty-scope suggestion reads, old Slack
-digest/card recipients, migration execution and suggestion rebuild/count
-permission gaps. Local repairs and independent reviews pass; the full release
-gate is green: type-check, lint, 423 files / 7,532 tests and production build.
-The bounded invoice list
-passes local 375/768/1280 checks with dark mode and all fields retained; the
-client home passes 375/768 in the read-only lens. Both module ports remain
-partial and ported, unchecked. No additional production migration applied yet.
-The source is saved in local merge a14d0dea; it has not been pushed or deployed.
+Signed-in production QA works in the Codex browser as Liam. The invoice list
+reads all 120 invoices, exports 120 CSV rows and paginates beyond the old
+50-row cap. Live 375/768 dark cards and the 1280 fitted seven-column table
+pass. The paid-month filter includes the recovered Lingorama payment. Client
+home passes 375 light/dark and 768 dark in the Giant Group read-only lens;
+actions stay disabled and the onboarding checklist stays hidden. Requests
+list/board and create/cancel, and client search/create/cancel, pass live.
+Both module ports remain partial and ported, unchecked. CN.3 Slack proof
+still depends on CN.2 setup. The tenancy CI suite skipped for missing dev
+Clerk keys; its green workflow is not isolation proof.
 
-Cloudflare access was restored on 2026-10-11. A fresh 20,991,659-byte backup
-and exact-SQL rehearsal preserved all 121 existing tables/data and indexes.
-Migration 0111 was applied at 13:31 NZDT; all eight named objects, nullable
-reject_reason and both NOT NULL primary keys are verified. The checked source
-is ready to push. Lint/build use the existing CI=1 mode to skip the remote AI
-dev proxy. Production is still 2f81243f until deployment completes. The Codex
-browser remains signed out; live QA, the email preview and SW.1 need that session.
+The live recovery preview identified a production Stripe test-mode key.
+Liam replaced it with the correct live key. A fresh preview matched the paid
+invoice and no duplicates; the app imported WEBL8VAA-0002 for Lingorama,
+USD 1,000, with one line item, correct customer mapping and an audit entry.
+No email or Stripe write occurred. Broader historical reconciliation remains.
+
+Live QA found a paid invoice still offering Delete despite the API's draft-only
+guard. A one-file repair passed independent review and a fresh full gate;
+its follow-up deploy/live check is pending. The changed signing email preview
+also remains pending: its endpoint has no UI action, so Liam was given the
+two-variant console command. Vivaldi is Liam's main browser; it is not currently
+connected to Codex. TASKS.md and the run log keep the remaining evidence.
 
 ## The plan (2026-08-18)
 
@@ -207,11 +204,13 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 
 ## Known live bugs (priority order)
 
-**P1, 2026-10-10 (SW.1):** the paid Lingorama Stripe invoice is missing from
-the dashboard and its existing org has no Stripe customer mapping. Link and
-reconcile through the app as Liam, checking for duplicate clients/invoices.
-A successful webhook response alone does not recover an unknown customer.
+**Reconciliation follow-up, 2026-10-11 (SW.1):** Lingorama's paid invoice and
+customer mapping are recovered through the app as Liam. Broader historical
+invoice/subscription reconciliation remains, with identity and duplicate checks.
 See TASKS.md and docs/superpowers/plans/2026-10-10-stripe-webhook-investigation.md.
+The production Stripe test-mode key was corrected by Liam after the first
+preview returned 404. The repeated preview and recovery succeeded. Wrangler
+access and browser sign-in now work.
 
 **P1 before adding a scoped teammate (T1.16, source-confirmed 2026-10-10):**
 /api/admin/search checks Tahi organisation membership but does not apply the

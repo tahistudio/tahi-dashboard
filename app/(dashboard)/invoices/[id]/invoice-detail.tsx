@@ -886,15 +886,17 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
                   Copy Payment Link
                 </TahiButton>
               )}
-              <TahiButton
-                variant="danger"
-                size="lg"
-                disabled={anyBusy}
-                loading={busy === 'delete'}
-                onClick={() => setConfirming('delete')}
-              >
-                Delete Invoice
-              </TahiButton>
+              {invoice.status === 'draft' && (
+                <TahiButton
+                  variant="danger"
+                  size="lg"
+                  disabled={anyBusy}
+                  loading={busy === 'delete'}
+                  onClick={() => setConfirming('delete')}
+                >
+                  Delete Invoice
+                </TahiButton>
+              )}
             </div>
           </>
         )}

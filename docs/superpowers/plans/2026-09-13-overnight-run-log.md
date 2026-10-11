@@ -658,3 +658,65 @@ source can now be pushed; deployment and signed-in proof remain outstanding.
 The Codex browser still shows sign-in after refresh and PC Chrome is not
 connected. Liam was asked to sign into that browser or reconnect Chrome while
 the release proceeds. Email preview and SW.1 recovery remain pending.
+
+## 2026-10-11, signed-in recovery preview finds Stripe mode mismatch
+
+The batch is pushed at 511c7d5f. MCP deploy 38098768463 and cron worker deploy
+38098768460 passed; dashboard 38098768474 is still building. Tenancy workflow
+38098768466 is green because the Clerk development keys are absent: its
+isolation suite did not run, so this is not additional tenancy proof.
+
+Continuing with Google in the Codex browser picked up Liam's existing session.
+The production overview renders populated data as Liam. The live invoices
+recovery form selected Lingorama and previewed in_1UMcjRRx4rjcHALL0MTr5BjK.
+The app returned: Stripe could not retrieve this invoice (404). The configured
+key is test mode; check the account and mode. This confirms why this live
+invoice is invisible to the configured importer, rather than treating a zero
+import count as evidence of recovery. No recovery apply was attempted and no
+invoice or client mapping changed. A fresh read still found Lingorama's
+stripe_customer_id NULL and no client invoice rows.
+
+Liam was asked to enter the live STRIPE_SECRET_KEY for acct_1RMmvjRx4rjcHALL
+through npx wrangler secret put STRIPE_SECRET_KEY --name tahi-dashboard. Secrets
+remain his operator step. After it is saved, rerun the app preview and only
+apply if the current identity/duplicate checks pass.
+
+## 2026-10-11, release 511c7d5f live and Lingorama recovered
+
+Dashboard 38098768474, MCP 38098768463 and cron worker 38098768460 are green.
+Post-deploy probe at 13:40 NZDT passed root 307 to /sign-in, /sign-in 200 and
+signed-out /overview branded HTML 404. Source 2f81243f and a14d0dea is deployed;
+0111 was verified before the push. Signed-in checks run in a fresh Codex tab
+as Liam. His main browser is Vivaldi, confirmed this turn; no Vivaldi connector
+is currently available, so the working Codex session is used.
+
+Liam saved STRIPE_SECRET_KEY through Wrangler. The repeated live app preview
+matched WEBL8VAA-0002, USD 1,000, paid, Frederic@lingorama.com, without identity
+or duplicate conflicts. The authorised apply succeeded at 13:39 NZDT. Re-read
+confirms invoice d11e91e4-4e06-56d7-aaa5-6490d45d1ed3, paid_at
+2026-10-04T18:56:22Z, one Development end line, Lingorama mapped to
+cus_VFXeA5BxU9jgs7 and stripe_invoice_recovered audit at 00:39:02.292Z UTC.
+Live detail shows paid USD 1,000 and its stored Stripe pay page. Recovery sent
+no mail and made no Stripe writes. Broader reconciliation remains; bulk import
+was not run because its autoCreateOrg:true is wider than this checked recovery.
+
+Live invoice QA: complete ledger has 120 invoices, not the old 50. Export
+contains 120 rows including Lingorama once. Next page reads 21 to 40 of 120.
+Create opens its existing form and cancels without saving. At 375 dark all
+header/search controls measure 44 CSS pixels (43.996 after browser scaling),
+no horizontal overflow. At 768 dark cards fit; the paid-month filter shows
+only the recovered payment and NZD 1,700 converted total. At 1280 dark the
+seven-column table is 685.119 pixels inside its 685-pixel rounded container,
+with scrollWidth equal to clientWidth. Requests list/board and create/cancel
+pass; client search and create/cancel pass. Giant Group read-only client home
+passes 375 light/dark and 768 dark, disabled actions and no onboarding checklist.
+Screenshots are retained in ignored .wrangler/live-proof.
+
+FU.10 records a live detail affordance mismatch: paid invoices still offered
+Delete, while the API refuses non-drafts. Newton's one-file draft-only repair
+preserves admin/preview checks. Russell independently cleared it, including
+14 in-memory rendering checks and 15 existing tests; Newton ran 44 existing
+tests. The lead's fresh full gate passed type-check, lint, 423 files / 7,532
+tests and the build (223 static pages). Follow-up push/deploy/live checks are
+next. No invoice was deleted. The signing preview endpoint has no UI/WebMCP
+action; Liam was given its two-variant console command for his own inbox.
