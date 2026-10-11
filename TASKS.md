@@ -58,10 +58,10 @@ lint, 423 Vitest files (7,532 tests) and the production build.
 Public deployment health checks pass;
 no new task is marked complete without signed-in evidence.
 
-The next source batch is held locally: Cloudflare OAuth expired during the
-release gate, and remote D1 access needs npx wrangler login on the PC. Apply
-and verify 0111 before pushing this batch. Production remains on 2f81243f.
-Local merge commit: a14d0dea, all source checks passed; not pushed or deployed.
+Cloudflare access is restored. Fresh backup/rehearsal passed, and migration
+0111 was applied and its eight objects verified on 2026-10-11 at 13:31 NZDT.
+Local merge a14d0dea has passed all source checks and is ready to push.
+Production remains on 2f81243f until the deployment completes.
 The existing CI=1 check mode skips the remote AI dev proxy; it grants no
 production access. Browser sign-in is separately needed for live QA and SW.1.
 
@@ -360,9 +360,9 @@ One table, task_suggestions, sits between "something was said" and "a task chang
   fenced. Manual full sweeps require both inbox features and unrestricted
   access; verified scheduled runs are preserved. Full gate passes: type-check,
   lint, 423 files / 7,532 tests and build. Fresh production-backup rehearsal
-  preserves all 121 original tables/data and old indexes. Production still
-  lacks reject_reason and all eight named 0111 objects. The PC Cloudflare
-  login expired; refresh, apply and verify reviewed 0111 before pushing.
+  preserves all 121 original tables/data and old indexes. Cloudflare access
+  is restored; reviewed 0111 was applied on 2026-10-11 at 13:31 NZDT. All eight
+  objects, nullable reject_reason and both NOT NULL primary keys are verified.
   The raw SQL ALTER is single-use; the deployed runner handles retries.
   Live Slack proof also needs CN.2 setup. Contract: 2026-09-26-cn3-sync-contract.md.
 
@@ -583,7 +583,7 @@ Overnight 2026-09-14: every module in this section has a fresh design in Claude 
   truthful paid-month totals, mobile/tablet cards and fitted desktop columns.
   Local phone/tablet/dark checks and independent source reviews pass. Detail
   and the rest of finance.md remain open; partial and ported, unchecked.
-  Source commit a14d0dea is local only, held for Cloudflare login and 0111.
+  Source commit a14d0dea is ready to push after verified migration 0111.
 
 ---
 

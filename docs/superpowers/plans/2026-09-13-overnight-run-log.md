@@ -637,3 +637,24 @@ module. Design review checkboxes remain empty. Local browser tabs are closed,
 the viewport override is reset and the dev server is stopped. The production
 sign-in tab is kept for handoff. On restored Cloudflare access, refresh the
 backup/schema preflight before applying 0111 and releasing this commit.
+
+## 2026-10-11, 13:31 NZDT, migration 0111 applied before release
+
+Liam refreshed Wrangler OAuth. A remote SELECT succeeded in the pinned
+production account. Fresh backup pre-cn3-auth-restored-2026-10-11.sql is
+20,991,659 bytes under ignored .wrangler/production-backups. Exact migration
+rehearsal preserved all 121 original tables/data and indexes; before/after
+content fingerprint is 60b66d1f43ca47c420cc47eeb4367b9a315ed602e3460ff681640f03689b6fed.
+SQLite quick_check passed. Fresh production preflight found no reject_reason
+column and none of the eight named objects.
+
+Applied drizzle/migrations/0111_cn3_sync.sql once through Wrangler to tahi-db.
+Postflight verifies all eight named objects, nullable reject_reason and NOT
+NULL primary keys on both new tables. Existing task_suggestions has 144 rows.
+Ignored apply and postflight logs are retained. No invoice/client mapping,
+email policy or production data surgery changed. The fully gated a14d0dea
+source can now be pushed; deployment and signed-in proof remain outstanding.
+
+The Codex browser still shows sign-in after refresh and PC Chrome is not
+connected. Liam was asked to sign into that browser or reconnect Chrome while
+the release proceeds. Email preview and SW.1 recovery remain pending.

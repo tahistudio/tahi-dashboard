@@ -32,12 +32,13 @@ client home passes 375/768 in the read-only lens. Both module ports remain
 partial and ported, unchecked. No additional production migration applied yet.
 The source is saved in local merge a14d0dea; it has not been pushed or deployed.
 
-Release hold: the PC's Cloudflare OAuth login expired during the gate, and a
-remote D1 SELECT also fails authentication. Refresh with npx wrangler login
-on the PC. Migration 0111 is still absent and must be applied and verified
-before this batch is pushed. Lint/build checks use the repo's existing CI=1
-mode to skip the remote AI dev proxy. The production dashboard remains on
-2f81243f. Browser sign-in is a separate dependency for live QA and SW.1.
+Cloudflare access was restored on 2026-10-11. A fresh 20,991,659-byte backup
+and exact-SQL rehearsal preserved all 121 existing tables/data and indexes.
+Migration 0111 was applied at 13:31 NZDT; all eight named objects, nullable
+reject_reason and both NOT NULL primary keys are verified. The checked source
+is ready to push. Lint/build use the existing CI=1 mode to skip the remote AI
+dev proxy. Production is still 2f81243f until deployment completes. The Codex
+browser remains signed out; live QA, the email preview and SW.1 need that session.
 
 ## The plan (2026-08-18)
 

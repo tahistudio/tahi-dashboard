@@ -11,8 +11,8 @@ fit. Invoice detail, the other finance surfaces and the rest of both module
 plans remain open. Client home adds honest unavailable/partial states and
 deduplicated track queues; it is not the full module port. Local independent
 reviews and the release gate pass (423 files / 7,532 tests and build). The
-batch remains local pending Cloudflare login, migration 0111 and deployment.
-Port source commit: a14d0dea (local only, not pushed).
+Cloudflare access is restored and migration 0111 is applied and verified.
+Port source commit: a14d0dea, ready to push; deployment/live checks remain.
 No review checkbox is ticked for Liam.
 
 Capture caveat: the app shell scrolls inside its own container, so the critics' full-page screenshots covered the first 900px of each page at 1440 and the first 812px at 375; anything below that was checked against the source, not the pixels. When you review, scroll each page.
