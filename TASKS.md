@@ -34,13 +34,14 @@ Liam approved the eight grouped priorities. Both batches are deployed at
 511c7d5f (source 2f81243f and a14d0dea): scoped search and nested permission guards,
 bounded suggestion reads, valid overview route exports, contract expiry,
 truthful nudge/review actions, MCP invoice arguments and targeted dark repairs.
-The final source checks passed type-check, lint, all 399 Vitest files (6,660
+The first repair gate passed type-check, lint, all 399 Vitest files (6,660
 tests), and the production build. The first suite exposed seven permission
 test failures; source fixes resolved them, rather than retries hiding them.
 Feature guards now cover all 65 contract, proposal and schedule handlers,
 with 205 new route tests including real SQLite CRUD for permitted identities.
 SW.1 has a preview/apply route with contact identity, live/paid status, duplicate,
-fresh-preview and concurrent import checks. No Lingorama data has changed.
+fresh-preview and concurrent import checks. The checked app recovery imported
+Lingorama's known paid USD 1,000 invoice after Liam corrected the live key.
 The local QA snapshot is backed up and repaired. Rollback-only fixture tests
 proved seven tables and eight cascade edges, orphan rejection and sibling
 survival in both shards. Contract cards pass at 375 in light and dark and at
@@ -61,11 +62,12 @@ no new task is marked complete without signed-in evidence.
 
 Cloudflare access is restored. Fresh backup/rehearsal passed, and migration
 0111 was applied and its eight objects verified on 2026-10-11 at 13:31 NZDT.
-Merge a14d0dea is deployed at 511c7d5f. Dashboard/MCP/cron deploys and public
+Merge a14d0dea is deployed at 511c7d5f, with FU.10 follow-up live at 58433694.
+Dashboard/MCP/cron deploys and public
 health passed. Live invoice checks cover 120-row export/pagination, 375/768
 dark cards and fitted 1280 columns; Giant Group home passes 375 light/dark
 and 768 dark in read-only preview. Requests and clients regression checks
-pass. FU.10 is the small follow-up found during this lap.
+pass. FU.10 is the small follow-up found and verified during this lap.
 The existing CI=1 check mode skips the remote AI dev proxy; it grants no
 production access. Vivaldi is Liam's main browser; it is not connected to Codex.
 
@@ -268,12 +270,12 @@ Reviewers' notes that were not blocking. Each names its file.
   behind a sideways scroll.
   Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
   checks pass; signed-in live evidence is pending.
-- [~] FU.7 - [BE] app/api/admin/overview/brief/route.ts exports non-route
+- [x] FU.7 - [BE] app/api/admin/overview/brief/route.ts exports non-route
   symbols (computeBrief, readBriefCache, writeBriefCache, isBriefFresh,
   BRIEF_CACHE_KEY); type-check fails whenever a dev server's .next/types is
-  present. Move them into lib/.
-  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
-  checks pass; signed-in live evidence is pending.
+  present. Moved into lib/ in 2f81243f, deployed 2026-10-11. Full type-check,
+  lint, test and build gates pass. Signed-in overview/daily brief renders on
+  production at 375 in dark mode and desktop; live proof recorded 2026-10-11.
 - [ ] FU.8 - [Slack] A voice note in the DM arrives twice (message.im with the
   file inline and file_shared), so one recording may give two cards; check in
   the first live DM. Before channels go live, send the channel pointer and the
@@ -284,12 +286,14 @@ Reviewers' notes that were not blocking. Each names its file.
   Local repair 2f81243f preserves rows with backups. Rollback-only fixtures
   proved all eight edges in both shards; deliverable browser cleanup remains
   to be exercised. No production cascade/data operation was performed.
-- [ ] FU.10 - [FE/QA] Live QA on 2026-10-11 found paid invoice detail still
+- [x] FU.10 - [FE/QA] Live QA on 2026-10-11 found paid invoice detail still
   offering Delete Invoice although the API correctly refuses non-drafts.
   The action is now draft-only inside the existing admin/preview guard.
   Independent review, 44 existing tests and the fresh full gate pass (423
-  files / 7,532 tests, type-check, lint, build). Follow-up deploy and live
-  paid/draft checks remain before completion. No invoice was deleted.
+  files / 7,532 tests, type-check, lint, build). Source 58433694 is deployed
+  (run 38099534777). Live paid detail has no Delete, while draft detail retains
+  it, at 375/768 in dark mode on 2026-10-11. Public health passed. No invoice
+  was deleted. The full invoice-detail design port remains under CB4.
 
 ## Liam's dummy-client walk-through, merged, live check owed
 

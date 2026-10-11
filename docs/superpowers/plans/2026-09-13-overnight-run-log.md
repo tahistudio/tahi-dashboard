@@ -720,3 +720,58 @@ tests. The lead's fresh full gate passed type-check, lint, 423 files / 7,532
 tests and the build (223 static pages). Follow-up push/deploy/live checks are
 next. No invoice was deleted. The signing preview endpoint has no UI/WebMCP
 action; Liam was given its two-variant console command for his own inbox.
+
+## 2026-10-11, remaining live QA and final small deploy watch
+
+FU.10 repair is pushed as 58433694. Dashboard follow-up 38099534777 is building.
+No worker source changed after the successful MCP/cron releases at 511c7d5f.
+
+The deployed studio overview and daily brief render at 375 dark with no
+horizontal overflow. Suggestions loads all 25 pending suggestions and human
+review controls at 375 dark, without writing any real suggestion decision.
+Contracts pass 375 light/dark and 768 dark as cards; the phone action menu is
+reachable. At 1280 dark the complete contract table is 895.015 pixels inside
+its 895-pixel rounded container with no internal horizontal scroll. Lingorama's
+contract truth reads Marked signed and Signed elsewhere, without invented
+signatures or a signed PDF. Its actual legal text was only read, never changed.
+No unsigned expired contract exists in this live sample, so the expiry refusal
+still relies on the reviewed tests and the signing-email preview is outstanding.
+Time tracking's loaded empty state fits 375 dark; its search is 44.515 pixels
+and add-filter is 45.992 pixels, while header/tab controls are 44 CSS pixels
+(43.996 after browser scaling). Dark mode was explicitly verified after the
+loaded state, rather than assuming a navigation's initial theme. Screenshots
+are retained under ignored .wrangler/live-proof.
+
+Read only the mode of production's NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY through
+the GitHub environment variable: it is live. Its value was not printed or
+saved. The corrected server secret and public frontend key now use live mode.
+Liam's requested two-variant signing-email preview has not returned a result.
+
+## 2026-10-11, final source deployed and live handoff
+
+Dashboard deploy 38099534777 succeeded for 58433694. Public health at
+13:53:22 NZDT passed root 307 to /sign-in, /sign-in 200 and signed-out
+/overview branded HTML 404. The existing MCP and cron worker deployments
+remain current because their source did not change in the follow-up.
+
+Live FU.10 proof: the paid Lingorama invoice has no Delete action at 375 dark;
+the existing Assertio draft retains it at 375 and 768 dark. Neither invoice
+was altered or deleted. Both pages fit the viewport. The legacy invoice
+line-item table can still scroll internally on phones, within the full detail
+port left open under CB4. FU.7 is also complete on the full gate and live
+overview/daily-brief observation, recorded with its source commit in TASKS.md.
+
+A final read-only recovery preview after this deployment returns
+WEBL8VAA-0002, USD 1,000, paid, with identity matching the existing local
+invoice. The corrected live Stripe secret survived deployment. No second
+apply ran. SW.1 stays open for broader historical invoice/subscription
+reconciliation, with the known missing Lingorama payment recovered.
+
+The scoped signed-in production lap is complete. A controlled scoped-seat
+isolation lap, the two signing-email previews and real Slack delivery proof
+remain open. Slack proof requires Liam's CN.2 manifest/reinstall/secrets step.
+The bounded invoice/client-home ports remain partial and ported, unchecked;
+Liam's design-review boxes remain empty. REC.0 and WQA.0 are documented scopes,
+with audio-only calendar detection, PC audio/microphone capture, accurate cheap
+transcripts and manual recording preserved. No recorder or website QA embed
+was built in this batch. Vivaldi is saved as Liam's preferred browser.

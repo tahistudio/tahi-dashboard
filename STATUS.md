@@ -1,12 +1,13 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-11** by Codex (both batches deployed; Lingorama recovered; live QA in progress). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-11** by Codex (both batches deployed; Lingorama recovered; scoped live QA complete). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## Work in progress, 2026-10-11
 
-Repair source 2f81243f and integration a14d0dea are deployed at release
-511c7d5f. Dashboard 38098768474, MCP 38098768463 and cron worker 38098768460
+Repair source 2f81243f and integration a14d0dea deployed at release
+511c7d5f; the final invoice action repair is live at 58433694. Dashboard
+38099534777, MCP 38098768463 and cron worker 38098768460
 passed. Public health is green: root 307 to sign-in, sign-in 200 and signed-out
 overview the branded HTML 404. All 423 Vitest files / 7,532 tests, type-check,
 lint and production build passed. Migration 0111 was applied before the push,
@@ -29,10 +30,13 @@ Liam replaced it with the correct live key. A fresh preview matched the paid
 invoice and no duplicates; the app imported WEBL8VAA-0002 for Lingorama,
 USD 1,000, with one line item, correct customer mapping and an audit entry.
 No email or Stripe write occurred. Broader historical reconciliation remains.
+The post-deploy recovery preview still matches the existing paid invoice,
+confirming the corrected live key survived deployment; no second apply ran.
 
 Live QA found a paid invoice still offering Delete despite the API's draft-only
-guard. A one-file repair passed independent review and a fresh full gate;
-its follow-up deploy/live check is pending. The changed signing email preview
+guard. The one-file repair passed independent review and a fresh full gate;
+paid and draft detail checks pass live at 375/768 in dark mode after 58433694.
+No invoice was deleted. The changed signing email preview
 also remains pending: its endpoint has no UI action, so Liam was given the
 two-variant console command. Vivaldi is Liam's main browser; it is not currently
 connected to Codex. TASKS.md and the run log keep the remaining evidence.
@@ -212,12 +216,11 @@ The production Stripe test-mode key was corrected by Liam after the first
 preview returned 404. The repeated preview and recovery succeeded. Wrangler
 access and browser sign-in now work.
 
-**P1 before adding a scoped teammate (T1.16, source-confirmed 2026-10-10):**
-/api/admin/search checks Tahi organisation membership but does not apply the
-feature/organisation guards used by the entity routes. Search can therefore
-return out-of-scope entity names/content previews. Repair and verify with
-controlled scoped/denied seats. This triage did not demonstrate an attack
-using somebody else's account.
+**Verification before adding a scoped teammate (T1.16):** the search and
+nested feature/client guards are deployed in 2f81243f and a14d0dea. Real SQLite
+tests cover denied/scoped identities, current permissions and empty scope.
+The remaining live isolation lap needs controlled scoped/denied seats; Liam's
+super-admin smoke alone cannot prove those refusals.
 
 **Resolved 2026-10-10 (SW.0, tracking commit b361968f):** Liam authorised
 applying the existing live endpoint secret from his PC. Wrangler updated
