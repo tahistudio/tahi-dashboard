@@ -33,6 +33,8 @@ interface StepResult {
   ok: boolean
   error?: string
   count?: number
+  /** Stripe customers whose money was skipped because no client is linked to them. */
+  unlinked?: string[]
 }
 
 export async function POST(req: NextRequest) {
@@ -63,10 +65,10 @@ export async function POST(req: NextRequest) {
   }
 
   const payments = await importStripePayments(database, stripeKey)
-  steps.push({ name: 'import-payments', ok: payments.ok, error: payments.ok ? undefined : payments.error, count: payments.count })
+  steps.push({ name: 'import-payments', ok: payments.ok, error: payments.ok ? undefined : payments.error, count: payments.count, unlinked: unlinkedCustomers(payments.body) })
 
   const invoices = await importStripeInvoices(database, stripeKey)
-  steps.push({ name: 'import-invoices', ok: invoices.ok, error: invoices.ok ? undefined : invoices.error, count: invoices.count })
+  steps.push({ name: 'import-invoices', ok: invoices.ok, error: invoices.ok ? undefined : invoices.error, count: invoices.count, unlinked: unlinkedCustomers(invoices.body) })
 
   // Any successful step => the run did useful work. Only when every step
   // failed do we log 'error' (which pings the operator via cron-runs).
@@ -75,4 +77,16 @@ export async function POST(req: NextRequest) {
   await logCronRun(database, 'sync-stripe', status, Date.now() - t0, { steps }, okCount > 0 ? null : 'All Stripe sub-syncs failed')
 
   return NextResponse.json({ steps })
+}
+
+/**
+ * Money the sync skipped because its Stripe customer is not linked to a
+ * client. Logged on every run so a nightly "0 imported" cannot hide real
+ * payments waiting to be linked.
+ */
+function unlinkedCustomers(body: unknown): string[] | undefined {
+  const results = (body as { results?: Array<{ status?: string; orgMatch?: string }> } | null)?.results
+  if (!Array.isArray(results)) return undefined
+  const lines = results.filter(r => r.status === 'no_client_linked' && r.orgMatch).map(r => String(r.orgMatch))
+  return lines.length > 0 ? Array.from(new Set(lines)).slice(0, 50) : undefined
 }

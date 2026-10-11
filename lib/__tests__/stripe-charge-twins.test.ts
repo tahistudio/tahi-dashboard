@@ -348,4 +348,24 @@ describe('importStripePayments end to end', () => {
     expect(body.results[0].status).toBe('invoice_twin_exists')
     expect(recorded.inserts.filter((i) => i.table === 'invoices')).toHaveLength(0)
   })
+
+  it('never creates a client for an unlinked Stripe customer unless asked', async () => {
+    stubCharges([{ ...oneOff, id: 'ch_stranger', customer: 'cus_unknown', billing_details: { email: null, name: 'Stranger Ltd' } }])
+    const outcome = await importStripePayments(fakeDb() as unknown as SyncDb, 'sk_test')
+    const body = outcome.body as { imported: number; skipped: number; results: Array<{ chargeId: string; status: string; orgMatch?: string }> }
+
+    expect(body.imported).toBe(0)
+    expect(body.skipped).toBe(1)
+    expect(body.results[0].status).toBe('no_client_linked')
+    expect(body.results[0].orgMatch).toContain('cus_unknown')
+    expect(body.results[0].orgMatch).toContain('Stranger Ltd')
+    expect(recorded.inserts.filter((i) => i.table === 'organisations')).toHaveLength(0)
+    expect(recorded.inserts.filter((i) => i.table === 'invoices')).toHaveLength(0)
+  })
+
+  it('still creates the client when a caller opts in explicitly', async () => {
+    stubCharges([{ ...oneOff, id: 'ch_stranger', customer: 'cus_unknown', billing_details: { email: null, name: 'Stranger Ltd' } }])
+    await importStripePayments(fakeDb() as unknown as SyncDb, 'sk_test', { autoCreateOrg: true })
+    expect(recorded.inserts.filter((i) => i.table === 'organisations')).toHaveLength(1)
+  })
 })

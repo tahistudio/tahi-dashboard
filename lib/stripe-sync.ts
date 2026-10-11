@@ -70,11 +70,27 @@ export function chargeInvoiceLink(charge: Pick<StripeCharge, 'invoice' | 'paymen
 }
 
 /**
+ * Whether an unmatched Stripe customer may become a new client. Off by
+ * default (2026-10-11): the daily sync runs unattended, and an auto-created
+ * client for a customer who already exists under another name is a duplicate
+ * org with real money on it (Lingorama's failure resolved the wrong way). An
+ * unmatched customer is reported as skipped with its id and name so the
+ * studio links it deliberately through the paid-invoice recovery flow.
+ */
+export interface StripeSyncOptions {
+  autoCreateOrg?: boolean
+}
+
+/**
  * Import one-off Stripe payments (charges without invoices) as paid
  * invoices. Idempotent: the charge id is stored as stripeInvoiceId so a
  * re-run skips anything already imported.
  */
-export async function importStripePayments(database: D1, stripeKey: string | undefined): Promise<SyncOutcome> {
+export async function importStripePayments(
+  database: D1,
+  stripeKey: string | undefined,
+  opts: StripeSyncOptions = {},
+): Promise<SyncOutcome> {
   if (!stripeKey) {
     return { ok: false, status: 503, body: { error: 'Stripe not configured' }, error: 'Stripe not configured' }
   }
@@ -196,6 +212,15 @@ export async function importStripePayments(database: D1, stripeKey: string | und
       }
 
       const customerName = charge.billing_details?.name ?? charge.receipt_email ?? charge.description ?? 'Unknown'
+      if (!matchedOrgId && !opts.autoCreateOrg) {
+        skipped++
+        results.push({
+          chargeId: charge.id,
+          status: 'no_client_linked',
+          orgMatch: `Stripe customer ${charge.customer ?? 'none'} (${customerName}) is not linked to a client`,
+        })
+        continue
+      }
       if (!matchedOrgId) {
         const newOrgId = crypto.randomUUID()
         try {
@@ -284,9 +309,13 @@ export async function importStripePayments(database: D1, stripeKey: string | und
 /**
  * Import invoices from Stripe (paged) using the shared importStripeInvoice
  * upsert. Idempotent: existing local rows are updated in place, new ones
- * created and matched (or auto-created) to an org.
+ * created and matched to an org by its linked Stripe customer (never auto-created unless a caller opts in).
  */
-export async function importStripeInvoices(database: D1, stripeKey: string | undefined): Promise<SyncOutcome> {
+export async function importStripeInvoices(
+  database: D1,
+  stripeKey: string | undefined,
+  opts: StripeSyncOptions = {},
+): Promise<SyncOutcome> {
   if (!stripeKey) {
     return { ok: false, status: 503, body: { error: 'Stripe not configured' }, error: 'Stripe not configured' }
   }
@@ -330,10 +359,14 @@ export async function importStripeInvoices(database: D1, stripeKey: string | und
     const results: Array<{ number: string | null | undefined; status: string; orgMatch?: string }> = []
 
     for (const inv of allInvoices) {
-      const res = await importStripeInvoice(database, inv, { autoCreateOrg: true })
+      const res = await importStripeInvoice(database, inv, { autoCreateOrg: opts.autoCreateOrg === true })
       if ('skipped' in res) {
         skipped++
-        results.push({ number: inv.number, status: 'error', orgMatch: res.reason })
+        results.push({
+          number: inv.number,
+          status: 'no_client_linked',
+          orgMatch: `${res.reason}: Stripe customer ${typeof inv.customer === 'string' ? inv.customer : 'none'} (${inv.customer_name ?? 'unnamed'})`,
+        })
       } else if (res.created) {
         imported++
         results.push({ number: inv.number, status: 'imported', orgMatch: inv.customer_name ?? undefined })
