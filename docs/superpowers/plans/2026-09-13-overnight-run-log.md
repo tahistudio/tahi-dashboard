@@ -628,3 +628,12 @@ public probes and signed-in browser QA. Browser sign-in is also still needed
 for the email preview and the already-scoped SW.1 recovery. No task is newly
 marked live, and no invoice/client mapping, email policy or production data
 was changed by this local release preparation.
+
+Local merge committed as a14d0dea, with the required Made-With: Codex trailer
+and local QA/production limits in the body. It has not been pushed. Production
+remains 2f81243f, and the second parent is the reviewed cn3-ready tip 5955e851.
+TASKS marks CN.3 merged but unproved, while CB4 remains open for the full
+module. Design review checkboxes remain empty. Local browser tabs are closed,
+the viewport override is reset and the dev server is stopped. The production
+sign-in tab is kept for handoff. On restored Cloudflare access, refresh the
+backup/schema preflight before applying 0111 and releasing this commit.

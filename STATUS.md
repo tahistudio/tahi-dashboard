@@ -30,6 +30,7 @@ The bounded invoice list
 passes local 375/768/1280 checks with dark mode and all fields retained; the
 client home passes 375/768 in the read-only lens. Both module ports remain
 partial and ported, unchecked. No additional production migration applied yet.
+The source is saved in local merge a14d0dea; it has not been pushed or deployed.
 
 Release hold: the PC's Cloudflare OAuth login expired during the gate, and a
 remote D1 SELECT also fails authentication. Refresh with npx wrangler login
