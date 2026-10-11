@@ -446,3 +446,185 @@ Staging also caught two extra EOF blank lines in newly tracked files, which
 the unstaged diff check had not covered. The first local commit was created
 before that failure was handled. Those whitespace-only defects were corrected
 and the local commit amended before pushing; no failed gate was deployed.
+
+Repair batch 2f81243f was pushed. MCP worker run 38094094895 is green;
+dashboard run 38094094878 is in progress. CN.3 was merged locally without a
+commit from cn3-ready, preserving current TASKS state and both feature and
+Slack mocks in the bulk-task fixture. Source auto-merges retain task route
+guards, suggester abort/deadline handling and the corrected MCP invoice inputs.
+Review found two P1 branch defects (revoked founder thread recipients and
+studio Slack feature permissions); fixes are owned in the existing integration
+worktree. Client-brand wizard context is being fenced in that worktree too.
+Fresh production SELECTs confirm reject_reason and all eight named CN.3
+objects are absent. Production D1 id matches the configured tahi-db binding.
+A 20,975,557-byte SQL backup is saved under the ignored local path
+.wrangler/production-backups/pre-cn3-2026-10-11.sql. No migration applied.
+
+2026-10-11 deployment observation: dashboard run 38094094878 and MCP run
+38094094895 succeeded for 2f81243f. Mandatory public probes returned root 307
+Location /sign-in, sign-in 200 with Tahi HTML, and signed-out overview 404
+with the Page not found Tahi HTML. Browser tab 5 still shows the sign-in form;
+no signed-in live claim, email preview or invoice recovery is made.
+
+CN.3 migration rehearsal imported the ignored production backup into in-memory
+SQLite and applied the exact SQL mirror. All 121 pre-existing tables retained
+identical original-column content fingerprints before/after, all previous
+indexes were preserved, nullable reject_reason and both new tables appeared,
+and quick_check returned ok. Fingerprint on both sides:
+2b6cfd6658601ad49868336a93fecc91c21fb4f5072ce738fa708f346cfdb374.
+Real SQLite migration tests also prove uniqueness, partial-apply recovery and
+runner retries (9 tests across the existing and new files). Production is
+unchanged; apply waits for integrated source review and gates.
+
+Bounded ports are drafting in disjoint main-workspace files. Invoice work
+first closes scoped CSV export and non-draft DELETE gaps identified in review,
+then adds complete-ledger reads and truthful responsive presentation. Portal
+home work fixes unavailable reads, partial signals, hand-off title shape and
+repeated queues; full timeline/tablet redesign remains outside this slice.
+Both are ported, unchecked and require QA before commit.
+
+REC.0 and WQA.0 scope drafts are saved in SPECS/meeting-audio-capture.md and
+SPECS/website-qa-comments.md. Audio explicitly excludes video/screen capture,
+requires calendar detection and PC audio plus mic, and sets accuracy/cost
+benchmarks before selecting a provider. No capture, external signup, provider,
+new schema or recording automation was enabled.
+
+### 2026-10-11, CN.3 permission integration and local migration preparation
+
+Integrated the seven reviewed Slack guard files and five brand-scoped request
+wizard files from the integration worktree. Current role, feature and client
+access are checked again before old Slack threads post or accept a decision.
+Mixed studio notes require both requests and tasks; individual Slack cards
+require the feature for their work kind. Client wizard context filters brands,
+request counts, recent work, hours and approved call agreements before limits.
+The dashboard's mixed suggestion inbox and decision routes now require both
+features before business reads, and no-client suggestions use the same current
+scope guard as other pre-client work. The Suggestions tab follows those grants.
+The integrated scoped run passed 487 tests across 13 files. Independent review
+and the full merge gate are still in progress.
+
+Local migration preparation initially stopped before any mutation because the
+older seeded shard lacked task_suggestions. After inspecting both shard schemas,
+backed up both databases and replayed only the additive 0105 to 0111 files with
+duplicate-column handling. Both now have nullable reject_reason and all eight
+new tables/indexes; quick_check is ok in both. The active shard skipped its three
+existing columns. No production migration has been applied at this point.
+
+### 2026-10-11, independent integration and bounded port review
+
+Real SQLite review reproduced an empty-scope inbox leak before fixing it:
+six assertions failed because null-client suggestions escaped an empty client
+scope. Both list and count now fail closed, with 162 tests across five files
+passing. HTTP feature gates and the Suggestions tab agree on both required
+features. Local browser checks show the empty inbox at 1280 light and 375 dark
+without horizontal overflow.
+
+The migration endpoint also permitted ordinary studio seats to execute SQL.
+It now requires a current super admin or verified service identity before
+catalogue reads, body parsing or execution. Actual SQLite role regressions,
+runner tests and SQL parity pass (59 tests). Both new table IDs are explicitly
+NOT NULL. A fresh production-backup rehearsal preserves all 121 original
+tables and indexes. Original-column fingerprints match before/after:
+d161d283ea7ff20fd162f461954d69ed600d2112e05f39fe1f721fbcfec89860.
+Both local shards were backed up again; only the two empty CN.3 tables were
+rebuilt for ID nullability parity, with quick_check ok. Production unchanged.
+
+Independent invoice route review is clear (33 focused tests): feature and
+client scope precede pagination/export, and non-draft DELETE returns 409 before
+financial or local writes. Invoice review fixed written-off rows being counted
+as collected, cramped KPI totals, small controls and tablet table overflow.
+The remaining constrained desktop table is under correction. Client-home
+review and local 375/768 checks in light/dark preserve the read-only lens and
+show honest empty/setup lanes without overflow. Queue rollback and partial
+read failures are covered by component tests, not a browser round trip.
+
+Two additional P1 Slack findings were reproduced using current permissions
+over SQLite and captured transports: own-note digests bypassed current feature
+grants, and old card rewrites/reposts trusted stored recipients. Fixes and
+regressions are in progress. No external Slack message was sent. The PC Chrome
+connection remains unavailable and the production tab still shows sign-in.
+
+Invoice remeasurement after the scoped fixed-column correction: table and
+available container both 685.119 CSS pixels at viewport 1280 dark, with all
+seven columns visible and no internal or document overflow. At 768 dark it
+renders 20 cards and no table; 375 dark totals fit, header buttons/search and
+pagination controls measure 44px. Client links navigate to the client record
+without opening the invoice row. The existing create form opens and cancels;
+overview, requests and client navigation still load. Source UIUX review is
+clear. Local browser tabs were closed and the dev server stopped before build.
+
+A fresh 20,982,276-byte production backup is retained at the ignored path
+.wrangler/production-backups/pre-cn3-release-2026-10-11.sql. Rehearsing the
+exact SQL on it preserves all 121 original tables, their data and old indexes,
+with nullable reject_reason, NOT NULL new IDs and quick_check ok. Matching
+before/after fingerprint:
+fa2c8c9dee417af15bea8573408dcedea170d029003987448c91c68ce187fe5d.
+Independent review also reproduced a roleless suggestion rebuild expiring
+another client's pending row and global overview suggestion counts. Those
+pre-existing routes are being fenced before the final merge gate.
+
+### 2026-10-11, final permission regressions and release gate
+
+The old Slack delivery gaps are fixed and independently reviewed. Unique
+current recipients, active roles, per-kind features and client scope are
+checked before initial headers/cards, rewrites, reposts and personal digests,
+then again immediately before delivery. Client-copy exclusions hold. The
+scoped run passed 540 tests across 10 files, including 43 real SQLite cases
+for revoked/ambiguous identities, ownership and changes during delivery.
+No external Slack transport was used.
+
+Rebuild and overview-count fixes passed 227 focused tests, including 38 real
+SQLite regressions. Both inbox features are required. Empty scope denies;
+permitted scoped calls can be queued with readNow:false, and expiry writes
+keep their own client fence even when a suggestion's org disagrees with its
+call. Inline sweeps require unrestricted scope because they perform global
+maintenance. The owner card also hides cached/loading content when denied.
+Independent source and UI reviews are clear.
+
+The same global sweep was reachable manually through its cron route. Actual
+SQLite reproduced foreign-org repair for roleless, denied and scoped callers.
+The manual entry now checks a known identity, current role, both features and
+unrestricted scope before any write, including cron_runs. Verified service
+and scheduler-secret access remains supported. All 162 focused tests across
+three files pass, including 25 SQLite cases and 128 FU.1/suggester cases;
+independent review also passed 34 cases. Both worker type-checks pass.
+
+All owned files are frozen and staged; staged whitespace checks pass. The
+complete fail-closed type-check, lint, Vitest and bounded build gate has started.
+Production schema and billing data have not changed at this point.
+
+The first gate stopped during lint before Vitest/build: the PC's saved
+Cloudflare OAuth refresh failed with HTTP 400. A direct D1 SELECT access check
+failed the same way. No API token is configured locally. The failure is kept
+in .wrangler/cn3-release-lint-auth-failure.log. The existing next.config.ts
+CI mode deliberately skips the remote Workers AI dev proxy for lint/build;
+the gate restarted with CI=1, without changing auth or deployment settings.
+Liam was asked to refresh access with npx wrangler login. Migration 0111
+has not been applied, so this source batch must stay unpushed until it is.
+
+The first complete suite then found two integration failures: 421 files and
+7,530 tests passed, two failed. The boundary scanner saw colocated invoice
+tests as server modules and reported useImpersonation, useAllInvoices,
+loadAllInvoices and MAX_INVOICE_PAGES. Those tests are moving into __tests__,
+without relaxing the scanner. The Slack client-copy safety positive case
+expected ['Rejected by Liam, 09:41'] but got [], because its old fixture had
+no currently authorised recipient. Its permitted fixture is being repaired
+without weakening the refusal guard. Full assertions are preserved in
+.wrangler/cn3-release-vitest-first-failures.log; this is not a load-only flake.
+
+Final local release gate is green in the existing CI=1 mode: type-check,
+lint, all 423 Vitest files / 7,532 tests and npm run build. The build compiled
+successfully and generated all 223 static pages. Invoice tests moved into
+__tests__ with their assertions unchanged; the permitted Slack fixture now
+uses actual SQLite current identity/role/grants and also checks that only the
+founder DM receives the rewrite. Its complete Slack run passed 609 tests
+across 19 files. No production guard was weakened to repair either failure.
+
+Remote main still points to 2f81243f. Migration 0111 remains unapplied and
+the new source will be committed locally only until Cloudflare login is
+refreshed. The required next sequence is fresh schema preflight, reviewed
+0111 apply/object verification, push, dashboard/MCP/cron worker deploy watches,
+public probes and signed-in browser QA. Browser sign-in is also still needed
+for the email preview and the already-scoped SW.1 recovery. No task is newly
+marked live, and no invoice/client mapping, email policy or production data
+was changed by this local release preparation.

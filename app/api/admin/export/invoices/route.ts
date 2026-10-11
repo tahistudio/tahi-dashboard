@@ -3,8 +3,9 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, gte, lte, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, desc, inArray } from 'drizzle-orm'
 import { invoiceReference } from '@/lib/invoice-billing'
+import { getOrgScope } from '@/lib/require-access'
 
 // -- GET /api/admin/export/invoices --
 // Returns invoices as CSV.
@@ -21,11 +22,15 @@ export async function GET(req: NextRequest) {
   const statusFilter = url.searchParams.get('status')
   const dateFrom = url.searchParams.get('dateFrom')
   const dateTo = url.searchParams.get('dateTo')
+  const orgIdFilter = url.searchParams.get('orgId')
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  const scope = await getOrgScope(drizzle, userId)
 
   const conditions = []
+  if (orgIdFilter) conditions.push(eq(schema.invoices.orgId, orgIdFilter))
+  if (scope !== null) conditions.push(inArray(schema.invoices.orgId, scope))
   if (statusFilter && statusFilter !== 'all') {
     conditions.push(eq(schema.invoices.status, statusFilter))
   }
@@ -34,7 +39,7 @@ export async function GET(req: NextRequest) {
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined
 
-  const items = await drizzle
+  const items = scope?.length === 0 ? [] : await drizzle
     .select({
       id: schema.invoices.id,
       number: schema.invoices.number,
@@ -48,7 +53,7 @@ export async function GET(req: NextRequest) {
     .from(schema.invoices)
     .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
     .where(whereClause)
-    .orderBy(desc(schema.invoices.createdAt))
+    .orderBy(desc(schema.invoices.createdAt), desc(schema.invoices.id))
 
   // Invoice Number leads, because that is the string an accountant matches
   // against a bank statement or a Xero export. The raw id stays as the second

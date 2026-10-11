@@ -11,6 +11,7 @@ import { notifyTeamMember } from '@/lib/notifications'
 import { dispatchDomainEvent } from '@/lib/events'
 import { chunkThreadIds } from '@/lib/request-thread'
 import { loadWaitingOnOne } from '@/lib/request-handoff'
+import { queueWorkSync, workSyncArmed } from '@/lib/slack/work-sync'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -346,6 +347,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     })
   } catch {
     // Notification/event failures never fail the approval itself.
+  }
+
+  // The Slack thread line (CN.3), when this request came from a studio card.
+  // The client is found from their login in the background; the studio
+  // acting for them is named as itself ("Liam as Tim").
+  if (workSyncArmed()) {
+    await queueWorkSync(drizzle, [{
+      entityType: 'request',
+      entityId: id,
+      actor: {
+        type: 'client',
+        contactId: acting?.contactId ?? null,
+        clerkUserId: userId,
+        actingAsTeamMemberId: acting?.adminTeamMemberId ?? null,
+      },
+      changes: [{ field: 'status', from: 'client_review', to: 'delivered', phrase: 'approved the delivery' }],
+    }])
   }
 
   return NextResponse.json({ success: true, status: 'delivered' })

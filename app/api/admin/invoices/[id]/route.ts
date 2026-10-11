@@ -9,6 +9,7 @@ import { callXeroAPI } from '@/lib/xero'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { dispatchDomainEvent } from '@/lib/events'
 import { logAudit } from '@/lib/audit'
+import { isDraftInvoice } from '@/lib/invoice-status'
 import { STUDIO_TIME_ZONE } from '@/lib/kickoff-slot'
 import {
   XERO_PAYMENT_ACCOUNT_CODE_SETTING_KEY,
@@ -619,6 +620,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const denied = await requireAccessToOrg(drizzle, userId, invoice.orgId)
   if (denied) return denied
+
+  if (!isDraftInvoice(invoice.status)) {
+    return NextResponse.json({ error: 'Only draft invoices can be deleted' }, { status: 409 })
+  }
 
   // Void in Stripe if linked (draft = delete, finalized = void)
   const stripeKey = stripeSecretKey()

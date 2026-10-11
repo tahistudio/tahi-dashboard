@@ -58,6 +58,7 @@ import { SegmentedControl, type SegmentedControlOption } from '@/components/tahi
 import { Input, Select, Textarea } from '@/components/tahi/input'
 import { DataTable, type DataTableColumn } from '@/components/tahi/data-table'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
+import { StudioInvoiceList } from './_studio/studio-invoice-list'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -883,6 +884,12 @@ interface InvoiceListProps {
 }
 
 export function InvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
+  const { isImpersonatingClient } = useImpersonation()
+  if (isAdminProp && !isImpersonatingClient) return <StudioInvoiceList CreateInvoice={CreateInvoiceSlideOver} />
+  return <LegacyInvoiceList isAdmin={false} />
+}
+
+function LegacyInvoiceList({ isAdmin: isAdminProp }: InvoiceListProps) {
   const { isImpersonatingClient } = useImpersonation()
   const { showToast } = useToast()
   const { displayCurrency, formatNativeWithDisplay } = useDisplayCurrency()

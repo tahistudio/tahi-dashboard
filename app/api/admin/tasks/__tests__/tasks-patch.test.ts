@@ -13,12 +13,28 @@
  * for real here; only the reads and the access rule are stubbed.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextResponse } from 'next/server'
 
 interface Links { type: string; orgId: string | null; requestId: string | null }
 
 const updates: Record<string, unknown>[] = []
+const deleted: unknown[] = []
+
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/slack/work-sync')>('@/lib/slack/work-sync')
+  return {
+    ...actual,
+    workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+    queueWorkSync: vi.fn(async () => undefined),
+  }
+})
+
+vi.mock('@/lib/blockers-server', () => ({
+  sweepBlockers: async () => undefined,
+}))
 const accessChecked: (string | null | undefined)[] = []
 let current: Links | null = null
 let requestOrgs: Record<string, string> = {}
@@ -87,10 +103,14 @@ vi.mock('@/lib/db', () => ({
         where: () => ({ limit: async () => [{ id: 't1', title: 'A task' }] }),
       }),
     }),
+    delete: (table: unknown) => ({
+      where: async () => { deleted.push(table) },
+    }),
   }),
 }))
 
-const { PATCH } = await import('../[id]/route')
+const { PATCH, DELETE } = await import('../[id]/route')
+const { queueWorkSync } = await import('@/lib/slack/work-sync')
 
 const params = { params: Promise.resolve({ id: 't1' }) }
 
@@ -277,5 +297,39 @@ describe('PATCH /api/admin/tasks/[id] assignee type', () => {
     const res = await PATCH(patch({ assigneeId: 'ghost' }) as never, params)
     expect(res.status).toBe(400)
     expect(updates).toHaveLength(0)
+  })
+})
+
+describe('DELETE /api/admin/tasks/[id] and the Slack thread line (CN.3)', () => {
+  const remove = () => new Request('http://localhost/api/admin/tasks/t1', { method: 'DELETE' })
+
+  beforeEach(() => {
+    deleted.length = 0
+    vi.mocked(queueWorkSync).mockClear()
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('tells the card thread the task was deleted, after the delete', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    const res = await DELETE(remove() as never, params)
+    expect(res.status).toBe(200)
+    expect(deleted).toHaveLength(1)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'task',
+      entityId: 't1',
+      actor: { type: 'studio', clerkUserId: 'user_1' },
+      changes: [{ field: 'deleted', to: null }],
+    }])
+  })
+
+  it('queues nothing while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    const res = await DELETE(remove() as never, params)
+    expect(res.status).toBe(200)
+    expect(deleted).toHaveLength(1)
+    expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
   })
 })

@@ -11,7 +11,7 @@
  * notification tests below pin the fan-out, including the one-entry-per-person
  * rule that keeps a forty row assign from being forty bell rows.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 type Row = Record<string, unknown>
 
@@ -19,7 +19,15 @@ const state: {
   requestRows: Row[]
   updates: Array<{ table: string | undefined; patch: Row }>
   inserts: number
-} = { requestRows: [], updates: [], inserts: 0 }
+  selects: number
+} = { requestRows: [], updates: [], inserts: 0, selects: 0 }
+
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', () => ({
+  workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+  queueWorkSync: vi.fn(async () => undefined),
+}))
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({ orgId: 'org_tahi', userId: 'admin', sessionId: 's' }),
@@ -74,7 +82,10 @@ vi.mock('@/lib/db', () => {
   }
   return {
     db: vi.fn().mockResolvedValue({
-      select: () => ({ from: (t: { _table?: string } | undefined) => chainFor(t?._table) }),
+      select: () => {
+        state.selects++
+        return { from: (t: { _table?: string } | undefined) => chainFor(t?._table) }
+      },
       update: (t: { _table?: string } | undefined) => ({
         set: (patch: Row) => {
           state.updates.push({ table: t?._table, patch })
@@ -89,6 +100,7 @@ vi.mock('@/lib/db', () => {
 import { POST } from '@/app/api/admin/requests/bulk-assign/route'
 import { NextRequest } from 'next/server'
 import { notifyTeamMember } from '@/lib/notifications'
+import { queueWorkSync } from '@/lib/slack/work-sync'
 
 interface BellPayload { type: string; title: string; body?: string | null; entityId?: string | null }
 function bellCalls(): Array<{ memberId: string; payload: BellPayload }> {
@@ -189,5 +201,66 @@ describe('POST /api/admin/requests/bulk-assign, telling the people', () => {
       participants: [{ participantId: 'ct1', participantType: 'contact', role: 'follower' }],
     }))
     expect(bellCalls()).toHaveLength(0)
+  })
+})
+
+describe('POST /api/admin/requests/bulk-assign, the Slack thread line (CN.3)', () => {
+  const assignTm1 = {
+    requestIds: ['req1', 'req2'],
+    participants: [{ participantId: 'tm1', participantType: 'team_member', role: 'assignee' }],
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    state.requestRows = [
+      { id: 'req1', orgId: 'org_c', title: 'New homepage', requestNumber: 4, assigneeId: 'tm2' },
+      { id: 'req2', orgId: 'org_c', title: 'Pricing page', requestNumber: 5, assigneeId: 'tm1' },
+    ]
+    state.updates = []
+    state.inserts = 0
+    state.selects = 0
+    process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('queues nothing and reads nothing extra while Slack is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    await POST(makePost(assignTm1))
+    const unarmedSelects = state.selects
+    expect(queueWorkSync).not.toHaveBeenCalled()
+
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    state.selects = 0
+    await POST(makePost(assignTm1))
+    // The before-state rides the request read the route already makes.
+    expect(state.selects).toBe(unarmedSelects)
+  })
+
+  it('queues one batch, holding only the requests whose owner moved', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    await POST(makePost(assignTm1))
+    expect(queueWorkSync).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+      entityType: 'request',
+      entityId: 'req1',
+      actor: { type: 'studio', clerkUserId: 'admin' },
+      changes: [{ field: 'assignee', from: 'tm2', to: 'tm1' }],
+    }])
+  })
+
+  it('queues nothing for a pm or follower, or a contact, which move no owner', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    await POST(makePost({
+      requestIds: ['req1'],
+      participants: [
+        { participantId: 'tm3', participantType: 'team_member', role: 'pm' },
+        { participantId: 'tm4', participantType: 'team_member', role: 'follower' },
+        { participantId: 'ct1', participantType: 'contact', role: 'follower' },
+      ],
+    }))
+    expect(queueWorkSync).not.toHaveBeenCalled()
   })
 })

@@ -1,5 +1,39 @@
-import { withCronRun } from '@/lib/cron-runs'
+import { and, eq, isNull } from 'drizzle-orm'
+import { NextRequest, NextResponse } from 'next/server'
+import { schema } from '@/db/d1'
+import { db } from '@/lib/db'
+import { assertCronAuth, logCronRun } from '@/lib/cron-runs'
+import { resolveAccessScoping } from '@/lib/access-scoping'
+import { can, resolvePermissions } from '@/lib/permissions'
+import { resolveTeamMember, SERVICE_USER_ID } from '@/lib/team-identity'
 import { parseSecondPass, parseSweepLimit, runSuggestionSweep } from '@/lib/task-suggester'
+
+type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+const CRON = 'suggest-from-transcripts'
+
+async function mayRunManually(database: D1, userId: string): Promise<boolean> {
+  try {
+    if (userId !== SERVICE_USER_ID) {
+      const member = await resolveTeamMember(database, userId)
+      if (!member) return false
+      const [role] = await database.select({ id: schema.teamMemberRoles.id })
+        .from(schema.teamMemberRoles)
+        .innerJoin(schema.roles, eq(schema.teamMemberRoles.roleId, schema.roles.id))
+        .where(and(
+          eq(schema.teamMemberRoles.teamMemberId, member.id),
+          isNull(schema.teamMemberRoles.endedAt),
+        )).limit(1)
+      if (!role) return false
+    }
+    const access = await resolvePermissions(database, {
+      userId, orgId: process.env.NEXT_PUBLIC_TAHI_ORG_ID ?? null,
+    })
+    return can(access, 'tasks') && can(access, 'requests')
+      && (await resolveAccessScoping(database, userId)) === null
+  } catch {
+    return false
+  }
+}
 
 // POST /api/admin/crons/suggest-from-transcripts
 //
@@ -14,9 +48,10 @@ import { parseSecondPass, parseSweepLimit, runSuggestionSweep } from '@/lib/task
 // that spends money with nobody watching, so its gate, its high-water mark
 // and its cost accounting have to be unit testable without a Worker.
 //
-// Everything the route itself does is in withCronRun: the cron secret (or an
-// admin session), the timing, and one cron_runs row per run so
-// /settings/automations can answer "is this thing alive" without firing it.
+// Manual callers need both inbox features and unrestricted client access:
+// the sweep also resurfaces snoozed rows and repairs orgs across the workspace.
+// Denials precede every write, including cron_runs. Verified scheduler secrets
+// retain the automated path. Successful and failed runs keep the shared log.
 //
 // Whatever the batch, a run stops starting transcripts once another would
 // risk lib/task-suggester.ts#SWEEP_BUDGET_MS: workers/cron-trigger hangs up
@@ -38,9 +73,29 @@ import { parseSecondPass, parseSweepLimit, runSuggestionSweep } from '@/lib/task
 //                  "anything missed?", is on by default; 0, false, off or no
 //                  switch it off for this run only
 //                  (lib/task-suggester.ts#parseSecondPass).
-export const POST = withCronRun('suggest-from-transcripts', async (req, database) => {
+export async function POST(req: NextRequest) {
+  const auth = await assertCronAuth(req)
+  if (!auth.ok) return auth.response!
+
+  const secret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
+  const scheduler = !!secret && (req.headers.get('x-cron-secret') === secret
+    || req.headers.get('authorization') === `Bearer ${secret}`)
+  const database = await db() as unknown as D1
+  if (!scheduler && !(await mayRunManually(database, auth.userId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   const params = new URL(req.url).searchParams
   const batch = parseSweepLimit(params.get('limit'))
   const secondPass = parseSecondPass(params.get('second_pass'))
-  return runSuggestionSweep(database, { batch, secondPass })
-})
+  const startedAt = Date.now()
+  try {
+    const summary = await runSuggestionSweep(database, { batch, secondPass })
+    await logCronRun(database, CRON, 'success', Date.now() - startedAt, summary, null)
+    return NextResponse.json(summary)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await logCronRun(database, CRON, 'error', Date.now() - startedAt, null, message)
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}

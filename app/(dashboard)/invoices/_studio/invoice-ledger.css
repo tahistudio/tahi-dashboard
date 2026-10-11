@@ -1,0 +1,25 @@
+@layer components {
+  /* The rail can leave less room than the viewport breakpoint suggests.
+     Override DataTable's inline max-content minimum only for this ledger. */
+  .invoice-ledger-table table {
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+
+  .invoice-ledger-table :is(th, td) {
+    padding-inline: 0.5rem !important;
+    overflow-wrap: anywhere;
+  }
+
+  /* Status and rail badges keep their full text within their column. */
+  .invoice-ledger-table td > span {
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .invoice-ledger-table .tahi-table-pagination-nav button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}

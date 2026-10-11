@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/task-suggestions/decide-bulk
  *
@@ -37,6 +38,9 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  // This mixed inbox includes both work families and duplicate candidates.
+  const featureDenied = await requireFeature({ userId, orgId }, ['tasks', 'requests'])
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as BulkBody
 

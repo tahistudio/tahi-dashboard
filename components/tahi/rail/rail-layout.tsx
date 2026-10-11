@@ -241,6 +241,7 @@ export function RailLayout({
           >
             <Search size={14} aria-hidden="true" style={{ color: 'var(--color-text-subtle)', flexShrink: 0 }} />
             <input
+              className="h-11 lg:h-8"
               value={query ?? ''}
               onChange={e => onQueryChange(e.target.value)}
               placeholder={searchPlaceholder}

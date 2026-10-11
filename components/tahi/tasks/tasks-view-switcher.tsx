@@ -39,15 +39,16 @@ export const TASKS_VIEW_PANEL_ID = 'tasks-view-panel'
 export interface TasksViewSwitcherProps {
   value: TasksViewKey
   onChange: (next: TasksViewKey) => void
+  suggestionsAllowed?: boolean
 }
 
-export function TasksViewSwitcher({ value, onChange }: TasksViewSwitcherProps) {
+export function TasksViewSwitcher({ value, onChange, suggestionsAllowed = true }: TasksViewSwitcherProps) {
   const options = useMemo<SegmentedControlOption<TasksViewKey>[]>(
-    () => TASKS_VIEW_KEYS.map(key => {
+    () => TASKS_VIEW_KEYS.filter(key => key !== 'suggestions' || suggestionsAllowed).map(key => {
       const { label, Icon } = VIEW_META[key]
       return { value: key, label, icon: <Icon size={14} aria-hidden="true" />, panelId: TASKS_VIEW_PANEL_ID }
     }),
-    [],
+    [suggestionsAllowed],
   )
 
   return (

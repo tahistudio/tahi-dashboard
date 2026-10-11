@@ -18,6 +18,7 @@ import { db } from '@/lib/db'
 import { estimateRequestHours, wizardHourEstimatesPromptBlock } from '@/lib/wizard-hour-estimates'
 import { loadRequestOrgContext, CLIENT_HISTORY_PROMPT_RULES } from '@/lib/ai-request-org-context'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 
 export const dynamic = 'force-dynamic'
 
@@ -382,6 +383,8 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ orgId, userId }, 'requests')
+  if (featureDenied) return featureDenied
 
   let body: WizardBody
   try {
@@ -431,13 +434,21 @@ export async function POST(req: NextRequest) {
   //
   // Once access is confirmed, the context read itself is best effort: a read
   // that fails costs the model some helpful background, never the draft.
+  // The studio audience keeps quotes, but task agreements require a separate
+  // Tasks grant. Audience and caller-supplied context never grant permission.
   if (context?.orgId) {
     try {
       const database = await db()
       const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
       const denied = await requireAccessToOrg(drizzle, userId, context.orgId)
       if (denied) return denied
-      const orgContext = await loadRequestOrgContext(drizzle, context.orgId)
+      let includeTasks = false
+      try {
+        includeTasks = !(await requireFeature({ orgId, userId }, 'tasks'))
+      } catch {
+        // An unavailable permission read leaves task context absent.
+      }
+      const orgContext = await loadRequestOrgContext(drizzle, context.orgId, { audience: 'studio', includeTasks })
       if (orgContext) contextParts.push(orgContext)
     } catch {
       // No context this turn. The interview still works, it just has to ask.

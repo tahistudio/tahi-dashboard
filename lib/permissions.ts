@@ -525,3 +525,66 @@ export async function clientCanSeeFeature(
   const access = await resolvePermissions(drizzle, auth)
   return decideFeature(access, featureKey)
 }
+
+/**
+ * Can this CONTACT use `featureKey`, read from their contacts row rather than
+ * from a Clerk session. For the doors that know a person by contact id and
+ * have no session: a client's Slack DM (lib/slack), where the email on their
+ * Slack profile is what found the contact.
+ *
+ * The same rule clientCanSeeFeature applies to a portal session, with the
+ * contact named directly: the org's feature_visibility rows are the baseline,
+ * the contact's own rows refine it (most specific wins), and decideFeature
+ * decides. Keyed on the contact id, so a contact with no Clerk login yet (an
+ * imported one, or one who never opened the portal) is held to their own
+ * contact rows too, which a session-keyed read would skip.
+ *
+ * DENY BY DEFAULT on everything this cannot establish: a contact that is not
+ * at `orgId`, a contact or org id that is empty, and the studio's own org,
+ * which is never a client. The caller treats a throw as a refusal too.
+ */
+export async function contactCanSeeFeature(
+  drizzle: D1,
+  subject: { contactId: string | null; orgId: string | null },
+  featureKey: string,
+): Promise<boolean> {
+  const { contactId, orgId } = subject
+  if (!contactId || !orgId) return false
+  const tahiOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID
+  if (tahiOrgId && orgId === tahiOrgId) return false
+
+  const [contact] = await drizzle
+    .select({
+      id: schema.contacts.id,
+      portalRole: schema.contacts.portalRole,
+      isPrimary: schema.contacts.isPrimary,
+    })
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.id, contactId), eq(schema.contacts.orgId, orgId)))
+    .limit(1)
+  if (!contact) return false
+
+  const overrides = new Map<string, Effect>()
+  const orgRows = await drizzle
+    .select({ featureKey: schema.featureVisibility.featureKey, effect: schema.featureVisibility.effect })
+    .from(schema.featureVisibility)
+    .where(and(
+      eq(schema.featureVisibility.subjectType, 'organisation'),
+      eq(schema.featureVisibility.subjectId, orgId),
+    ))
+  for (const r of orgRows) overrides.set(r.featureKey, r.effect as Effect)
+  const contactRows = await drizzle
+    .select({ featureKey: schema.featureVisibility.featureKey, effect: schema.featureVisibility.effect })
+    .from(schema.featureVisibility)
+    .where(and(
+      eq(schema.featureVisibility.subjectType, 'contact'),
+      eq(schema.featureVisibility.subjectId, contact.id),
+    ))
+  for (const r of contactRows) overrides.set(r.featureKey, r.effect as Effect) // most specific
+
+  return decideFeature({
+    userId: null, orgId, level: 'client', audience: 'client',
+    isSuperAdmin: false, isAdmin: false, canManagePermissions: false,
+    viewableResources: null, overrides, portalRole: resolvePortalRole(contact),
+  }, featureKey)
+}

@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const statusParam = url.searchParams.get('status') ?? 'all'
   const orgIdFilter = url.searchParams.get('orgId')
-  const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
+  const parsedPage = parseInt(url.searchParams.get('page') ?? '1', 10)
+  const page = Number.isSafeInteger(parsedPage) ? Math.max(1, parsedPage) : 1
   const limit = 50
   const offset = (page - 1) * limit
 
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
   // Access scoping: restrict to the team member's allowed orgs
   const scope = await getOrgScope(drizzle, userId)
   if (scope !== null && scope.length === 0) {
-    return NextResponse.json({ items: [], page, limit })
+    return NextResponse.json({ items: [], page, limit, scope: 'none' })
   }
 
   // Build conditions
@@ -66,12 +67,17 @@ export async function GET(req: NextRequest) {
       totalAmount: schema.invoices.totalUsd,
       currency: schema.invoices.currency,
       dueDate: schema.invoices.dueDate,
+      sentAt: schema.invoices.sentAt,
+      viewedAt: schema.invoices.viewedAt,
+      paidAt: schema.invoices.paidAt,
+      stripeHostedInvoiceUrl: schema.invoices.stripeHostedInvoiceUrl,
+      xeroOnlineInvoiceUrl: schema.invoices.xeroOnlineInvoiceUrl,
       createdAt: schema.invoices.createdAt,
       updatedAt: schema.invoices.updatedAt,
     })
     .from(schema.invoices)
     .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
-    .orderBy(desc(schema.invoices.createdAt))
+    .orderBy(desc(schema.invoices.createdAt), desc(schema.invoices.id))
     .limit(limit)
     .offset(offset)
 

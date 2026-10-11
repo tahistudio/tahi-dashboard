@@ -16,7 +16,7 @@
  * rule 11 regression test is for.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const calls: { where: unknown; set: Record<string, unknown> }[] = []
 const selectWheres: unknown[] = []
@@ -24,11 +24,23 @@ const notified: Record<string, unknown>[] = []
 let scopedOrgIds: string[] | null = null
 let existingIds: string[] = []
 let existingAssignees: Record<string, string | null> = {}
+/** Status, priority and due date per row, the before-state of the Slack lines. */
+let existingFields: Record<string, Record<string, unknown>> = {}
 let callerTeamMemberId: string | null = null
 
 // Feature access is granted for these task behaviour fixtures.
 // Denial wiring is exercised with the real guard in permission-write-guards.test.ts.
 vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/slack/work-sync')>('@/lib/slack/work-sync')
+  return {
+    ...actual,
+    workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+    queueWorkSync: vi.fn(async () => undefined),
+  }
+})
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
@@ -93,6 +105,7 @@ vi.mock('@/lib/db', () => ({
             id,
             title: `Task ${id}`,
             assigneeId: existingAssignees[id] ?? null,
+            ...(existingFields[id] ?? {}),
           }))
         },
       }),
@@ -109,6 +122,7 @@ const ids = (values: string[]) => ({ op: 'inArray', col: 'id', values })
 const noClient = { op: 'isNull', col: 'org_id' }
 
 const { PATCH } = await import('../bulk/route')
+const { queueWorkSync } = await import('@/lib/slack/work-sync')
 
 function patch(body: unknown): Request {
   return new Request('http://localhost/api/admin/tasks/bulk', {
@@ -126,7 +140,13 @@ describe('PATCH /api/admin/tasks/bulk', () => {
     scopedOrgIds = null
     existingIds = ['a', 'b']
     existingAssignees = {}
+    existingFields = {}
     callerTeamMemberId = 'tm_me'
+    vi.mocked(queueWorkSync).mockClear()
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   it('asks only for the rows the caller access rule reaches', async () => {
@@ -267,5 +287,58 @@ describe('PATCH /api/admin/tasks/bulk', () => {
     await PATCH(patch({ taskIds: existingIds, updates: { assigneeId: 'tm_staci' } }) as never)
     expect(notified).toHaveLength(1)
     expect(notified[0].title).toBe('6 tasks assigned to you')
+  })
+
+  describe('the Slack thread lines (CN.3)', () => {
+    it('queues one batch holding only the rows that changed', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      existingIds = ['a', 'b', 'c']
+      existingFields = {
+        a: { status: 'todo', priority: 'standard', dueDate: null },
+        b: { status: 'done', priority: 'standard', dueDate: null },
+        c: { status: 'in_progress', priority: 'high', dueDate: '2026-10-02' },
+      }
+      await PATCH(patch({ taskIds: existingIds, updates: { status: 'done', dueDate: '2026-10-02' } }) as never)
+
+      expect(vi.mocked(queueWorkSync)).toHaveBeenCalledTimes(1)
+      const actor = { type: 'studio', clerkUserId: 'user_1' }
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([
+        {
+          entityType: 'task',
+          entityId: 'a',
+          actor,
+          changes: [
+            { field: 'status', from: 'todo', to: 'done' },
+            { field: 'dueDate', from: null, to: '2026-10-02' },
+          ],
+        },
+        { entityType: 'task', entityId: 'b', actor, changes: [{ field: 'dueDate', from: null, to: '2026-10-02' }] },
+        { entityType: 'task', entityId: 'c', actor, changes: [{ field: 'status', from: 'in_progress', to: 'done' }] },
+      ])
+    })
+
+    it('reads an assignee cleared from the bar as unassigned', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      existingIds = ['a', 'b']
+      existingAssignees = { a: 'tm_staci' }
+      await PATCH(patch({ taskIds: existingIds, updates: { assigneeId: null } }) as never)
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([
+        { entityType: 'task', entityId: 'a', actor: { type: 'studio', clerkUserId: 'user_1' }, changes: [{ field: 'assignee', from: 'tm_staci', to: null }] },
+      ])
+    })
+
+    it('queues nothing when no row actually moved', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      existingFields = { a: { status: 'done' }, b: { status: 'done' } }
+      await PATCH(patch({ taskIds: ['a', 'b'], updates: { status: 'done' } }) as never)
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
+
+    it('queues nothing while Slack is not configured', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', '')
+      await PATCH(patch({ taskIds: ['a', 'b'], updates: { status: 'done' } }) as never)
+      expect(calls).toHaveLength(1)
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
   })
 })

@@ -47,8 +47,18 @@ vi.mock('drizzle-orm', () => ({ eq: (a: unknown, b: unknown) => ({ a, b }) }))
 // gate is covered end to end in portal-feature-visibility.test.ts; stub it here
 // so these spend/limit tests keep their minimal settings-only schema mock.
 vi.mock('@/lib/require-feature', () => ({
+  requireFeature: vi.fn().mockResolvedValue(null),
   requirePortalFeature: vi.fn().mockResolvedValue(null),
 }))
+// Exercise the real feature guard and decision core in the permission matrix
+// below. Only the identity/role resolution needs the settings-only DB stub.
+vi.mock('@/lib/permissions', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/permissions')>()),
+  resolvePermissions: vi.fn(),
+}))
+// This file stubs the context loader. Its real contact/brand reads are proved
+// with SQLite in ai-request-org-context.test.ts, not this settings-only DB.
+vi.mock('@/lib/messages-store', () => ({ loadClientScope: vi.fn() }))
 
 // The admin route now gates its client-context lookup on team member access
 // scoping (CLAUDE.md rule 11). Mocked here rather than driven through the
@@ -72,12 +82,28 @@ vi.mock('@/lib/ai-request-org-context', async (importOriginal) => {
   }
 })
 
+// The portal wizard maps the caller's Clerk org to its D1 org before loading
+// context. Against the settings-only schema mock above the real lookup throws
+// and the route carries on without context, which is what every test but the
+// audience one wants; that one resolves an org so the loader is reached.
+vi.mock('@/lib/upload-access', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/upload-access')>()
+  return {
+    ...actual,
+    resolveD1OrgId: vi.fn().mockResolvedValue(null),
+  }
+})
+
 import { POST as adminPost } from '@/app/api/admin/ai/request-wizard/route'
 import { POST as portalPost } from '@/app/api/portal/ai/request-wizard/route'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/server-auth'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { loadRequestOrgContext } from '@/lib/ai-request-org-context'
+import { resolveD1OrgId } from '@/lib/upload-access'
+import { requireFeature, requirePortalFeature } from '@/lib/require-feature'
+import { db } from '@/lib/db'
+import { resolvePermissions, type ResolvedAccess } from '@/lib/permissions'
 
 function makeRequest(path: string): NextRequest {
   return new NextRequest(`http://localhost:3000${path}`, {
@@ -131,13 +157,42 @@ function writtenCounter(): { key: string; day: string; count: number } {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  createMessage.mockReset()
   settingsRows.length = 0
   insertValues.mockReturnValue({ onConflictDoUpdate: vi.fn().mockResolvedValue(undefined) })
   process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
   process.env.ANTHROPIC_API_KEY = 'sk-test'
+  vi.mocked(requireFeature).mockReset().mockResolvedValue(null)
+  vi.mocked(resolvePermissions).mockReset()
+  vi.mocked(requirePortalFeature).mockReset().mockResolvedValue(null)
+  vi.mocked(resolveD1OrgId).mockReset().mockResolvedValue(null)
+  vi.mocked(loadRequestOrgContext).mockReset().mockResolvedValue('')
 })
 
 describe('POST /api/admin/ai/request-wizard', () => {
+  it.each([true, false])('denies Requests before context/model work even with API key configured: %s', async withKey => {
+    asAdmin()
+    if (!withKey) delete process.env.ANTHROPIC_API_KEY
+    vi.mocked(requireFeature).mockResolvedValueOnce(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
+    const res = await adminPost(makeRequestWithOrgId('org-acme'))
+    expect(res.status).toBe(403)
+    expect(requireFeature).toHaveBeenCalledExactlyOnceWith({ userId: 'user_1', orgId: 'org_tahi' }, 'requests')
+    expect(db).not.toHaveBeenCalled()
+    expect(requireAccessToOrg).not.toHaveBeenCalled()
+    expect(loadRequestOrgContext).not.toHaveBeenCalled()
+    expect(createMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not load business context or call the model if the Requests permission lookup fails', async () => {
+    asAdmin()
+    vi.mocked(requireFeature).mockRejectedValueOnce(new Error('Permission read failed'))
+    await expect(adminPost(makeRequestWithOrgId('org-acme'))).rejects.toThrow('Permission read failed')
+    expect(db).not.toHaveBeenCalled()
+    expect(requireAccessToOrg).not.toHaveBeenCalled()
+    expect(loadRequestOrgContext).not.toHaveBeenCalled()
+    expect(createMessage).not.toHaveBeenCalled()
+  })
+
   it('502s when the model call throws rather than faking a draft', async () => {
     asAdmin()
     createMessage.mockRejectedValueOnce(anthropicError(500))
@@ -219,6 +274,41 @@ describe('POST /api/admin/ai/request-wizard', () => {
   // name any org id here and have another client's details woven into the
   // reply.
   describe('client context scoping', () => {
+    it.each([
+      { seat: 'roleless', resources: [], expectedStatus: 403, includeTasks: false },
+      { seat: 'requests only', resources: ['requests'], expectedStatus: 200, includeTasks: false },
+      { seat: 'explicit Tasks grant', resources: ['requests'], overrides: [['tasks', 'allow']], expectedStatus: 200, includeTasks: true },
+      { seat: 'Tasks denied', resources: ['requests', 'tasks'], overrides: [['tasks', 'deny']], expectedStatus: 200, includeTasks: false },
+      { seat: 'Requests denied', resources: ['requests', 'tasks'], overrides: [['requests', 'deny']], expectedStatus: 403, includeTasks: false },
+      { seat: 'super admin', resources: [], overrides: [['requests', 'deny'], ['tasks', 'deny']], expectedStatus: 200, includeTasks: true },
+      { seat: 'service', resources: [], expectedStatus: 200, includeTasks: true },
+    ])('enforces the real permission decision for $seat', async ({ seat, resources, overrides, expectedStatus, includeTasks }) => {
+      const { requireFeature: realGuard } = await vi.importActual<typeof import('@/lib/require-feature')>('@/lib/require-feature')
+      vi.mocked(requireFeature).mockImplementation(realGuard)
+      const userId = seat === 'service' ? 'api-service' : 'user_1'
+      vi.mocked(getRequestAuth).mockResolvedValue({ userId, orgId: 'org_tahi', sessionId: 's' })
+      const access: ResolvedAccess = {
+        userId, orgId: 'org_tahi', level: seat === 'super admin' ? 'super_admin' : 'team_member',
+        audience: 'team', isSuperAdmin: seat === 'super admin', isAdmin: seat === 'super admin',
+        canManagePermissions: seat === 'super admin', viewableResources: new Set(resources),
+        overrides: new Map(overrides as Array<[string, 'allow' | 'deny']> | undefined),
+      }
+      if (seat === 'service') vi.mocked(resolvePermissions).mockRejectedValue(new Error('Service must bypass role reads'))
+      else vi.mocked(resolvePermissions).mockResolvedValue(access)
+      createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+      const res = await adminPost(makeRequestWithOrgId('org-acme'))
+      expect(res.status).toBe(expectedStatus)
+      if (expectedStatus === 403) {
+        expect(requireAccessToOrg).not.toHaveBeenCalled()
+        expect(loadRequestOrgContext).not.toHaveBeenCalled()
+        expect(createMessage).not.toHaveBeenCalled()
+      } else {
+        expect(loadRequestOrgContext).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'org-acme', { audience: 'studio', includeTasks })
+      }
+      if (seat === 'service') expect(resolvePermissions).not.toHaveBeenCalled()
+      else expect(resolvePermissions).toHaveBeenCalledWith(expect.anything(), { userId, orgId: 'org_tahi' })
+    })
+
     it('loads org context for a team member scoped to that client', async () => {
       vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_scoped', orgId: 'org_tahi', sessionId: 's' })
       vi.mocked(requireAccessToOrg).mockResolvedValueOnce(null)
@@ -228,7 +318,10 @@ describe('POST /api/admin/ai/request-wizard', () => {
       const res = await adminPost(makeRequestWithOrgId('org-acme'))
       expect(res.status).toBe(200)
       expect(vi.mocked(requireAccessToOrg)).toHaveBeenCalledWith(expect.anything(), 'user_scoped', 'org-acme')
-      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme')
+      // The separate Tasks guard granted task context for this studio seat.
+      expect(requireFeature).toHaveBeenNthCalledWith(1, { userId: 'user_scoped', orgId: 'org_tahi' }, 'requests')
+      expect(requireFeature).toHaveBeenNthCalledWith(2, { userId: 'user_scoped', orgId: 'org_tahi' }, 'tasks')
+      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme', { audience: 'studio', includeTasks: true })
       const [[sentPayload]] = createMessage.mock.calls
       expect((sentPayload as { system: string }).system).toContain('CLIENT ON FILE: Acme Co')
     })
@@ -255,7 +348,24 @@ describe('POST /api/admin/ai/request-wizard', () => {
       const res = await adminPost(makeRequestWithOrgId('org-acme'))
       expect(res.status).toBe(200)
       expect(vi.mocked(requireAccessToOrg)).toHaveBeenCalledWith(expect.anything(), 'user_1', 'org-acme')
-      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme')
+      expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme', { audience: 'studio', includeTasks: true })
+    })
+
+    it.each(['denied', 'failed'])('omits task context when the server Tasks guard is %s, ignoring body permission claims', async failure => {
+      asAdmin()
+      vi.mocked(requireFeature).mockResolvedValueOnce(null)
+      if (failure === 'denied') vi.mocked(requireFeature).mockResolvedValueOnce(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
+      else vi.mocked(requireFeature).mockRejectedValueOnce(new Error('Tasks permission unavailable'))
+      vi.mocked(loadRequestOrgContext).mockResolvedValueOnce('CLIENT ON FILE: Acme Co')
+      createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+      const res = await adminPost(new NextRequest('http://localhost:3000/api/admin/ai/request-wizard', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'A request' }], includeTasks: true, context: { orgId: 'org-acme', includeTasks: true, audience: 'studio', userId: 'api-service' } }),
+      }))
+      expect(res.status).toBe(200)
+      expect(requireFeature).toHaveBeenNthCalledWith(2, { userId: 'user_1', orgId: 'org_tahi' }, 'tasks')
+      expect(loadRequestOrgContext).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'org-acme', { audience: 'studio', includeTasks: false })
+      expect((createMessage.mock.calls[0][0] as { system: string }).system).toContain('CLIENT ON FILE: Acme Co')
     })
   })
 })
@@ -270,6 +380,26 @@ describe('POST /api/portal/ai/request-wizard', () => {
     expect(system).toContain('CLIENT HISTORY')
     expect(system).toContain('coverage gaps')
     expect(system).toContain('two sentences')
+  })
+
+  // CN.3: the portal wizard talks to the client, so it asks for the client
+  // audience by name rather than leaning on the default: FROM RECENT CALLS
+  // then names only the client's own visible requests, with no quotes and no
+  // tasks.
+  it('loads the client audience of the org context for the caller\'s own org', async () => {
+    asClient()
+    vi.mocked(resolveD1OrgId).mockResolvedValueOnce('org-acme')
+    vi.mocked(loadRequestOrgContext).mockResolvedValueOnce('FROM RECENT CALLS: #231 Footer LinkedIn tag')
+    createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+
+    const res = await portalPost(makeRequest('/api/portal/ai/request-wizard'))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(resolveD1OrgId)).toHaveBeenCalledWith(expect.anything(), 'org_client')
+    expect(vi.mocked(loadRequestOrgContext)).toHaveBeenCalledWith(expect.anything(), 'org-acme', { audience: 'client', userId: 'user_client' })
+    const [[sentPayload]] = createMessage.mock.calls
+    const system = (sentPayload as { system: string }).system
+    expect(system).toContain('FROM RECENT CALLS: #231 Footer LinkedIn tag')
+    expect(system).toContain('name it by its number and do not draft it again')
   })
 
   it('502s when the model call throws, on the client-facing route too', async () => {
@@ -346,5 +476,51 @@ describe('POST /api/portal/ai/request-wizard', () => {
     asAdmin()
     const res = await portalPost(makeRequest('/api/portal/ai/request-wizard'))
     expect(res.status).toBe(403)
+  })
+
+  it('refuses a Requests denial before looking up context or calling the model', async () => {
+    asClient()
+    vi.mocked(requirePortalFeature).mockResolvedValueOnce(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
+    const res = await portalPost(makeRequest('/api/portal/ai/request-wizard'))
+    expect(res.status).toBe(403)
+    expect(requirePortalFeature).toHaveBeenCalledWith({ userId: 'user_client', orgId: 'org_client', clerkOrgId: 'org_client' }, 'requests')
+    expect(resolveD1OrgId).not.toHaveBeenCalled()
+    expect(loadRequestOrgContext).not.toHaveBeenCalled()
+    expect(createMessage).not.toHaveBeenCalled()
+  })
+
+  it('never accepts a client identity or studio audience from the body', async () => {
+    asClient()
+    vi.mocked(resolveD1OrgId).mockResolvedValueOnce('org-acme')
+    createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+    const res = await portalPost(new NextRequest('http://localhost:3000/api/portal/ai/request-wizard', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'A request' }], includeTasks: true, context: { orgId: 'org-other', userId: 'user_other', contactId: 'contact-other', audience: 'studio', includeTasks: true } }),
+    }))
+    expect(res.status).toBe(200)
+    expect(loadRequestOrgContext).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'org-acme', { audience: 'client', userId: 'user_client' })
+  })
+
+  it.each(['missing mapping', 'failed mapping', 'failed context'])('keeps drafting without private context on %s', async failure => {
+    asClient()
+    if (failure === 'failed mapping') vi.mocked(resolveD1OrgId).mockRejectedValueOnce(new Error('D1 failure'))
+    if (failure === 'failed context') {
+      vi.mocked(resolveD1OrgId).mockResolvedValueOnce('org-acme')
+      vi.mocked(loadRequestOrgContext).mockRejectedValueOnce(new Error('D1 failure'))
+    }
+    createMessage.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Which page?' }] })
+    expect((await portalPost(makeRequest('/api/portal/ai/request-wizard'))).status).toBe(200)
+    const payload = createMessage.mock.calls[0][0] as { system: string }
+    expect(payload.system).not.toContain('\n\nCONTEXT: ')
+    if (failure !== 'failed context') expect(loadRequestOrgContext).not.toHaveBeenCalled()
+  })
+
+  it('keeps raw studio sessions denied even with a preview cookie', async () => {
+    asAdmin()
+    const req = makeRequest('/api/portal/ai/request-wizard')
+    req.cookies.set('tahi-impersonate-org', 'org-acme')
+    expect((await portalPost(req)).status).toBe(403)
+    expect(loadRequestOrgContext).not.toHaveBeenCalled()
+    expect(createMessage).not.toHaveBeenCalled()
   })
 })

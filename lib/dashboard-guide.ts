@@ -134,7 +134,7 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
       '- **hand_off_request, hand_back_request, list_requests_waiting_on_clients** - point a request at a client contact, hand it back, and see everything currently waiting on someone.\n' +
       '- **list_clients, get_client, create_client, update_client, list_client_contacts** - client organisations and the people at them.\n' +
       '- **list_tasks, get_task, create_task, update_task** - the studio\'s internal to-do list.\n' +
-      '- **list_task_suggestions, decide_task_suggestion** - the call-suggestions inbox: read what a transcribed call proposed for tasks and requests, and approve, tweak, snooze or reject it.\n' +
+      '- **list_task_suggestions, decide_task_suggestion, cron_suggestion_digest** - the call-suggestions inbox: read what a transcribed call proposed for tasks and requests, approve, tweak, snooze or reject it (a reject can carry a reason), and preview or send the Monday digest.\n' +
       '- **add_blocker, remove_blocker, list_blockers** - link and unlink blocking work.\n' +
       '- **list_invoices, get_invoice, create_invoice, update_invoice** - billing records.\n' +
       '- **list_time_entries, log_time, start_timer, stop_timer** - time tracking.\n' +
@@ -156,7 +156,14 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
       '- **Snooze** (tonight or this week) brings it back later.\n' +
       '- **Reject** dismisses it.\n\n' +
       'A new task or request is checked against what already exists before anything is created. A close match shows on the row with a "Use it instead" button, which attaches the suggestion to that existing item as a note rather than creating a copy. A very close match asks for a second confirm, and Approve reads "Approve anyway" until that confirm is given.\n\n' +
-      'An applied suggestion posts as "Tahi bot" in the task\'s own thread, with the quote it came from, so it never reads as something Liam or Staci typed themselves.',
+      'An applied suggestion posts as "Tahi bot" in the task\'s own thread, with the quote it came from, so it never reads as something Liam or Staci typed themselves.\n\n' +
+      'Once Slack is set up, the suggestions keep in step there too:\n\n' +
+      '- A change to a task or request that came from a suggestion (its status, who has it, its due date, its priority, its title, a task turned into a request, a hand-off to the client or taking it back) posts one short line under that suggestion\'s card: on the founders\' cards, and on a person\'s own note cards. Nobody gets a line about their own change. Comments, sub-requests and nesting stay on the dashboard.\n' +
+      '- An approved card says who approved it and links to what it made: "Approved by Liam, 09:41 · Open #231".\n' +
+      '- Every Monday morning a digest arrives by DM (08:30 NZ time in daylight saving, 08:00 outside it): how many suggestions are waiting and for which clients, the five that have waited longest, what is snoozed, client drafts not confirmed yet, approvals that did not apply, and last week\'s decisions. Anyone whose own notes have waited a day or more gets just those. Nothing arrives when nothing is waiting.\n' +
+      '- Each person approves their own notes in Slack: a note you sent the bot is yours to approve (a founder can too) when its client is one you can reach in the dashboard, and a client confirms their own request.\n' +
+      '- A client\'s own "Is this the request?" card only ever shows what they wrote: Approve and Reject, no Tweak and no snooze. It changes only when they press it, to "Approved by Tim" with a link to their request, or "Rejected by Tim". Anything the studio does to a client\'s draft (snoozing, rejecting, an apply that failed) stays on the dashboard and never shows in the client\'s DM. Each message a client sends is its own draft, even when two start the same way, and nobody is ever shown another person\'s draft. A client gets a card only when the portal would let them file a request (Requests not turned off for them or their client in Permissions), and an approved draft is filed under their brand, as a request filed in the portal would be.\n\n' +
+      'The suggester learns from what happens next. A rejection, with its reason when one is given, teaches it not to propose the same thing for that client again. An applied suggestion teaches the request wizard what was already agreed on a call, so it names the existing request rather than drafting it twice.',
   },
 ]
 

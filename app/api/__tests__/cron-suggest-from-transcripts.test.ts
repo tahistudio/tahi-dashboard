@@ -11,12 +11,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 vi.mock('@/lib/notifications', () => ({ createNotification: vi.fn() }))
+vi.mock('@/lib/access-scoping', () => ({ resolveAccessScoping: vi.fn(async () => null) }))
+vi.mock('@/lib/team-identity', () => ({
+  SERVICE_USER_ID: 'api-service',
+  resolveTeamMember: vi.fn(async () => ({ id: 'member_1' })),
+}))
+vi.mock('@/lib/permissions', () => ({
+  resolvePermissions: vi.fn(async () => ({})),
+  can: vi.fn(() => true),
+}))
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn(),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
-// The sweep is stubbed; the two query parsers are the real ones, because
-// what this route does with ?limit and ?second_pass is the only logic it has.
+// The sweep is stubbed; the query parsers are real. Permission SQL and the
+// actual sweep writes are exercised in cron-suggest-from-transcripts-sqlite.
 vi.mock('@/lib/task-suggester', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/task-suggester')>()
   return {
@@ -54,7 +63,10 @@ function post(headers: Record<string, string> = {}, query = '') {
 }
 
 beforeEach(() => {
-  vi.mocked(db).mockResolvedValue({ insert: () => ({ values: async () => ({}) }) } as never)
+  vi.mocked(db).mockResolvedValue({
+    insert: () => ({ values: async () => ({}) }),
+    select: () => ({ from: () => ({ innerJoin: () => ({ where: () => ({ limit: async () => [{ id: 'role_1' }] }) }) }) }),
+  } as never)
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: null, orgId: null } as never)
   vi.mocked(runSuggestionSweep).mockResolvedValue(SUMMARY)
   vi.stubEnv('TAHI_CRON_SECRET', 'shhh')

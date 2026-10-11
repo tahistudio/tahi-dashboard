@@ -1,6 +1,18 @@
 # Design pass review for Liam (2026-09-14, overnight)
 
-Every dashboard surface was designed in Claude Design from the requirement documents under docs/superpowers/design/requirements, by an opus designer, then screenshot-critiqued at 1440 and 375 in light and dark by a sonnet critic, then revised once where the critic said FIX or REDO. Nothing is ported. Tick a module once you have looked at it; mark it SHIP (port as is), FIX (list what to change) or REDO.
+Every dashboard surface was designed in Claude Design from the requirement documents under docs/superpowers/design/requirements, by an opus designer, then screenshot-critiqued at 1440 and 375 in light and dark by a sonnet critic, then revised once where the critic said FIX or REDO. The dated port record below tracks bounded implementation slices. Tick a module once you have looked at it; mark it SHIP (port as is), FIX (list what to change) or REDO.
+
+## Port record, 2026-10-11
+
+Finance and portal-home have bounded local drafts, partial and ported,
+unchecked. The studio invoice list keeps every existing ledger field, adds
+complete pagination and scoped export, and uses cards where the table cannot
+fit. Invoice detail, the other finance surfaces and the rest of both module
+plans remain open. Client home adds honest unavailable/partial states and
+deduplicated track queues; it is not the full module port. Local independent
+reviews and the release gate pass (423 files / 7,532 tests and build). The
+batch remains local pending Cloudflare login, migration 0111 and deployment.
+No review checkbox is ticked for Liam.
 
 Capture caveat: the app shell scrolls inside its own container, so the critics' full-page screenshots covered the first 900px of each page at 1440 and the first 812px at 375; anything below that was checked against the source, not the pixels. When you review, scroll each page.
 

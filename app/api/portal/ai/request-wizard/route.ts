@@ -475,11 +475,16 @@ export async function POST(req: NextRequest) {
   // `orgId` here is the raw Clerk org id (getRequestAuth, not getPortalAuth);
   // resolveD1OrgId is the same lookup getPortalAuth itself does. Best
   // effort: a context read that fails costs the model some helpful
-  // background about this client, never the draft itself.
+  // background about this client, never the draft itself. The audience is
+  // said out loud rather than left to the default: this wizard talks to the
+  // client, so both history and FROM RECENT CALLS use this contact's brand
+  // fence, with current request titles, no quotes and no tasks. The raw auth
+  // above still denies studio sessions, including preview cookies, before
+  // resolving any client data.
   try {
     const d1OrgId = await resolveD1OrgId(drizzle, orgId)
     if (d1OrgId) {
-      const orgContext = await loadRequestOrgContext(drizzle, d1OrgId)
+      const orgContext = await loadRequestOrgContext(drizzle, d1OrgId, { audience: 'client', userId })
       if (orgContext) contextParts.push(orgContext)
     }
   } catch {

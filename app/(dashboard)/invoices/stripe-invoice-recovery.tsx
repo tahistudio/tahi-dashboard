@@ -64,7 +64,7 @@ export function StripeInvoiceRecovery({ onImported }: { onImported: () => void }
   const resetPreview = () => { setPreview(null); setError(''); setRecoveredId('') }
   if (!isSuperAdmin) return null
   return <>
-    <TahiButton variant="secondary" size="sm" onClick={() => setOpen(true)}>Recover paid Stripe invoice</TahiButton>
+    <TahiButton variant="secondary" size="sm" style={{ minHeight: '2.75rem' }} onClick={() => setOpen(true)}>Recover paid Stripe invoice</TahiButton>
     <SlideOver open={open} onClose={() => { if (!busy) setOpen(false) }} title="Recover a paid Stripe invoice" subtitle="Match a paid live invoice to an existing client.">
       <SlideOver.Body>
         <div className="flex flex-col gap-5">
@@ -75,7 +75,7 @@ export function StripeInvoiceRecovery({ onImported }: { onImported: () => void }
               ...(data?.map(org => ({ value: org.id, label: org.name })) ?? []),
             ]} />
           </label>
-          {clientError && <div><p role="alert" className="text-sm text-[var(--color-danger-ink)]">Clients could not load.</p><TahiButton variant="secondary" onClick={() => retryClients()}>Retry loading clients</TahiButton></div>}
+          {clientError && <div><p role="alert" className="text-sm text-[var(--color-danger-ink)]">Clients could not load.</p><TahiButton variant="secondary" style={{ minHeight: '2.75rem' }} onClick={() => retryClients()}>Retry loading clients</TahiButton></div>}
           <label className="flex flex-col gap-2 text-sm">Stripe invoice id
             <Input style={{ minWidth: 0, height: '2.75rem' }} value={invoiceId} disabled={busy} placeholder="in_..." onChange={e => { setInvoiceId(e.target.value); resetPreview() }} />
           </label>
@@ -92,8 +92,8 @@ export function StripeInvoiceRecovery({ onImported }: { onImported: () => void }
         </div>
       </SlideOver.Body>
       <SlideOver.Footer>
-        <TahiButton variant="secondary" disabled={busy} onClick={() => setOpen(false)}>Close</TahiButton>
-        {!recoveredId && <TahiButton disabled={busy || !orgId || !invoiceId.trim() || !!clientError || (preview !== null && !preview.canApply)} onClick={() => recover(preview === null)}>
+        <TahiButton variant="secondary" style={{ minHeight: '2.75rem' }} disabled={busy} onClick={() => setOpen(false)}>Close</TahiButton>
+        {!recoveredId && <TahiButton style={{ minHeight: '2.75rem' }} disabled={busy || !orgId || !invoiceId.trim() || !!clientError || (preview !== null && !preview.canApply)} onClick={() => recover(preview === null)}>
           {busy ? preview ? 'Importing...' : 'Checking...' : preview ? 'Import paid invoice' : 'Preview recovery'}
         </TahiButton>}
       </SlideOver.Footer>

@@ -34,6 +34,7 @@ import { schema } from '@/db/d1'
 import { SONNET_MODEL } from '@/lib/ai-models'
 import { recordCost } from '@/lib/ai-cost'
 import { resolveByName } from '@/lib/task-wizard-drafts'
+import { summariseProposal } from '@/lib/suggestion-summary'
 import { slackBotToken } from '@/lib/slack/api'
 import { postSuggestionsForCall } from '@/lib/slack/mirror'
 import { insertSuggestions, isRepeatOf, listSuggestions, resurfaceSnoozed, type SuggestionKind } from '@/lib/task-suggestions'
@@ -148,6 +149,27 @@ export function parseSweepLimit(raw: string | null): number {
   return Math.min(MAX_SWEEP_BATCH, Math.max(1, parsed))
 }
 
+/**
+ * Rejections as negative examples (CN.3 section 7). At most eight shown, from
+ * the last 120 days, from a scan of thirty, in a block of at most 2,000
+ * characters: about 500 input tokens on the first read of a call and a tenth
+ * of that on the second, which reads it from the cache.
+ */
+export const REJECTED_EXAMPLE_LIMIT = 8
+export const REJECTED_WINDOW_DAYS = 120
+export const REJECTED_BLOCK_MAX_CHARS = 2000
+export const REJECTED_SCAN_LIMIT = 30
+
+/** The per-field clips, so one long quote cannot crowd out the other seven examples. */
+const REJECTED_SUMMARY_CHARS = 140
+const REJECTED_QUOTE_CHARS = 160
+const REJECTED_REASON_CHARS = 120
+/** A reject reason saying the call was filed under the wrong client (the
+ *  inbox chip reads "Wrong client"). Such a row is never shown as an example. */
+const WRONG_CLIENT_REASON = /\bwrong\s+client\b/i
+
+const REJECTED_HEADER = 'REJECTED BEFORE (a person turned these down for this client; never propose them again):'
+
 const TASK_ACTIVITY_DAYS = 60
 const TASK_DONE_DAYS = 14
 /** How long a delivered request stays in the context, marked delivered, so a
@@ -229,11 +251,34 @@ export interface SuggestionContextContact {
   email: string
 }
 
+/**
+ * Something a person already turned down for this client (CN.3 section 7),
+ * as the model is shown it: when, what kind, the one-line summary the inbox
+ * showed, the words it rested on and, when they said, why. No description,
+ * rationale or confidence: the point is "not this again", not a second
+ * chance to argue for it.
+ */
+export interface RejectedExample {
+  kind: string
+  summary: string
+  quote: string
+  reason: string | null
+  /** YYYY-MM-DD, the date part of decided_at. */
+  decidedOn: string
+}
+
 export interface SuggestionContext {
   tasks: SuggestionContextTask[]
   requests: SuggestionContextRequest[]
   members: SuggestionContextMember[]
   contacts: SuggestionContextContact[]
+  /**
+   * The REJECTED BEFORE block's rows. Only the sweep (and the rebuild, which
+   * runs through it) sets this; a Slack note is one person's direct ask
+   * rather than a call read for everything said, so lib/slack/notes.ts never
+   * does.
+   */
+  rejected?: RejectedExample[]
 }
 
 export interface SuggestionDraft {
@@ -450,6 +495,190 @@ export async function buildSuggestionContext(
   }))
 
   return { tasks, requests, members, contacts }
+}
+
+// ── Rejections as negative examples (CN.3 section 7) ─────────────────────────
+//
+// A person pressing Reject is the clearest signal the studio ever gives the
+// suggester, and until now it was thrown away: the next call with the same
+// client proposed the same footer tag again, and somebody rejected it again.
+// So the sweep shows the model what was turned down for THIS client lately,
+// with the reason when there is one, and rule 8 of the system prompt says
+// what to do with it.
+//
+// SAME CLIENT ONLY, and that is a privacy rule before it is a relevance one.
+// A title or a quote from one client's call in another client's prompt could
+// come back as a proposal filed on the wrong client, and a request title is
+// client visible once approved. So the org is filtered in SQL and then again
+// here, in a pure function the tests hand another client's rows to.
+//
+// NO CLIENT, NO EXAMPLES. A call suggestion with no org is not studio
+// housekeeping: scheduled calls always carry an org and Slack notes are never
+// 'founders' rows, so a null org on a founders row means some client's
+// discovery call whose client could not be worked out, and the repair pass
+// only mends pending rows. Two such calls from two different clients would
+// share the null, so matching null to null would show one client's title and
+// quote in the other's prompt. A call with no org is read with no block.
+
+/** One task_suggestions row as the rejected-examples reader selects it. */
+export interface RejectedSuggestionRow {
+  kind: string
+  proposal: string
+  quote: string
+  status: string
+  approverType: string
+  orgId: string | null
+  decidedAt: string | null
+  rejectReason: string | null
+}
+
+/** A line of prose cut so the result, ellipsis included, is at most `max` characters. */
+function clipWithin(value: string, max: number): string {
+  const flat = value.replace(/\s+/g, ' ').trim()
+  return flat.length <= max ? flat : clip(flat, max - 3)
+}
+
+function parseProposalLoose(proposal: string): unknown {
+  try {
+    return JSON.parse(proposal)
+  } catch {
+    return proposal
+  }
+}
+
+/**
+ * The rows the model may be shown, newest first, as examples.
+ *
+ * Re-applies every rule the SQL already applied, because this is the function
+ * the privacy tests hit and a query is easy to loosen by accident:
+ *
+ *   * 'rejected' only. 'expired' is a rebuild tidying up, not a person
+ *     saying no, and teaching the model from it would teach it to stop
+ *     proposing things nobody ever looked at.
+ *   * approver_type 'founders' only, which is the call suggestions. A
+ *     member's rejected note is a private change of mind about their own
+ *     ask, not a verdict on what the client wants.
+ *   * decided inside REJECTED_WINDOW_DAYS of `at`. Older than that and the
+ *     client may well want it now.
+ *   * the same client: the row's org equals `orgId`. Never another client's
+ *     row, and nothing at all when `orgId` is empty, since a null org is an
+ *     unidentified client rather than the studio (see above).
+ *   * not rejected as the wrong client. That reason says the call was filed
+ *     under this client by mistake, so the row is another client's words
+ *     (their title, their quote) and not a verdict on what this client
+ *     wants; shown here it would put one client's work in another's prompt
+ *     for the whole window.
+ *
+ * Then one example per folded summary, so the same item rejected off three
+ * calls is one line rather than three, and at most REJECTED_EXAMPLE_LIMIT.
+ */
+export function selectRejectedExamples(
+  rows: readonly RejectedSuggestionRow[],
+  orgId: string | null,
+  at: Date,
+): RejectedExample[] {
+  const scope = orgId || null
+  if (!scope) return []
+  const since = at.getTime() - REJECTED_WINDOW_DAYS * 86_400_000
+
+  const eligible = rows
+    .filter(row => row.status === 'rejected'
+      && row.approverType === 'founders'
+      && row.orgId === scope
+      && !WRONG_CLIENT_REASON.test(asString(row.rejectReason) ?? ''))
+    .map(row => ({ row, time: row.decidedAt ? Date.parse(row.decidedAt) : Number.NaN }))
+    .filter(entry => Number.isFinite(entry.time) && entry.time >= since)
+    .sort((a, b) => b.time - a.time)
+
+  const seen = new Set<string>()
+  const examples: RejectedExample[] = []
+  for (const { row } of eligible) {
+    if (examples.length >= REJECTED_EXAMPLE_LIMIT) break
+    const summary = clipWithin(summariseProposal(row.kind, parseProposalLoose(row.proposal)), REJECTED_SUMMARY_CHARS)
+    const key = fold(summary)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const reason = asString(row.rejectReason)
+    examples.push({
+      kind: row.kind,
+      summary,
+      quote: clipWithin(row.quote ?? '', REJECTED_QUOTE_CHARS),
+      reason: reason ? clipWithin(reason, REJECTED_REASON_CHARS) : null,
+      decidedOn: (row.decidedAt ?? '').slice(0, 10),
+    })
+  }
+  return examples
+}
+
+/**
+ * What this client had rejected lately, ready for the REJECTED BEFORE block.
+ *
+ * Filtered in SQL (status, approver, org, window, newest first, a scan of
+ * REJECTED_SCAN_LIMIT) and then handed to selectRejectedExamples, which
+ * applies every rule again. Never throws: a sweep that cannot read its
+ * rejections reads the call without them, exactly as it did before CN.3,
+ * rather than failing a call over a hint. That includes the window before
+ * migration 0111 is applied, when reject_reason does not exist yet. A call
+ * with no org reads nothing at all, not the null-org rows (see above).
+ */
+export async function loadRejectedExamples(
+  database: Drizzle,
+  orgId: string | null,
+  at: Date,
+): Promise<RejectedExample[]> {
+  const scope = orgId || null
+  if (!scope) return []
+  try {
+    const rows = await database
+      .select({
+        kind: schema.taskSuggestions.kind,
+        proposal: schema.taskSuggestions.proposal,
+        quote: schema.taskSuggestions.quote,
+        status: schema.taskSuggestions.status,
+        approverType: schema.taskSuggestions.approverType,
+        orgId: schema.taskSuggestions.orgId,
+        decidedAt: schema.taskSuggestions.decidedAt,
+        rejectReason: schema.taskSuggestions.rejectReason,
+      })
+      .from(schema.taskSuggestions)
+      .where(and(
+        eq(schema.taskSuggestions.status, 'rejected'),
+        eq(schema.taskSuggestions.approverType, 'founders'),
+        eq(schema.taskSuggestions.orgId, scope),
+        gte(schema.taskSuggestions.decidedAt, daysBefore(at, REJECTED_WINDOW_DAYS)),
+      ))
+      .orderBy(desc(schema.taskSuggestions.decidedAt))
+      .limit(REJECTED_SCAN_LIMIT)
+    return selectRejectedExamples(Array.isArray(rows) ? rows : [], scope, at)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The REJECTED BEFORE block, or '' when there is nothing to show.
+ *
+ * Newest first, one line per example. When the block would run past
+ * REJECTED_BLOCK_MAX_CHARS the OLDEST lines go first, since the most recent
+ * no is the one most likely to be asked again; if not even one line fits the
+ * answer is '' rather than a header over nothing. Deterministic for a given
+ * list, which matters: the block sits inside the cached notes and the second
+ * read has to send it byte for byte.
+ */
+export function formatRejectedBlock(examples: readonly RejectedExample[]): string {
+  if (examples.length === 0) return ''
+  const flat = (value: string): string => value.replace(/\s+/g, ' ').trim()
+  const lines = examples
+    .map((example, index) => ({ example, index }))
+    .sort((a, b) => b.example.decidedOn.localeCompare(a.example.decidedOn) || a.index - b.index)
+    .map(({ example }) => {
+      const reason = example.reason ? flat(example.reason) : ''
+      return `- ${flat(example.decidedOn)} | ${flat(example.kind)} | ${flat(example.summary)} | quote "${flat(example.quote)}"${reason ? ` | reason: ${reason}` : ''}`
+    })
+
+  const block = (): string => [REJECTED_HEADER, ...lines].join('\n')
+  while (lines.length > 0 && block().length > REJECTED_BLOCK_MAX_CHARS) lines.pop()
+  return lines.length > 0 ? block() : ''
 }
 
 /**
@@ -750,6 +979,7 @@ Rules, in order of importance:
 6. Never invent an owner, a date or an estimate. If a person was named, put the NAME in suggestedAssigneeName, requesterName or contactName and leave the id out. If no date was said, leave the date out.
    - suggestedAssigneeName is who will do the work, on a create_task, a create_request or an update_request: the person who said on the call they would do it, with assigneeReason quoting what they said in one sentence ("said she would send the headers"). When nobody named an owner but the REQUESTS list already shows one for the request being updated, repeat that name with assigneeReason "owns this client's work". Leave both null when neither is true.
 7. At most 12 items. Fewer good ones beat more.
+8. REJECTED BEFORE, when present, lists items a person already turned down for this client. Do not propose any of them again, reworded or not, and be slow to propose anything of the same shape. Only when this call clearly asks for the same thing again, in its own words, propose it and say so in the rationale.
 
 Write in the studio's voice: plain sentences, no dashes of any kind, no exclamation marks, no filler.
 
@@ -774,7 +1004,16 @@ Answer with a short sentence saying what the call was about, then one block exac
 
 Use "targetTaskId" alongside "kind" for update_task, complete_task, add_subtasks and note. Use "targetRequestId" for update_request, request_note and hand_off_request. If nothing actionable was said, write the sentence and an empty array.`
 
-function buildUserMessage(input: SuggestFromTranscriptInput): string {
+/**
+ * The notes block: the call, what the client has on file, the people, what
+ * was turned down before, then the wrap up and the transcript.
+ *
+ * REJECTED BEFORE sits after CONTACTS and before WRAP UP so it is inside the
+ * notes, which are the cached block when a second read follows: the second
+ * read sends this exact text again and pays the cache price for it. Exported
+ * so a test can hold the two reads' notes side by side.
+ */
+export function buildUserMessage(input: SuggestFromTranscriptInput): string {
   const parts: string[] = []
   parts.push(`CALL: ${input.callTitle ?? 'Untitled call'}${input.callDate ? ` (${input.callDate})` : ''}`)
 
@@ -803,6 +1042,9 @@ function buildUserMessage(input: SuggestFromTranscriptInput): string {
       `- ${c.name} | ${c.email}`,
     )].join('\n'))
   }
+
+  const rejected = formatRejectedBlock(input.context.rejected ?? [])
+  if (rejected) parts.push(rejected)
 
   if (input.wrapUp) {
     parts.push(`WRAP UP:\n${input.wrapUp.slice(0, MAX_TRANSCRIPT_CHARS)}`)
@@ -1303,7 +1545,13 @@ export async function runSuggestionSweep(
         wrapUp: transcript.wrapUp,
         callTitle: transcript.title,
         callDate: transcript.receivedAt.slice(0, 10),
-        context: await buildSuggestionContext(database, gate.orgId, at),
+        // What this client turned down lately rides in the same context, so
+        // both reads of the call see it and the second reads it from the
+        // cache (CN.3 section 7). The loader never throws.
+        context: {
+          ...(await buildSuggestionContext(database, gate.orgId, at)),
+          rejected: await loadRejectedExamples(database, gate.orgId, at),
+        },
       }
       const first = base
       result = await read(secondPass.enabled ? { ...first, cacheSource: true } : first)

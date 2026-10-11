@@ -30,8 +30,8 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
 
 ## Execution update, 2026-10-11
 
-Liam approved the eight grouped priorities. The first repair batch is ready
-for commit and not deployed: scoped search and nested permission guards,
+Liam approved the eight grouped priorities. The first repair batch is committed
+and deployed as 2f81243f, with signed-in live proof pending: scoped search and nested permission guards,
 bounded suggestion reads, valid overview route exports, contract expiry,
 truthful nudge/review actions, MCP invoice arguments and targeted dark repairs.
 The final source checks passed type-check, lint, all 399 Vitest files (6,660
@@ -49,8 +49,20 @@ Overview, request list/board, client search and create/cancel smoke checks pass.
 Time search and filter controls measure at least 44px at 375 in dark.
 The signed-in PC Chrome connection is unavailable, so production data recovery,
 changed email previews and live QA are still pending. CN.3 and bounded ports
-follow this repair batch. Existing checkboxes stay unchanged until deployment
-and live evidence.
+are underway after this repair batch. Local invoice checks now pass at 375,
+768 and 1280, including dark mode, all seven table fields and 44px controls.
+Client-home checks pass at 375 and 768 in the read-only lens. Integration review
+also found suggestion rebuild/count and old Slack delivery permission gaps;
+the local fixes and independent reviews pass. The full gate passes type-check,
+lint, 423 Vitest files (7,532 tests) and the production build.
+Public deployment health checks pass;
+no new task is marked complete without signed-in evidence.
+
+The next source batch is held locally: Cloudflare OAuth expired during the
+release gate, and remote D1 access needs npx wrangler login on the PC. Apply
+and verify 0111 before pushing this batch. Production remains on 2f81243f.
+The existing CI=1 check mode skips the remote AI dev proxy; it grants no
+production access. Browser sign-in is separately needed for live QA and SW.1.
 
 ## Current triage, 2026-10-10
 
@@ -207,34 +219,46 @@ agent side is done unless the line says otherwise.
 
 Reviewers' notes that were not blocking. Each names its file.
 
-- [ ] FU.1 - [BE] Suggester: give each Anthropic read a timeout capped at the
+- [~] FU.1 - [BE] Suggester: give each Anthropic read a timeout capped at the
   time left in the sweep budget, with fewer retries (lib/task-suggester.ts).
   The budget only decides when a read starts, so one hanging transcript can
   still pass the cron-trigger's 120 s cut and block the queue behind it.
-- [ ] FU.2 - [BE/FE] Contracts past their expiry: a Lapsed pill on the admin
+  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
+  checks pass; signed-in live evidence is pending.
+- [~] FU.2 - [BE/FE] Contracts past their expiry: a Lapsed pill on the admin
   detail and list, and the same guard on POST /api/admin/contracts/[id]/email
   and the MCP send path, so the studio cannot email a link that opens on "This
   contract has expired". The client signing email (emails/contract-sign.tsx
   about line 94) still leaves the signing deadline out of its expiry line.
+  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
+  checks pass; signed-in live evidence is pending.
 - [ ] FU.3 - [Decision] A partly signed contract marked signed by hand gets no
   fully-signed email and no signed PDF although real signatures exist. Block
   the hand mark when signatures exist, or turn it into a real countersign.
-- [ ] FU.4 - [FE] Expiry dates are stored as T23:59:59Z and shown in the
+- [~] FU.4 - [FE] Expiry dates are stored as T23:59:59Z and shown in the
   viewer's zone, so a New Zealand client sees the day after the studio's pick.
-- [ ] FU.5 - [FE] Dark leftovers: schedules/[id]/schedule-detail.tsx has its
+  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
+  checks pass; signed-in live evidence is pending.
+- [~] FU.5 - [FE] Dark leftovers: schedules/[id]/schedule-detail.tsx has its
   own light-hex STATUS_PALETTE; the contract detail audit timeline accents
   (contract-detail.tsx about line 1163) are light-only hex; three hand-rolled
   menus colour danger with var(--color-danger) (proposal detail, kanban board,
   messages); the Wire timestamp and News feed label use --text-faint (3.2:1).
   The new --color-danger-ink token is the fix for the danger cases.
-- [ ] FU.6 - [FE] Desktop: a long Wire item wraps inside the fixed 1.6rem strip
+  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
+  checks pass; signed-in live evidence is pending.
+- [~] FU.6 - [FE] Desktop: a long Wire item wraps inside the fixed 1.6rem strip
   and its second line is clipped (wants a one-line ellipsis); the contracts
   table at 1280 is wider than its card, so Sent, Expiry and Row actions sit
   behind a sideways scroll.
-- [ ] FU.7 - [BE] app/api/admin/overview/brief/route.ts exports non-route
+  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
+  checks pass; signed-in live evidence is pending.
+- [~] FU.7 - [BE] app/api/admin/overview/brief/route.ts exports non-route
   symbols (computeBrief, readBriefCache, writeBriefCache, isBriefFresh,
   BRIEF_CACHE_KEY); type-check fails whenever a dev server's .next/types is
   present. Move them into lib/.
+  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
+  checks pass; signed-in live evidence is pending.
 - [ ] FU.8 - [Slack] A voice note in the DM arrives twice (message.im with the
   file inline and file_shared), so one recording may give two cards; check in
   the first live DM. Before channels go live, send the channel pointer and the
@@ -242,6 +266,9 @@ Reviewers' notes that were not blocking. Each names its file.
 - [ ] FU.9 - [QA] The seeded QA sqlite lost its FK cascades, so the D3 specs
   leave contract_signers, contract_signatures and proposal children behind
   (cleanup command in docs/local-dev-and-qa.md); reseed with cascades intact.
+  Local repair 2f81243f preserves rows with backups. Rollback-only fixtures
+  proved all eight edges in both shards; deliverable browser cleanup remains
+  to be exercised. No production cascade/data operation was performed.
 
 ## Liam's dummy-client walk-through, merged, live check owed
 
@@ -323,16 +350,20 @@ One table, task_suggestions, sits between "something was said" and "a task chang
 - [~] CN.1c - [BE/MCP] A rebuild should merge passes, not replace them: two reads of the same three Elevate calls gave five items and then none (sampling variance; Sonnet 5 rejects a temperature parameter, 400 "temperature is deprecated for this model"). Keep the union: on a re-read, rows from the previous pass that the model did not propose again stay pending instead of expiring, and only rows the human already decided are left alone. Also worth a second model pass per transcript with the first pass shown as context ("anything missed?") before the union. Built 2026-09-26 (opus, 7f6e8223), subsequently merged a6592326 and deployed ed2d4385; no migration. Live drain/union checks remain. A re-read is now a union: insertSuggestions compares each draft against everything its transcript already has on file except expired rows, through the new isRepeatOf in lib/task-suggestions.ts (a create at SIMILAR_BLOCK across both create kinds, a note on the same target, an update to the same fields, a subtask list with nothing new, a hand-off to the same person), counts a repeat as a duplicate and never touches the row on file; expired rows keep their retired keys and are not compared, so af5c2991 holds. The rebuild route expires nothing by default (pending and snoozed stay, applied, rejected and failed are never touched) and re-reads straight away through runSuggestionSweep with transcriptIds (oldest first, at most 20, no 30-day window, whatever the read mark), returning mode, transcripts, kept, expired, read, deferred and skipped; replace is the one path that still expires, for vocabulary changes. Every call is read twice (lib/task-suggester.ts: the second read is shown the first read's items with their quotes and asked only for what it missed, notes read back from the prompt cache, mergeSecondRead keeps both reads inside the twelve item ceiling); on by default, ?second_pass=0 on the cron and secondPass false on the rebuild switch it off per call; each read logs its own ai_cost_log row (stages suggest and second_pass). Expected extra spend roughly 3 cents per transcript at Sonnet 5 rates (the log line reads about 6, because the rate card prices cached input at the full rate). MCP: rebuild_task_suggestions gains replace, second_pass and read_now; cron_suggest_from_transcripts gains limit and second_pass, its mapping moved into task-suggestion-tools.ts so the parity test covers it; the guide says each call is read twice and a rebuild adds. Tests in lib/task-suggester.test.ts, lib/__tests__/task-suggestions.test.ts, the rebuild and cron route tests and the MCP parity test; full vitest 5771 green. Review follow-up 2026-09-26 (opus, same branch, after main gained 33f61601, the middleware fix that let the scheduled sweep run at all for the first time since 22 Sep): a time budget, because two reads of 20 to 27 seconds per call put a batch of five far past workers/cron-trigger's 120 second fetch timeout. The sweep only starts a call whose reads should finish inside SWEEP_BUDGET_MS (75 s), judged on the larger of READ_ESTIMATE_MS (30 s) and the slowest read it has timed, always taking the first so a run cannot starve; the rest are left unread and unstamped and reported as deferred and deferredIds, and a second read that would not fit is skipped (secondPass.skipped out_of_time; the first read is written and the call stamped). secondPass.ran now counts only second reads that came back; skipped also names full ones. The rebuild reads inside the same budget from the request start and prepares a call (count or expire, retire keys, clear) only through the sweep's new beforeRead hook, once the budget has admitted it; what the read did not reach is deferred (prepared and cleared) only when the sweep will find it: linked to a call and at least DEFER_MARGIN_DAYS (3) inside the 30-day window (sweepWillReach). Everything else is left untouched and listed in skipped: unlinked (all no longer clears transcripts with a null call_id), not_found, too_old_to_defer. replace is one rule for body and query (true, 1, or 1, true, yes in any case). The replace expiry runs in chunks of 80 ids. The oldest-first test now feeds rows out of order and the route sorts them itself; the route test renders each condition with Drizzle's SQLite dialect. Throughput is now about one call per half-hour run; the guide says so. Contract section 3 and both MCP descriptions updated. Tests: budget paths on an injected clock in lib/task-suggester.test.ts, route tests rewritten; full vitest 379 files, 5840 tests green; type-check and lint clean. Merged a6592326, deployed ed2d4385 (2026-09-26). Next: watch two scheduled runs in cron_runs (durationMs under 90 s, deferred counts draining), then rebuild the three Elevate transcripts and check nothing drops out of the inbox.
 - [x] CN.1d - [BE/FE/MCP] Suggestions never duplicate what exists (Liam, 2026-09-19: make sure it checks for requests that are close or similar). Similarity scoring in lib/text-similarity.ts; the inbox warns Looks like #226 with Use #226 instead and Approve anyway; approve is blocked at 0.8 without force; the sweep drops cross-call duplicates; the model also sees requests delivered in the last 90 days. Contract docs/superpowers/plans/2026-09-19-cn1d-duplicate-guard-contract.md. Built 2026-09-19 as workflow cn1d-duplicate-guard: D1 lib/text-similarity.ts, similar computed on read against the org's requests (open or delivered in 90 days), tasks and other pending suggestions, approve blocked at 0.8 without force, the attach action, the sweep dropping similar_pending, delivered requests marked in the model context, MCP arguments (opus, 766b0721); D2 the Looks like line with Use #NNN instead and Approve anyway behind a confirm, types mirror, guide (sonnet, ebfb2e6d); reviews non-blocking. Merged and deployed ad18431a. Live: the inbox was empty by then (Liam approved 8, all landed as Verandela requests #228 to #235 with bot lines and audit entries, and rejected 19), so the first warnings will show on the next call's suggestions; the guard is unit tested at all three points.
 - [~] CN.2 - [BE/Slack] The Slack app, DM first with permission levels (Liam, 2026-09-22). Built as workflow cn2-slack-app (S1 identity, verification, routes, opus c7e00396; S2 approvals in DMs with in-place rewrites, opus 171791cf; S3 notes and voice through Workers AI, opus acff94e1; A1 assignee suggestions, sonnet ea50d1e3; reviews non-blocking), integrated by one agent (19 stub mismatches, route wiring, voice size check before download, agent-mode events), merged b06b0d91, migration 0110 applied on tahi-db, deployed a2471632 after a CI fix (the AI binding forces a remote dev proxy, skipped on CI). Live: both webhook routes answer 401 to a bad signature. Waiting on Liam: apply the manifest to the existing Tahi Dashboard app, reinstall, set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET, then the live DM checks. Loose ends closed in ebc7e0a3 plus a review fix 5fbe654b, merged dc73687b and deployed 33f61601 (2026-09-26): view_submission is done (the interactive route answers response_action clear, and a future modal plugs in through registerViewSubmissionHandler on the action registry), app_mention in a channel is done (one line in the thread pointing to a DM, the refusal line for a stranger, never a note; a file posted in a channel is ignored as well, so only a file in the 1:1 reaches the voice path), slack_events_seen sweep is done (rows older than seven days, a daily step of the snapshot-metrics cron; no migration, the 0110 seen_at index serves the delete). For the live DM checks: a voice note in the DM arrives twice (message.im with the file inline, and file_shared, under different event ids), so confirm one recording gives one card.
-- [ ] CN.3 - [BE] Keeping in sync is BUILT on cn3-ready (d1103abe;
-  branch tip 5955e851), not integrated into main or deployed. Includes Slack
-  thread updates, weekly digest, rejection reasons and wizard learning from
-  applied suggestions. Triage 2026-10-10: 72 files differ from the merge base,
-  23 commits ahead and 8 behind main. Review/integrate current main, apply
-  reviewed 0111_cn3_sync.sql before deploying, then full gates and live checks.
-  Production task_suggestions has no reject_reason column. The SQL ALTER is
-  not safe to rerun blindly; check the column first or use the runner's
-  duplicate-column handling once that runner is deployed. Slack verification
-  depends on CN.2 configuration. Contract: 2026-09-26-cn3-sync-contract.md.
+- [ ] CN.3 - [BE] Keeping in sync is reviewed and integrated locally from
+  cn3-ready (branch tip 5955e851), awaiting the local merge commit and release.
+  Includes Slack thread updates, weekly digest, rejection reasons and wizard
+  learning from applied suggestions. Current roles/features/client scope are
+  revalidated for old and new Slack deliveries; wizard context follows brands.
+  Empty-scope inbox reads, rebuild/count access and migration permissions are
+  fenced. Manual full sweeps require both inbox features and unrestricted
+  access; verified scheduled runs are preserved. Full gate passes: type-check,
+  lint, 423 files / 7,532 tests and build. Fresh production-backup rehearsal
+  preserves all 121 original tables/data and old indexes. Production still
+  lacks reject_reason and all eight named 0111 objects. The PC Cloudflare
+  login expired; refresh, apply and verify reviewed 0111 before pushing.
+  The raw SQL ALTER is single-use; the deployed runner handles retries.
+  Live Slack proof also needs CN.2 setup. Contract: 2026-09-26-cn3-sync-contract.md.
 
 ## Product manager AI (Liam, 2026-09-20: "I want a product manager AI")
 
@@ -547,6 +578,10 @@ Overnight 2026-09-14: every module in this section has a fresh design in Claude 
   Liam's 2026-09-26 unchecked-port instruction removes the advance-review
   dependency. Start with invoice list/detail, preserve all real billing fields
   and guards, then record port commits with review boxes left empty.
+  2026-10-11 bounded local list port: complete ledger reads, scoped CSV export,
+  truthful paid-month totals, mobile/tablet cards and fitted desktop columns.
+  Local phone/tablet/dark checks and independent source reviews pass. Detail
+  and the rest of finance.md remain open; partial and ported, unchecked.
 
 ---
 
@@ -768,6 +803,10 @@ fixed.
   audit uncovered/new routes and prove denied deep links/data reads return
   403 for real scoped/client seats. T1.16 owns global search organisation
   scoping; share the tests and live lap rather than rebuild the guard system.
+  Repair 2f81243f is deployed with feature guards on all 65 sales artifact
+  handlers (205 new route tests). The local CN.3 integration additionally
+  fences mixed suggestion reads/decisions/rebuild/counts, old Slack deliveries,
+  scoped invoice export and migration access. Signed-in role proof is pending.
 
 - [ ] T1.7 (C4.3/C4.4) - [Ops/BE] Portal noindex + robots; WAF rate rules
   (60/min `/api/portal/*`, 20/min `/api/uploads/*`) or KV limiter.
@@ -823,11 +862,12 @@ scoping.
 - [~] T1.16 - [BE] Per-org scoping rollout: both the deliverable batch and
   named batch-B index routes now have guards (deals, conversations, calls,
   time, announcements). The old "only 30 of 362" tally is historical.
-  Confirmed remaining source gap 2026-10-10: /api/admin/search checks Tahi
-  membership and queries entities without feature or organisation scoping.
-  Prioritise that repair, then audit nested writes/reports and the scoped
-  teammate preview. Add tests for denied/partially scoped seats. Source
-  finding only; no attack against another person's account was attempted.
+  Global search and nested write/report repairs shipped in 2f81243f with
+  denied and partially scoped tests; deployed signed-in proof remains open.
+  The local CN.3 integration also closes empty-client-scope suggestions,
+  rebuild/count access and stale Slack recipient grants. Continue the scoped
+  teammate/live role lap. These are isolated fixture/source findings; no
+  attack against another person's production account was attempted.
 
 - [~] T1.17 - [BE/FE/QA] Hire onboarding's core implementation is built
   in 45ec6d2a: verified-email roster linking, guarded team writes, Login
@@ -889,6 +929,8 @@ scoping.
   amountUsd/totalUsd and exposes no lineItems, while the API requires non-empty
   lineItems. Align schema/mapping and test the real tool-to-route contract on
   QA data. Triage 2026-10-10, source checked on main.
+  Schema/mapping repaired and tool-to-route tests pass in 2f81243f, deployed
+  2026-10-11. Signed-in creation/messaging round trips remain to verify.
 
 - [ ] CT.18 (0.25d) - [Liam decision] Delete /tracks (linked from nowhere,
   HTML5-drag only; the client home's TrackBoard tells the same story with
@@ -1122,13 +1164,14 @@ teardown, eight website feedback tools, call recording routes with costs). Not
 scheduled; each needs a scope before building.
 
 - [ ] WQA.0 - [Scope] Website QA tester: clients pin comments on sites we are
-  building and suggest copy edits (before and after, a "Copy edited text"
-  button), guests by signed review link with name and email, an embed script in
-  a Shadow DOM served by the Worker, screenshots to R2, team-only or everyone
-  visibility, pins become requests through the suggestion gate, MCP tools.
-  Reuses the beta feedback ball (feedback_comments, lib/feedback-anchor.ts).
-  Interim with no build: pull Webflow comment-only guest comments into request
-  suggestions.
+  building and suggest copy edits with original/proposed text. The studio can
+  discuss, resolve and convert feedback to a request with its source intact.
+  Scope draft: SPECS/website-qa-comments.md. Evaluate authorised-site embed
+  and extension/review-link fallback, stable anchors and screenshots, guest
+  identity and revocation, client/brand isolation and request conversion.
+  Reuse feedback-ball lessons; do not mix client-site QA with beta feedback.
+  No delivery mechanism, guest policy or schema selected. Webflow comment
+  intake remains an interim idea, not a built connector.
 - [ ] REC.0 - [Scope] Calendar-aware meeting audio and transcription beyond
   Gemini (Liam clarified 2026-10-10, Decision #068): detect meetings in Liam's
   calendar, capture PC system audio plus microphone so both sides are heard,
@@ -1139,7 +1182,8 @@ scheduled; each needs a scope before building.
   hosted options on real calls for accuracy and total cost. No provider or
   recording automation chosen yet. Feed call_transcripts and the existing
   human-approved suggestions flow. Audio upload is a fallback, not the main
-  workflow.
+  workflow. Scope draft: SPECS/meeting-audio-capture.md, with accuracy/cost
+  benchmark and Windows capture proof before provider selection.
 - [ ] LP.1 - [BE] Scope changes caught on a call: the suggester proposes a
   change request with the quote, included or billable, cost and days added
   (extends CN.1 and the scope-creep flag).

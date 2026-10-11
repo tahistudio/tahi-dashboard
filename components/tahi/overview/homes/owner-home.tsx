@@ -23,6 +23,7 @@ import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { useResource } from '@/lib/use-resource'
 import { apiPath } from '@/lib/api'
+import { usePermissions } from '@/components/tahi/permissions-context'
 import { stageColour } from '@/lib/chart-colors'
 import { cashFlowBasisLine } from '@/lib/cash-position'
 import {
@@ -74,8 +75,7 @@ interface OverviewData {
     draftInvoicesNzd?: number
     draftInvoicesCount?: number
     mrr?: number
-    /** Pending call-transcript suggestions the studio has not decided yet
-     *  (CN.1). Always present, no feature gate. */
+    /** Pending suggestions within the caller's granted inbox and client scope. */
     taskSuggestions?: { pending: number; calls: number }
   }
   mrrDeltaPct?: number | null
@@ -1567,6 +1567,8 @@ function SuggestionsCard({
   loading: boolean
 }) {
   const router = useRouter()
+  const { features, isSuperAdmin } = usePermissions()
+  if (!isSuperAdmin && !(features.tasks === true && features.requests === true)) return null
   if (loading) return <Card section="Suggestions from calls" span={5}><Shim h={70} /></Card>
   if (!suggestions || suggestions.pending === 0) return null
   const { pending, calls } = suggestions

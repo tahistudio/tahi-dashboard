@@ -1359,3 +1359,41 @@ the existing human approval gate for task or request suggestions (Decision
 Nothing is scheduled or implemented by this decision.
 
 ---
+
+## #069 - CN.3 Uses Additive Learning and Sync Storage Behind Existing Permissions
+
+**Date:** 2026-10-11
+
+**Decision:** Integrate the already-built CN.3 scope approved in Liam's repair
+batch. Its schema adds nullable task_suggestions.reject_reason, indexes for
+applied work/rejections, and slack_work_posts/slack_digests for thread and
+weekly-digest claims. The Codex lead reviewed the schema as PM against the
+branch contract and a fresh production schema read. Apply reviewed 0111 before
+code deployment, with a recoverable backup and object verification. The raw
+SQL file is single-use because SQLite's ADD COLUMN has no IF NOT EXISTS; the
+runner handles duplicate-column retries after deployment.
+
+**Rationale:** The current inbox must remain readable during rollout. Learning
+uses only human-decided suggestions. Slack recipients and approvers must be
+checked against current roles, feature grants and client scope, including old
+threads and work with no client. Client wizard context must also follow the
+contact's brand scope. A stored card or identity never becomes an access grant.
+
+**Implications:** Slack remains inert while its token is absent. No automatic
+client messaging or AI item writes are authorised. The human suggestion gate,
+client-safe card policy and email allowlist remain in force. Migration and
+source integration stay pending until their gates pass; live Slack proof still
+requires Liam's existing CN.2 setup.
+
+**Integration review:** Migration catalogue and execution require a current
+super admin or the verified service identity, not ordinary studio membership.
+Both new primary keys are explicitly NOT NULL in the runner and SQL mirror.
+Empty client scope means no suggestions, including pre-client suggestions.
+Digest notes and stored Slack copies must recheck the recipient's current
+role, feature and client grants before posting or rewriting private content.
+Manual full sweeps and inline rebuilds require both inbox features and
+unrestricted client access because they perform global maintenance. Scoped
+seats may queue permitted calls through rebuild with readNow:false. Verified
+scheduler secrets keep the automated path.
+
+---

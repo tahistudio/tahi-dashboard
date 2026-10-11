@@ -18,8 +18,19 @@
  * and getOrgScope, is the real thing. The fake D1 records every query so the
  * SQL a route actually built can be asserted.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Column, Param, SQL } from 'drizzle-orm'
+
+// The Slack thread line (CN.3): armed only when the token is set, with the
+// queue recorded rather than deferred.
+vi.mock('@/lib/slack/work-sync', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/slack/work-sync')>('@/lib/slack/work-sync')
+  return {
+    ...actual,
+    workSyncArmed: () => !!process.env.SLACK_BOT_TOKEN,
+    queueWorkSync: vi.fn(async () => undefined),
+  }
+})
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user_member', orgId: 'org_tahi' }),
@@ -46,6 +57,7 @@ import { db } from '@/lib/db'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { notifyOrgContacts, notifyTeamMember } from '@/lib/notifications'
 import { dispatchDomainEvent } from '@/lib/events'
+import { queueWorkSync } from '@/lib/slack/work-sync'
 import { NextRequest } from 'next/server'
 
 import { GET as listRequests, POST as createRequest } from '@/app/api/admin/requests/route'
@@ -441,6 +453,75 @@ describe('PATCH /api/admin/requests/bulk', () => {
     expect(res.status).toBe(200)
     expect(vi.mocked(dispatchDomainEvent)).not.toHaveBeenCalled()
     expect(vi.mocked(notifyOrgContacts)).not.toHaveBeenCalled()
+  })
+
+  describe('the Slack thread lines (CN.3)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    const before = [
+      { id: 'req-a', orgId: 'org-a', title: 'One', assigneeId: null, status: 'in_progress' },
+      { id: 'req-b', orgId: 'org-a', title: 'Two', assigneeId: 'tm-1', status: 'delivered' },
+    ]
+
+    it('queues one batch holding only the rows that changed, off the rows read before the write', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      unrestricted()
+      const { handle } = makeDb([before, before])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      const res = await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', {
+        ids: ['req-a', 'req-b'],
+        status: 'delivered',
+        assigneeId: 'tm-1',
+      }))
+      expect(res.status).toBe(200)
+      expect(vi.mocked(queueWorkSync)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(queueWorkSync).mock.calls[0][1]).toEqual([{
+        entityType: 'request',
+        entityId: 'req-a',
+        actor: { type: 'studio', clerkUserId: 'user_member' },
+        changes: [
+          { field: 'status', from: 'in_progress', to: 'delivered' },
+          { field: 'assignee', from: null, to: 'tm-1' },
+        ],
+      }])
+    })
+
+    it('reads the archive flag as a status change to archived', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      unrestricted()
+      const { handle } = makeDb([before, before])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', { ids: ['req-a', 'req-b'], archived: true }))
+      const batch = vi.mocked(queueWorkSync).mock.calls[0][1]
+      expect(batch.map(change => [change.entityId, change.changes])).toEqual([
+        ['req-a', [{ field: 'status', from: 'in_progress', to: 'archived' }]],
+        ['req-b', [{ field: 'status', from: 'delivered', to: 'archived' }]],
+      ])
+    })
+
+    it('queues nothing when no row moved', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      unrestricted()
+      const { handle } = makeDb([[before[1]], [before[1]]])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', { ids: ['req-b'], status: 'delivered' }))
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
+
+    it('queues nothing while Slack is not configured', async () => {
+      vi.stubEnv('SLACK_BOT_TOKEN', '')
+      unrestricted()
+      const { handle } = makeDb([before, before])
+      vi.mocked(db).mockResolvedValue(handle as never)
+
+      await bulkPatch(jsonReq('/api/admin/requests/bulk', 'PATCH', { ids: ['req-a', 'req-b'], status: 'on_hold' }))
+      expect(vi.mocked(queueWorkSync)).not.toHaveBeenCalled()
+    })
   })
 })
 

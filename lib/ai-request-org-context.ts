@@ -19,17 +19,28 @@
  * this data (step two) is a separate feature; this module only surfaces the
  * facts.
  *
+ * CN.3 adds a third block, FROM RECENT CALLS: what was agreed on a call with
+ * this client and has already been filed, read from APPLIED task suggestions
+ * (a pending one is not agreed yet, a rejected one is the suggester's lesson,
+ * not the wizard's). It lets the wizard name the existing request by its
+ * number instead of drafting a duplicate. The block has two audiences
+ * because the portal wizard talks to the client: the client sees only the
+ * request kinds read off a call, by number and CURRENT title, never a quote,
+ * a task, an internal thread note or a request filed from a Slack DM; the
+ * studio sees permitted applied kinds with quotes, a Slack note marked as one.
+ *
  * Split into pure formatters (unit tested, no DB) and a thin loader that
- * runs the reads: the org row, its brands, its last few requests, and now
- * the full history aggregates. Every read is scoped to the caller's own org
- * by the caller.
+ * runs the reads: the org row, its brands, its last few requests, the full
+ * history aggregates and the applied call suggestions. Every read is scoped
+ * to the caller's own org by the caller.
  */
 
 import { schema } from '@/db/d1'
-import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, ne, sql, type SQL } from 'drizzle-orm'
 import { REQUEST_CATEGORIES } from '@/lib/request-vocabulary'
 import { REQUEST_CLOSED_STATUSES } from '@/lib/status-config'
 import { resolveTracksConfig, getTracksConfigSummary } from '@/lib/plan-utils'
+import { loadClientScope } from '@/lib/messages-store'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -91,6 +102,40 @@ export interface ClientHistoryStats {
   hoursLast90Days: number | null
 }
 
+/**
+ * Who the context block is written for. 'client' is the portal wizard, which
+ * talks to the client, and is the default everywhere because it is the safe
+ * one: it never carries a quote, a task or an internal thread note. 'studio'
+ * is the admin wizard.
+ */
+export type OrgContextAudience = 'client' | 'studio'
+
+/**
+ * One thing agreed on a call and already filed, as the FROM RECENT CALLS
+ * block names it. Built by selectCallAgreements from an applied suggestion
+ * joined to the request or task it touched.
+ */
+export interface CallAgreement {
+  /** The suggestion kind ('create_request', 'update_task', ...). */
+  kind: string
+  /** The request's number, for the request kinds. Null for a task. */
+  requestNumber: number | null
+  /** The request's or task's CURRENT title, never the model's proposal on the
+   *  client audience. */
+  title: string
+  /** yyyy-mm-dd the call transcript arrived. Null when the row has none. */
+  callDate: string | null
+  /** yyyy-mm-dd the suggestion was applied. */
+  appliedOn: string
+  /** The transcript lines the row rests on, clipped. Always null for the
+   *  client audience. */
+  quote: string | null
+  /** Set only on the studio audience, for a row filed from a Slack note
+   *  rather than read off a call, so its line does not claim a call. The
+   *  client audience never carries a note row at all. */
+  fromNote?: true
+}
+
 export interface RequestOrgContextInput {
   org: OrgContextOrg | null
   brands: OrgContextBrand[]
@@ -98,6 +143,10 @@ export interface RequestOrgContextInput {
   /** The CLIENT HISTORY aggregates. Omitted or null when there is nothing to
    *  add beyond the CLIENT ON FILE block above. */
   history?: ClientHistoryStats | null
+  /** Applied call suggestions for the FROM RECENT CALLS block, newest first. */
+  callAgreements?: CallAgreement[]
+  /** Who the block is for. Defaults to 'client', the safe audience. */
+  audience?: OrgContextAudience
 }
 
 /** Join a list of already-formatted entries, capping at `max` and marking
@@ -119,11 +168,15 @@ function formatCounts(counts: Record<string, number>): string {
 /**
  * Pure formatter: turns already-loaded rows into the text block the system
  * prompt appends. Returns an empty string when there is nothing on file at
- * all, so a brand-new org costs the prompt nothing.
+ * all, so a brand-new org costs the prompt nothing. FROM RECENT CALLS comes
+ * last, after CLIENT HISTORY, and is rendered even when nothing else is on
+ * file.
  */
 export function formatRequestOrgContext(input: RequestOrgContextInput): string {
   const { org, brands, recentRequests, history } = input
-  if (!org && brands.length === 0 && recentRequests.length === 0 && !history) return ''
+  const callBlock = formatCallAgreements(input.callAgreements ?? [], input.audience ?? 'client')
+  const hasOnFile = !!org || brands.length > 0 || recentRequests.length > 0 || !!history
+  if (!hasOnFile) return callBlock
 
   const lines: string[] = ['CLIENT ON FILE (do not ask for anything already listed here):']
 
@@ -150,6 +203,7 @@ export function formatRequestOrgContext(input: RequestOrgContextInput): string {
 
   const blocks = [lines.join('\n')]
   if (history) blocks.push(formatClientHistory(history))
+  if (callBlock) blocks.push(callBlock)
   return blocks.join('\n\n')
 }
 
@@ -210,6 +264,300 @@ export function formatClientHistory(stats: ClientHistoryStats): string {
   return lines.join('\n')
 }
 
+// ── FROM RECENT CALLS (CN.3) ─────────────────────────────────────────────────
+
+/** Most agreements the block names. */
+export const CALL_AGREEMENT_LIMIT = 8
+
+/** How far back an applied suggestion still counts as a recent agreement. */
+export const CALL_AGREEMENT_WINDOW_DAYS = 180
+
+/** The block's ceiling, about 350 tokens. Oldest lines go first. */
+export const CALL_BLOCK_MAX_CHARS = 1400
+
+/** Rows the loader reads before the rules below pick from them. */
+const CALL_AGREEMENT_SCAN_LIMIT = 30
+
+/** Longest a quote gets on the studio audience, ellipsis included. */
+const CALL_QUOTE_MAX_CHARS = 120
+
+/** Longest a title gets on either audience, so one runaway title cannot eat
+ *  the block's budget on its own. */
+const CALL_TITLE_MAX_CHARS = 120
+
+/**
+ * The request kinds a client may see. request_note is left out on purpose: it
+ * is a line on the request's internal thread, not something the client filed.
+ * The task kinds are left out because tasks are the studio's own.
+ */
+const CLIENT_CALL_KINDS: readonly string[] = ['create_request', 'update_request', 'hand_off_request']
+
+/** task_suggestions.source_kind for a row read off a call transcript. The
+ *  other value today is 'note', a Slack DM (lib/slack/notes.ts). */
+const CALL_SOURCE_KIND = 'call'
+
+/** Every request kind, for deciding whether a row names a request or a task. */
+const REQUEST_CALL_KINDS: readonly string[] = [...CLIENT_CALL_KINDS, 'request_note']
+
+/** The task kinds, the studio's own follow ups. */
+const TASK_CALL_KINDS: readonly string[] = ['create_task', 'update_task', 'complete_task', 'add_subtasks', 'note']
+
+/** A kind in words, for the studio lines and the last resort title. */
+const CALL_KIND_WORDS: Record<string, string> = {
+  create_request: 'new request',
+  update_request: 'request update',
+  hand_off_request: 'handed to the client',
+  request_note: 'note on the request',
+  create_task: 'new task',
+  update_task: 'task update',
+  complete_task: 'marked done',
+  add_subtasks: 'checklist added',
+  note: 'note on the task',
+}
+
+/**
+ * One applied suggestion joined to what it touched, the shape the loader
+ * reads. Every column from a joined table is nullable because the joins are
+ * left joins: a deleted task or a transcript that was never linked still
+ * leaves the suggestion row standing.
+ */
+export interface CallAgreementRow {
+  orgId: string | null
+  /** task_suggestions.source_kind: 'call' for a transcript, 'note' for a
+   *  Slack DM. */
+  sourceKind: string | null
+  kind: string
+  status: string
+  appliedAt: string | null
+  appliedTaskId: string | null
+  appliedRequestId: string | null
+  quote: string | null
+  proposal: string | null
+  requestId: string | null
+  requestOrgId: string | null
+  requestBrandId?: string | null
+  requestNumber: number | null
+  requestTitle: string | null
+  requestIsInternal: boolean | null
+  requestStatus: string | null
+  taskId: string | null
+  taskOrgId: string | null
+  taskTitle: string | null
+  callReceivedAt: string | null
+}
+
+function kindWords(kind: string): string {
+  return CALL_KIND_WORDS[kind] ?? kind.replace(/_/g, ' ')
+}
+
+/** The en and em dash, built from their code points so this source file
+ *  never carries either character itself. */
+const DASH_CLASS = `[${String.fromCharCode(0x2013)}${String.fromCharCode(0x2014)}]`
+
+/** A dash with a space on at least one side reads as a clause break. */
+const SPACED_DASH = new RegExp(`\\s*${DASH_CLASS}\\s+|\\s+${DASH_CLASS}\\s*`, 'g')
+
+/** A dash between two characters reads as a range or a compound. */
+const BARE_DASH = new RegExp(DASH_CLASS, 'g')
+
+/**
+ * One line of prompt text from a stored string: whitespace collapsed so an
+ * item can never spill onto a second line, and em or en dashes (a verbatim
+ * transcript line carries them) swapped for a comma or a hyphen so the
+ * block never shows the model the punctuation the brand voice bans.
+ */
+function flatten(value: string): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(SPACED_DASH, ', ')
+    .replace(BARE_DASH, '-')
+    .replace(/^,\s*|,\s*$/g, '')
+    .trim()
+}
+
+/** Flatten, then clip to `max` characters, the ellipsis included. */
+function clipLine(value: string, max: number): string {
+  const flat = flatten(value)
+  if (flat.length <= max) return flat
+  const cut = flat.slice(0, max - 3)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd()}...`
+}
+
+/** The yyyy-mm-dd at the front of an ISO stamp, or null when there is none. */
+function datePart(value: string | null): string | null {
+  if (!value) return null
+  const match = /^\d{4}-\d{2}-\d{2}/.exec(value)
+  return match ? match[0] : null
+}
+
+/** The title a stored proposal carries, or '' when it has none or will not parse. */
+function proposalTitle(raw: string | null): string {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed && typeof parsed === 'object' && typeof (parsed as { title?: unknown }).title === 'string') {
+      return (parsed as { title: string }).title
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+/**
+ * Pure: picks what the FROM RECENT CALLS block names, from rows the loader
+ * read. Every rule is applied here in JavaScript even where the query already
+ * applied it, so the privacy rules hold whatever the rows came from.
+ *
+ * Both audiences: the row must be applied and belong to `orgId`; newest first
+ * by applied date; one line per request or task (the newest row wins); at
+ * most CALL_AGREEMENT_LIMIT.
+ *
+ * Client: only rows read off a call (source_kind 'call'), because every line
+ * says "from the call" and a request filed from somebody's Slack DM was not
+ * agreed on one; only create_request, update_request and hand_off_request;
+ * and only when the request they touched still exists, belongs to `orgId`,
+ * is not internal and is not archived, which is exactly what the portal
+ * request list shows. The title is the request's current title, never the
+ * proposal's, and there is never a quote.
+ *
+ * Studio: request kinds, plus task kinds only with a trusted Tasks grant,
+ * from a call or a Slack note (a note row is marked
+ * fromNote so its line says so), titled from the request or task it touched
+ * (then the proposal's title, then the kind itself), with the quote clipped.
+ * A row whose request or task has since moved to another client is dropped
+ * rather than naming that client's work here.
+ */
+export function selectCallAgreements(
+  rows: readonly CallAgreementRow[],
+  orgId: string,
+  audience: OrgContextAudience,
+  brandIds: readonly string[] | null = null,
+  includeTasks: boolean = false,
+): CallAgreement[] {
+  const ordered = rows
+    .filter(row => row.status === 'applied' && row.orgId === orgId && !!datePart(row.appliedAt))
+    .sort((a, b) => (b.appliedAt ?? '').localeCompare(a.appliedAt ?? ''))
+
+  const seen = new Set<string>()
+  const picked: CallAgreement[] = []
+
+  for (const row of ordered) {
+    if (picked.length >= CALL_AGREEMENT_LIMIT) break
+    const isRequestKind = REQUEST_CALL_KINDS.includes(row.kind)
+    const isTaskKind = TASK_CALL_KINDS.includes(row.kind)
+
+    let title: string
+    let quote: string | null = null
+    if (audience === 'client') {
+      if (row.sourceKind !== CALL_SOURCE_KIND) continue
+      if (!CLIENT_CALL_KINDS.includes(row.kind)) continue
+      if (!row.requestId || row.requestOrgId !== orgId) continue
+      if (row.requestIsInternal !== false || row.requestStatus === 'archived') continue
+      if (brandIds !== null && (!row.requestBrandId || !brandIds.includes(row.requestBrandId))) continue
+      title = row.requestTitle ?? ''
+    } else {
+      if (!includeTasks && !isRequestKind) continue
+      if (row.requestId && row.requestOrgId !== orgId) continue
+      if (row.taskId && row.taskOrgId && row.taskOrgId !== orgId) continue
+      const joined = isRequestKind ? row.requestTitle : isTaskKind ? row.taskTitle : (row.requestTitle ?? row.taskTitle)
+      title = joined || proposalTitle(row.proposal)
+      quote = row.quote && flatten(row.quote) ? clipLine(row.quote, CALL_QUOTE_MAX_CHARS) : null
+    }
+
+    title = clipLine(title, CALL_TITLE_MAX_CHARS)
+    if (!title) {
+      if (audience === 'client') continue
+      const words = kindWords(row.kind)
+      title = `${words.charAt(0).toUpperCase()}${words.slice(1)}`
+    }
+
+    const itemId = isRequestKind ? row.appliedRequestId ?? row.requestId : isTaskKind ? row.appliedTaskId ?? row.taskId : null
+    if (itemId) {
+      const key = `${isRequestKind ? 'request' : 'task'}:${itemId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+
+    picked.push({
+      kind: row.kind,
+      requestNumber: isRequestKind ? row.requestNumber ?? null : null,
+      title,
+      callDate: datePart(row.callReceivedAt),
+      appliedOn: datePart(row.appliedAt) ?? '',
+      quote,
+      ...(audience === 'studio' && row.sourceKind !== CALL_SOURCE_KIND ? { fromNote: true as const } : {}),
+    })
+  }
+
+  return picked
+}
+
+/**
+ * The client line's tail, in the client's own terms.
+ *
+ * A hand-off says what happened, not what is true now: "handed to your team",
+ * never "waiting on you". The line is read to whichever contact opens the
+ * wizard, who may not be the person it was handed to, and the hand-off may
+ * since have been handed back or taken back by the studio.
+ */
+function clientCallPhrase(kind: string, callDate: string | null): string | null {
+  switch (kind) {
+    case 'create_request':
+      return callDate ? `filed from the call on ${callDate}` : 'filed from a call'
+    case 'update_request':
+      return callDate ? `updated after the call on ${callDate}` : 'updated after a call'
+    case 'hand_off_request':
+      return callDate ? `handed to your team after the call on ${callDate}` : 'handed to your team after a call'
+    default:
+      return null
+  }
+}
+
+/**
+ * Pure formatter for the FROM RECENT CALLS block. Returns '' when there is
+ * nothing to name. Items arrive newest first; when the block would pass
+ * CALL_BLOCK_MAX_CHARS the oldest lines are dropped until it fits.
+ *
+ * The client audience re-checks the kind and never prints a quote even if an
+ * item carries one, so a caller that built items by hand cannot leak a
+ * transcript line into the portal.
+ */
+export function formatCallAgreements(items: readonly CallAgreement[], audience: OrgContextAudience): string {
+  const lines: string[] = []
+  for (const item of items) {
+    const title = clipLine(item.title, CALL_TITLE_MAX_CHARS)
+    if (!title) continue
+    if (audience === 'client') {
+      const phrase = clientCallPhrase(item.kind, item.callDate)
+      if (!phrase) continue
+      const name = item.requestNumber != null ? `#${item.requestNumber} ${title}` : title
+      lines.push(`- ${name}, ${phrase}`)
+    } else {
+      const name = item.requestNumber != null
+        ? `#${item.requestNumber} ${title}`
+        : TASK_CALL_KINDS.includes(item.kind) ? `Task: ${title}` : `Request: ${title}`
+      const when = item.fromNote ? ', Slack note' : item.callDate ? `, call ${item.callDate}` : ''
+      const quote = item.quote ? clipLine(item.quote, CALL_QUOTE_MAX_CHARS) : ''
+      lines.push(`- ${name} (${kindWords(item.kind)}${when})${quote ? `: "${quote}"` : ''}`)
+    }
+  }
+  if (lines.length === 0) return ''
+
+  const header = audience === 'client'
+    ? 'FROM RECENT CALLS (agreed on a call with the studio and already filed; never draft these again):'
+    : 'FROM RECENT CALLS (applied from call notes; already filed):'
+  const render = () => [header, ...lines].join('\n')
+  let text = render()
+  while (text.length > CALL_BLOCK_MAX_CHARS && lines.length > 0) {
+    lines.pop()
+    text = render()
+  }
+  return lines.length > 0 ? text : ''
+}
+
 /**
  * The prompt rules both wizard routes append under their static "CLIENT
  * CONTEXT" heading. Lives here, not duplicated in each route's system
@@ -219,14 +567,128 @@ export function formatClientHistory(stats: ClientHistoryStats): string {
  * lib module and each route imports and interpolates it.
  */
 export const CLIENT_HISTORY_PROMPT_RULES = `- If a CLIENT HISTORY section below states this client's request counts, categories, plan, or tracks, treat all of it as already known. Never ask what work this client has had done before, what plan or tracks they are on, or how many requests they have filed.
-- If the client asks what they are not doing, what is missing, or what to try next, answer from the coverage gaps and the plan named in CLIENT HISTORY in two sentences, then continue scoping the request in front of you. A full account review is a separate feature; do not attempt one here.`
+- If the client asks what they are not doing, what is missing, or what to try next, answer from the coverage gaps and the plan named in CLIENT HISTORY in two sentences, then continue scoping the request in front of you. A full account review is a separate feature; do not attempt one here.
+- If FROM RECENT CALLS lists something that matches what is being asked, it was already agreed on a call and filed: name it by its number and do not draft it again. If the ask adds to it, draft only the addition.`
+
+/**
+ * Read the applied call suggestions for one org and pick what FROM RECENT
+ * CALLS names. Applied in the last CALL_AGREEMENT_WINDOW_DAYS before `at`,
+ * newest first, a scan of CALL_AGREEMENT_SCAN_LIMIT rows, each joined to the
+ * request and task it touched and the transcript it came from. The client
+ * audience narrows the scan to the kinds it may see, so a busy run of studio
+ * tasks cannot crowd its requests out of the scan. selectCallAgreements then
+ * applies every rule again.
+ *
+ * Never throws: a failed read (a database where a column never landed, a
+ * slow D1) returns [] and the rest of the context still loads.
+ */
+export async function loadCallAgreements(
+  drizzle: Drizzle,
+  orgId: string,
+  audience: OrgContextAudience,
+  at: Date = new Date(),
+  brandIds?: readonly string[] | null,
+  includeTasks: boolean = false,
+): Promise<CallAgreement[]> {
+  // Undefined is an unresolved client scope, not the org-wide permission a
+  // known contact with no brand links holds. Studio reads need no client seat.
+  if (audience === 'client' && (brandIds === undefined || brandIds?.length === 0)) return []
+  try {
+    const since = new Date(at.getTime() - CALL_AGREEMENT_WINDOW_DAYS * 86_400_000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, 'Z')
+    const conditions = [
+      eq(schema.taskSuggestions.status, 'applied'),
+      eq(schema.taskSuggestions.orgId, orgId),
+      gte(schema.taskSuggestions.appliedAt, since),
+    ]
+    if (audience === 'client') {
+      conditions.push(eq(schema.taskSuggestions.sourceKind, CALL_SOURCE_KIND))
+      conditions.push(inArray(schema.taskSuggestions.kind, [...CLIENT_CALL_KINDS]))
+      conditions.push(clientRequestWhere(orgId, brandIds ?? null))
+    } else if (!includeTasks) {
+      // Filter before LIMIT so task activity cannot crowd out requests for
+      // a studio seat without Tasks. Unknown kinds also fail closed.
+      conditions.push(inArray(schema.taskSuggestions.kind, [...REQUEST_CALL_KINDS]))
+    }
+
+    const rows: CallAgreementRow[] = await drizzle
+      .select({
+        orgId: schema.taskSuggestions.orgId,
+        sourceKind: schema.taskSuggestions.sourceKind,
+        kind: schema.taskSuggestions.kind,
+        status: schema.taskSuggestions.status,
+        appliedAt: schema.taskSuggestions.appliedAt,
+        appliedTaskId: schema.taskSuggestions.appliedTaskId,
+        appliedRequestId: schema.taskSuggestions.appliedRequestId,
+        quote: schema.taskSuggestions.quote,
+        proposal: schema.taskSuggestions.proposal,
+        requestId: schema.requests.id,
+        requestOrgId: schema.requests.orgId,
+        requestBrandId: schema.requests.brandId,
+        requestNumber: schema.requests.requestNumber,
+        requestTitle: schema.requests.title,
+        requestIsInternal: schema.requests.isInternal,
+        requestStatus: schema.requests.status,
+        taskId: schema.tasks.id,
+        taskOrgId: schema.tasks.orgId,
+        taskTitle: schema.tasks.title,
+        callReceivedAt: schema.callTranscripts.receivedAt,
+      })
+      .from(schema.taskSuggestions)
+      .leftJoin(schema.requests, eq(schema.requests.id, schema.taskSuggestions.appliedRequestId))
+      .leftJoin(schema.tasks, eq(schema.tasks.id, schema.taskSuggestions.appliedTaskId))
+      .leftJoin(schema.callTranscripts, eq(schema.callTranscripts.id, schema.taskSuggestions.transcriptId))
+      .where(and(...conditions))
+      .orderBy(desc(schema.taskSuggestions.appliedAt))
+      .limit(CALL_AGREEMENT_SCAN_LIMIT)
+
+    return selectCallAgreements(rows, orgId, audience, brandIds ?? null, includeTasks)
+  } catch {
+    return []
+  }
+}
+
+/** The same tenant, brand and external-request fence as the portal list. */
+function clientRequestWhere(orgId: string, brandIds: readonly string[] | null): SQL {
+  return and(
+    eq(schema.requests.orgId, orgId),
+    eq(schema.requests.isInternal, false),
+    ne(schema.requests.status, 'archived'),
+    brandIds !== null ? inArray(schema.requests.brandId, [...brandIds]) : undefined,
+  )!
+}
 
 /**
  * Load and format the context block for one org. Every read is scoped to
  * `orgId`, which the caller has already resolved to the caller's own
  * organisation, never taken from anywhere else on the request body.
+ *
+ * `audience` decides what FROM RECENT CALLS may carry. It defaults to
+ * 'client', the safe audience, so a caller that forgets to say gets the
+ * portal's rules rather than the studio's quotes and task titles. Client
+ * context also requires the authenticated user's contact inside this org.
  */
-export async function loadRequestOrgContext(drizzle: Drizzle, orgId: string): Promise<string> {
+export async function loadRequestOrgContext(
+  drizzle: Drizzle,
+  orgId: string,
+  options: { audience?: OrgContextAudience; userId?: string; includeTasks?: boolean } = {},
+): Promise<string> {
+  const audience: OrgContextAudience = options.audience ?? 'client'
+  let brandIds: string[] | null = null
+  if (audience === 'client') {
+    if (!options.userId) return ''
+    try {
+      const scope = await loadClientScope(drizzle, { orgId, clerkUserId: options.userId })
+      if (!scope.contactId) return ''
+      brandIds = scope.brandIds
+    } catch {
+      // A missing or failed contact/brand read must never open the org-wide
+      // history. The wizard can ask questions without private context.
+      return ''
+    }
+  }
+  const requestWhere = audience === 'client' ? clientRequestWhere(orgId, brandIds) : eq(schema.requests.orgId, orgId)
   const [orgRow] = await drizzle
     .select({
       name: schema.organisations.name,
@@ -244,14 +706,14 @@ export async function loadRequestOrgContext(drizzle: Drizzle, orgId: string): Pr
   const brandRows = await drizzle
     .select({ name: schema.brands.name, website: schema.brands.website })
     .from(schema.brands)
-    .where(eq(schema.brands.orgId, orgId))
+    .where(and(eq(schema.brands.orgId, orgId), brandIds !== null ? inArray(schema.brands.id, brandIds) : undefined))
 
   // The `brands` table is the current source (migration 0093); a client
   // onboarded before it exists may still only carry the legacy JSON array of
   // brand names on the org row. Used only when the table has nothing, so a
   // migrated client is never shown both.
   let brands: OrgContextBrand[] = brandRows.map(b => ({ name: b.name, website: b.website ?? null }))
-  if (brands.length === 0 && orgRow) {
+  if (brands.length === 0 && orgRow && brandIds === null) {
     const [legacy] = await drizzle
       .select({ brands: schema.organisations.brands })
       .from(schema.organisations)
@@ -268,20 +730,28 @@ export async function loadRequestOrgContext(drizzle: Drizzle, orgId: string): Pr
     }
   }
 
+  // The client audience reads what the portal's own list shows, which never
+  // includes an internal request: its title is the studio's, and the portal
+  // wizard's model would otherwise be free to name it to the client.
   const recentRequests = await drizzle
     .select({ title: schema.requests.title, category: schema.requests.category })
     .from(schema.requests)
-    .where(eq(schema.requests.orgId, orgId))
+    .where(requestWhere)
     .orderBy(desc(schema.requests.createdAt))
     .limit(RECENT_REQUEST_LIMIT)
 
-  const history = orgRow ? await loadClientHistoryStats(drizzle, orgId, orgRow) : null
+  const history = orgRow ? await loadClientHistoryStats(drizzle, orgId, orgRow, requestWhere, audience) : null
+  // Only a server permission check may set includeTasks. Audience alone is
+  // not permission to see task titles, proposals or transcript quotes.
+  const callAgreements = await loadCallAgreements(drizzle, orgId, audience, new Date(), brandIds, options.includeTasks === true)
 
   return formatRequestOrgContext({
     org: orgRow ? { name: orgRow.name, industry: orgRow.industry ?? null, website: orgRow.website ?? null } : null,
     brands,
     recentRequests,
     history,
+    callAgreements,
+    audience,
   })
 }
 
@@ -303,6 +773,8 @@ async function loadClientHistoryStats(
   drizzle: Drizzle,
   orgId: string,
   orgRow: OrgHistoryRow,
+  requestWhere: SQL,
+  audience: OrgContextAudience,
 ): Promise<ClientHistoryStats> {
   const now = new Date()
   const twelveMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 12, now.getUTCDate())).toISOString()
@@ -315,7 +787,7 @@ async function loadClientHistoryStats(
       createdAt: schema.requests.createdAt,
     })
     .from(schema.requests)
-    .where(eq(schema.requests.orgId, orgId))
+    .where(requestWhere)
 
   const categoryCountsAllTime: Record<string, number> = {}
   const categoryCountsRecent: Record<string, number> = {}
@@ -387,10 +859,13 @@ async function loadClientHistoryStats(
   let hoursLast90Days: number | null = null
   try {
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-    const hourRows = await drizzle
+    const hoursQuery = drizzle
       .select({ hours: schema.timeEntries.hours })
       .from(schema.timeEntries)
-      .where(and(eq(schema.timeEntries.orgId, orgId), gte(schema.timeEntries.date, ninetyDaysAgo)))
+    const hourRows = audience === 'client'
+      ? await hoursQuery.innerJoin(schema.requests, eq(schema.requests.id, schema.timeEntries.requestId))
+        .where(and(eq(schema.timeEntries.orgId, orgId), gte(schema.timeEntries.date, ninetyDaysAgo), requestWhere))
+      : await hoursQuery.where(and(eq(schema.timeEntries.orgId, orgId), gte(schema.timeEntries.date, ninetyDaysAgo)))
     hoursLast90Days = Math.round(hourRows.reduce((sum, r) => sum + r.hours, 0) * 10) / 10
   } catch {
     hoursLast90Days = null

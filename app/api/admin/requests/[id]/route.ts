@@ -9,6 +9,7 @@ import { loadWaitingOnOne } from '@/lib/request-handoff'
 // bulk PATCH cannot drift from this one), the access rule, the assignment
 // ping and the status fan-out all live in the shared writer.
 import { updateRequestRecord, type RequestPatchInput } from '@/lib/request-writes'
+import { diffWorkFields, queueWorkSync, workSyncArmed } from '@/lib/slack/work-sync'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -242,9 +243,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // Access scoping
+  // Access scoping. The status rides along as the before-state of the Slack
+  // thread line, so archiving an archived request tells nobody anything.
   const [ownerRow] = await drizzle
-    .select({ orgId: schema.requests.orgId })
+    .select({ orgId: schema.requests.orgId, status: schema.requests.status })
     .from(schema.requests)
     .where(eq(schema.requests.id, id))
     .limit(1)
@@ -256,6 +258,19 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     .update(schema.requests)
     .set({ status: 'archived', updatedAt: new Date().toISOString() })
     .where(and(eq(schema.requests.id, id)))
+
+  // A request that came from a Slack card says so in the card's thread (CN.3).
+  if (workSyncArmed()) {
+    const changes = diffWorkFields({ status: ownerRow?.status }, { status: 'archived' })
+    if (changes.length > 0) {
+      await queueWorkSync(drizzle, [{
+        entityType: 'request',
+        entityId: id,
+        actor: { type: 'studio', clerkUserId: userId ?? null },
+        changes,
+      }])
+    }
+  }
 
   return NextResponse.json({ success: true })
 }

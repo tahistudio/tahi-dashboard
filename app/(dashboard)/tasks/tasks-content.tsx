@@ -45,6 +45,7 @@ import { apiPath } from '@/lib/api'
 import { PageHeader } from '@/components/tahi/page-header'
 import { useToast } from '@/components/tahi/toast'
 import { useImpersonation } from '@/components/tahi/impersonation-banner'
+import { useFeature } from '@/components/tahi/permissions-context'
 import { RailLayout } from '@/components/tahi/rail/rail-layout'
 import {
   SaveDefaultControl,
@@ -244,15 +245,22 @@ export function TasksContent() {
   const searchParams = useSearchParams()
   const { mutate: mutateKey } = useSWRConfig()
   const rail = useTasksRailState()
+  const canReadRequests = useFeature('requests')
+  const canReadTasks = useFeature('tasks')
+  const suggestionsAllowed = canReadRequests && canReadTasks
 
   // The Tasks surface otherwise has no URL-override layer (see
   // use-tasks-rail-state.ts), but the overview's suggestions card links to
   // /tasks?view=suggestions and has to land on that view. Runs once: after
   // the first paint the switcher, not the address bar, owns rail.view.
   useEffect(() => {
-    if (searchParams.get('view') === 'suggestions') rail.setView('suggestions')
+    if (suggestionsAllowed && searchParams.get('view') === 'suggestions') rail.setView('suggestions')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!suggestionsAllowed && rail.view === 'suggestions') rail.setView('list')
+  }, [suggestionsAllowed, rail.view, rail.setView])
 
   const {
     isImpersonatingTeamMember,
@@ -980,7 +988,7 @@ export function TasksContent() {
     />
   )
 
-  const suggestionsBody = (
+  const suggestionsBody = suggestionsAllowed ? (
     <TasksSuggestions
       clients={clients}
       peopleList={peopleList}
@@ -989,7 +997,7 @@ export function TasksContent() {
       onRequestCreated={id => router.push(`/requests/${id}`)}
       onCountChange={setSuggestionsCount}
     />
-  )
+  ) : null
 
   const listBody = (
     <TasksList
@@ -1097,7 +1105,7 @@ export function TasksContent() {
         <RailLayout
           rail={<TasksRail {...railProps} />}
           railTouch={<TasksRail {...railProps} touch />}
-          switcher={<TasksViewSwitcher value={rail.view} onChange={rail.setView} />}
+          switcher={<TasksViewSwitcher value={rail.view} onChange={rail.setView} suggestionsAllowed={suggestionsAllowed} />}
           chips={railInert ? NO_CHIPS : chips}
           onClearChip={chip => rail.setFilters({
             ...rail.filters,

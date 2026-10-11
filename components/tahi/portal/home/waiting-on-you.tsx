@@ -48,6 +48,8 @@ export interface WaitingAction {
   /** Omitted (or undefined) renders the control disabled: a read-only lens, or
    *  an action this seat is not allowed to take. */
   onAct?: () => void
+  /** Why this action is unavailable, including the separate money boundary. */
+  reason?: string
 }
 
 export interface WaitingItem {
@@ -74,7 +76,10 @@ export interface WaitingOnYouProps {
   loading?: boolean
   /** Read-only lens (an admin previewing a client). Disables every write. */
   ro?: boolean
+  moneyRo?: boolean
   previewName?: string | null
+  /** A missing source qualifies the list, including its quiet state. */
+  partial?: string | null
   /** Empty-state CTA: opens the New request dialog. */
   onStart?: () => void
   /** True for a client with no requests at all, which gets the warmer copy. */
@@ -101,7 +106,9 @@ export function WaitingOnYou({
   items,
   loading,
   ro,
+  moneyRo,
   previewName,
+  partial,
   onStart,
   isFirstRun,
   hasOpenRequests,
@@ -109,6 +116,18 @@ export function WaitingOnYou({
   onRetry,
 }: WaitingOnYouProps) {
   const [expanded, setExpanded] = useState(false)
+  const lensNote = ro
+    ? `You are reading this as ${previewName ?? 'the client'}. Every action here is read-only in client view.`
+    : moneyRo
+      ? `You are acting as ${previewName ?? 'the client'}. Paying stays read-only; work actions remain available.`
+      : null
+  const incomplete = partial || (failed ? 'Your requests could not be checked, so this list may be incomplete.' : null)
+  const warning = incomplete ? (
+    <div className="pfh-partial">
+      <p role="status">{incomplete}</p>
+      {onRetry && <button type="button" className="pfh-btn ghost" onClick={onRetry}>Try again</button>}
+    </div>
+  ) : null
 
   // Loading first, always. A client with three deliveries waiting must never
   // read "All quiet in the studio." for the length of a round trip.
@@ -138,17 +157,14 @@ export function WaitingOnYou({
   // the fetch is still in flight, one round trip later.
   if (failed && items.length === 0) {
     return (
-      <section className="pfh-err" aria-label="Waiting on you">
-        <b>Your overview did not load.</b>
-        <p>
-          That is on us, not you. Nothing here is a reading of your account yet, so try again in a
-          moment.
-        </p>
-        {onRetry && (
-          <button type="button" className="pfh-err-cta tahi-focus-ring" onClick={onRetry}>
-            Try again
-          </button>
-        )}
+      <section className="pfh-tile" aria-label="Waiting on you">
+        <div className="pfh-head"><h2>Waiting on you</h2></div>
+        <div className="pfh-state-copy" role="status">
+          <b>Your overview did not load.</b>
+          <p>That is on us, not you. Nothing you have sent is affected.</p>
+        </div>
+        {onRetry && <button type="button" className="pfh-btn primary" onClick={onRetry}>Try again</button>}
+        {lensNote && <p className="pfh-ro"><Icon n="clock" s={13} />{lensNote}</p>}
       </section>
     )
   }
@@ -166,10 +182,12 @@ export function WaitingOnYou({
           <h2>Waiting on you</h2>
         </div>
 
+        {warning}
+
         <div className="pfh-quiet-body">
-          <b>All quiet in the studio.</b>
+          <b>{incomplete ? 'No items from the available checks.' : 'All quiet in the studio.'}</b>
           <p>
-            {isFirstRun
+            {incomplete ? 'Try the checks again to refresh this list.' : isFirstRun
               ? 'Nothing here yet. Send us the first thing and you will watch every step of it from this page.'
               : 'Nothing is waiting on you right now. We will tell you the moment there is something to look at.'}
           </p>
@@ -179,7 +197,7 @@ export function WaitingOnYou({
               plain text link, and only when there is genuinely nothing open
               to start from. Anyone with an open request reads plain copy and
               nothing to press. */}
-          {onStart && !hasOpenRequests && (
+          {onStart && !hasOpenRequests && !incomplete && (
             <button
               type="button"
               className="pfh-quiet-link"
@@ -192,10 +210,10 @@ export function WaitingOnYou({
           )}
         </div>
 
-        {ro && (
+        {lensNote && (
           <p className="pfh-ro">
             <Icon n="clock" s={13} />
-            You are reading this as {previewName ?? 'the client'}. Every action here is read-only in client view.
+            {lensNote}
           </p>
         )}
       </section>
@@ -218,8 +236,10 @@ export function WaitingOnYou({
       <div className="pfh-head">
         <h2>Waiting on you</h2>
         <span className="pfh-count">{items.length}</span>
-        <p>Everything below moves the moment you touch it.</p>
+        <p>Open an item to see what needs attention.</p>
       </div>
+
+      {warning}
 
       <ul className="pfh-list">
         {shown.map(it => (
@@ -259,10 +279,10 @@ export function WaitingOnYou({
         </button>
       )}
 
-      {ro && (
+      {lensNote && (
         <p className="pfh-ro">
           <Icon n="clock" s={13} />
-          You are reading this as {previewName ?? 'the client'}. Every action here is read-only in client view.
+          {lensNote}
         </p>
       )}
     </section>
@@ -290,7 +310,7 @@ function WaitingButton({
       className={`pfh-btn ${kind}`}
       disabled={disabled}
       onClick={disabled ? undefined : action.onAct}
-      title={ro ? `Read-only while you are viewing as ${previewName ?? 'the client'}` : undefined}
+      title={disabled ? action.reason ?? (ro ? `Read-only while you are viewing as ${previewName ?? 'the client'}` : undefined) : undefined}
     >
       {action.label}
     </button>

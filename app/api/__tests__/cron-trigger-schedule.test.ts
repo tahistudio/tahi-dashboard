@@ -82,5 +82,30 @@ describe('targetToPath', () => {
     expect(targetToPath['leads-ai']).toBe('cron/leads-ai')
     expect(targetToPath['sync-xero']).toBe('cron/sync-xero')
     expect(targetToPath['finance-anomaly-scan']).toBe('cron/finance-anomaly-scan')
+    expect(targetToPath['suggestion-digest']).toBe('cron/suggestion-digest')
+  })
+})
+
+// CN.3 section 5. The digest's window is Monday 08:00 to 09:59 in Auckland,
+// and Cloudflare only speaks UTC, so it rides both Sunday evening slots: one
+// of them lands in the window whichever side of daylight saving it is. First
+// in each list, so a slow content job ahead of it cannot push it past 10:00.
+describe('the Monday suggestions digest', () => {
+  it('fires first in the 19:30 and the 20:00 Sunday slots', () => {
+    expect(cronToTargets['30 19 * * SUN'][0]).toBe('suggestion-digest')
+    expect(cronToTargets['0 20 * * SUN'][0]).toBe('suggestion-digest')
+  })
+
+  it('keeps the jobs those slots already fired', () => {
+    expect(cronToTargets['30 19 * * SUN']).toContain('content-gap-hunt')
+    expect(cronToTargets['0 20 * * SUN']).toContain('indexing-reverser')
+  })
+
+  it('fires in no other slot', () => {
+    const slots = Object.entries(cronToTargets)
+      .filter(([, targets]) => targets.includes('suggestion-digest'))
+      .map(([cron]) => cron)
+      .sort()
+    expect(slots).toEqual(['0 20 * * SUN', '30 19 * * SUN'])
   })
 })

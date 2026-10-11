@@ -21,7 +21,7 @@
  *   THE CEILING, because three is the number in the contract and a DM that
  *   answers with nine cards is a DM nobody reads.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { schema } from '@/db/d1'
 import type { SuggestionDraft } from '@/lib/task-suggestions'
 import type { SuggestResult } from '@/lib/task-suggester'
@@ -41,17 +41,56 @@ vi.mock('@/lib/task-suggestions', async () => {
   }
 })
 
+const contextReads: Array<string | null> = []
+
 vi.mock('@/lib/task-suggester', async () => {
   const actual = await vi.importActual<typeof import('@/lib/task-suggester')>('@/lib/task-suggester')
   return {
     ...actual,
-    buildSuggestionContext: async () => ({ tasks: [], requests: [], members: [], contacts: [] }),
+    buildSuggestionContext: async (_database: unknown, orgId: string | null) => {
+      contextReads.push(orgId)
+      return { tasks: [], requests: [], members: [], contacts: [] }
+    },
   }
 })
 
-const { draftFromNote, resolveOrgFromText, MAX_NOTE_SUGGESTIONS, NOTE_REPLY_TEAM, NOTE_REPLY_CLIENT } =
-  await import('../notes')
+/** Clerk user id to the clients that person reaches; null is everything. */
+let scopeFor: (clerkUserId: string | null) => string[] | null = () => null
+const scopeLookups: Array<string | null> = []
+let grantedFeatures = new Set(['tasks', 'requests'])
+let permissionFailure = false
+let activeRoles = ['task_handler']
+
+vi.mock('@/lib/permissions', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/permissions')>('@/lib/permissions')
+  return {
+    ...actual,
+    resolvePermissions: async (_database: unknown, auth: { userId: string; orgId: string }) => {
+      if (permissionFailure) throw new Error('permissions unavailable')
+      return { ...auth, level: 'team_member', audience: 'team', isSuperAdmin: false, isAdmin: false,
+        canManagePermissions: false, viewableResources: grantedFeatures, overrides: new Map() }
+    },
+  }
+})
+
+vi.mock('@/lib/access-scoping', () => ({
+  resolveAccessScoping: async (_database: unknown, clerkUserId: string | null) => {
+    scopeLookups.push(clerkUserId)
+    return scopeFor(clerkUserId)
+  },
+}))
+
+const {
+  draftFromNote,
+  resolveOrgFromText,
+  MAX_NOTE_SUGGESTIONS,
+  NOTE_REPLY_TEAM,
+  NOTE_REPLY_CLIENT,
+  NOTE_REPLY_CLIENT_ON_FILE,
+  NOTE_REPLY_TEAM_ON_FILE,
+} = await import('../notes')
 const { SLACK_DENIED_REPLY } = await import('../identity')
+const { buildDedupeKey } = await import('@/lib/task-suggestions')
 
 type Rows = Record<string, Array<Record<string, unknown>>>
 
@@ -59,14 +98,22 @@ const TABLE_KEYS = new Map<unknown, string>([
   [schema.taskSuggestions, 'task_suggestions'],
   [schema.organisations, 'organisations'],
   [schema.contacts, 'contacts'],
+  [schema.featureVisibility, 'feature_visibility'],
+  [schema.teamMembers, 'team_members'],
+  [schema.teamMemberRoles, 'team_member_roles'],
 ])
 
+/** Ngaire's contacts row at Giant Group, which the portal gate reads. */
+const NGAIRE = { id: 'c_ngaire', orgId: 'o_giant', name: 'Ngaire Reid', portalRole: 'member', isPrimary: false }
+
 function fakeDb(rows: Rows) {
+  rows = { team_members: [{ clerkUserId: 'clerk_studio' }], ...rows }
   const name = (table: unknown): string => TABLE_KEYS.get(table) ?? 'unknown'
   function reader(table: unknown) {
-    const data = rows[name(table)] ?? []
+    const data = table === schema.teamMemberRoles ? activeRoles.map(name => ({ name })) : rows[name(table)] ?? []
     const node: Record<string, unknown> = {}
     node.where = () => node
+    node.innerJoin = () => node
     node.orderBy = () => node
     node.limit = () => node
     node.then = <T>(resolve: (value: Array<Record<string, unknown>>) => T) => Promise.resolve(data).then(resolve)
@@ -121,7 +168,16 @@ const ORGS = [
 beforeEach(() => {
   insertedDrafts.length = 0
   insertResult = { inserted: 1, duplicates: 0, similarDropped: 0 }
+  contextReads.length = 0
+  scopeLookups.length = 0
+  scopeFor = () => null
+  grantedFeatures = new Set(['tasks', 'requests'])
+  permissionFailure = false
+  activeRoles = ['task_handler']
+  vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', 'org_tahi')
 })
+
+afterEach(() => vi.unstubAllEnvs())
 
 describe('resolveOrgFromText', () => {
   it('resolves a client named exactly once', () => {
@@ -225,7 +281,7 @@ describe('draftFromNote, a team member', () => {
 
 describe('draftFromNote, a client', () => {
   it('drafts one request on their own org with them as the requester', async () => {
-    const database = fakeDb({ organisations: ORGS, task_suggestions: [] })
+    const database = fakeDb({ organisations: ORGS, task_suggestions: [], contacts: [NGAIRE] })
     let modelCalled = false
     const result = await draftFromNote({
       database,
@@ -257,7 +313,7 @@ describe('draftFromNote, a client', () => {
   })
 
   it('never files a client draft under another client named in the text', async () => {
-    const database = fakeDb({ organisations: ORGS, task_suggestions: [] })
+    const database = fakeDb({ organisations: ORGS, task_suggestions: [], contacts: [NGAIRE] })
     await draftFromNote({
       database,
       text: 'Kiwi Labs told us to ask you for the new deck',
@@ -277,6 +333,170 @@ describe('draftFromNote, a client', () => {
     expect(result.reason).toBe('denied')
     expect(result.reply).toBe(SLACK_DENIED_REPLY)
     expect(insertedDrafts).toHaveLength(0)
+  })
+
+  const NGAIRE_ID = identity({ level: 'client', email: 'ngaire@giant.example', teamMemberId: null, contactId: 'c_ngaire', orgId: 'o_giant' })
+
+  it('offers no card to a client whose Requests feature is denied for their org, as the portal refuses them', async () => {
+    const database = fakeDb({
+      organisations: ORGS,
+      task_suggestions: [],
+      contacts: [NGAIRE],
+      feature_visibility: [{ featureKey: 'requests', effect: 'deny' }],
+    })
+    const result = await draftFromNote({ database, text: 'Can you change the hero image?', identity: NGAIRE_ID })
+    expect(result.reason).toBe('denied')
+    expect(result.reply).toBe(SLACK_DENIED_REPLY)
+    expect(result.rows).toEqual([])
+    expect(insertedDrafts).toHaveLength(0)
+  })
+
+  it('offers no card to a contact the database does not place at that client', async () => {
+    const database = fakeDb({ organisations: ORGS, task_suggestions: [], contacts: [] })
+    const result = await draftFromNote({ database, text: 'Can you change the hero image?', identity: NGAIRE_ID })
+    expect(result.reason).toBe('denied')
+    expect(insertedDrafts).toHaveLength(0)
+  })
+
+  it("shows the sender's own pending draft read back by key, and never another contact's row under the same key", async () => {
+    const text = 'Hi Liam! Can you change the hero image?'
+    const key = await buildDedupeKey({
+      sourceKind: 'note', transcriptId: null, kind: 'create_request', proposal: { title: 'Hi Liam!' },
+      orgId: 'o_giant', approverType: 'contact', approverId: 'c_ngaire', quote: text,
+    })
+    const own = {
+      id: 's_own', kind: 'create_request', proposal: JSON.stringify({ title: 'Hi Liam!' }), quote: text,
+      dedupeKey: key, approverType: 'contact', approverId: 'c_ngaire', orgId: 'o_giant', status: 'pending',
+    }
+    const foreign = { ...own, id: 's_foreign', approverId: 'c_tama', quote: 'TAMA private words' }
+    const otherClient = { ...own, id: 's_kiwi', orgId: 'o_kiwi', quote: 'KIWI private words' }
+    const database = fakeDb({ organisations: ORGS, contacts: [NGAIRE], task_suggestions: [foreign, otherClient, own] })
+    const result = await draftFromNote({ database, text, identity: NGAIRE_ID })
+    expect(result.rows.map(row => row.id)).toEqual(['s_own'])
+    expect(JSON.stringify(result.rows)).not.toContain('private words')
+  })
+
+  it('says so in one line when the same message was sent before and that draft is no longer open', async () => {
+    insertResult = { inserted: 0, duplicates: 1, similarDropped: 0 }
+    const text = 'Can you change the hero image?'
+    const key = await buildDedupeKey({
+      sourceKind: 'note', transcriptId: null, kind: 'create_request', proposal: { title: text },
+      orgId: 'o_giant', approverType: 'contact', approverId: 'c_ngaire', quote: text,
+    })
+    const decided = {
+      id: 's_old', kind: 'create_request', proposal: JSON.stringify({ title: text }), quote: text,
+      dedupeKey: key, approverType: 'contact', approverId: 'c_ngaire', orgId: 'o_giant', status: 'applied',
+    }
+    const database = fakeDb({ organisations: ORGS, contacts: [NGAIRE], task_suggestions: [decided] })
+    const result = await draftFromNote({ database, text, identity: NGAIRE_ID })
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('already_on_file')
+    expect(result.reply).toBe(NOTE_REPLY_CLIENT_ON_FILE)
+    expect(result.rows).toEqual([])
+  })
+})
+
+describe('draftFromNote, a studio note about a client the sender cannot reach (rule 11)', () => {
+  const NATHAN = identity({ level: 'member', teamMemberId: 'tm_nathan', email: 'nathan@tahi.studio' })
+
+  it('refuses before the model reads that client, and files nothing', async () => {
+    scopeFor = () => ['o_kiwi']
+    let modelCalled = false
+    const database = fakeDb({ organisations: ORGS, task_suggestions: [], team_members: [{ clerkUserId: 'clerk_nathan' }] })
+    const result = await draftFromNote({
+      database,
+      text: 'I will send the font headers to Giant Group',
+      identity: NATHAN,
+      suggest: async () => { modelCalled = true; throw new Error('must not be called') },
+    })
+    expect(result.reason).toBe('denied')
+    expect(result.reply).toBe(SLACK_DENIED_REPLY)
+    expect(modelCalled).toBe(false)
+    expect(contextReads).toEqual([])
+    expect(scopeLookups).toEqual(['clerk_nathan'])
+    expect(insertedDrafts).toHaveLength(0)
+  })
+
+  it('lets the same member file a note about a client in their scope', async () => {
+    scopeFor = () => ['o_giant']
+    const database = fakeDb({ organisations: ORGS, task_suggestions: [], team_members: [{ clerkUserId: 'clerk_nathan' }] })
+    const result = await draftFromNote({
+      database,
+      text: 'I will send the font headers to Giant Group',
+      identity: NATHAN,
+      suggest: suggesterReturning([suggestion()]),
+    })
+    expect(result.ok).toBe(true)
+    expect(contextReads).toEqual(['o_giant'])
+  })
+
+  it('refuses a null-org note without organisation access before reading context', async () => {
+    scopeFor = () => []
+    const database = fakeDb({ organisations: ORGS, task_suggestions: [] })
+    const result = await draftFromNote({
+      database,
+      text: 'remember to renew the domain before it lapses',
+      identity: NATHAN,
+      suggest: suggesterReturning([suggestion({ quote: 'remember to renew the domain before it lapses' })]),
+    })
+    expect(result.ok).toBe(false)
+    expect(scopeLookups).toEqual(['clerk_studio'])
+    expect(contextReads).toEqual([])
+    expect(insertedDrafts).toEqual([])
+  })
+
+  it('answers a repeat of a note already on file with one line rather than an empty card list', async () => {
+    insertResult = { inserted: 0, duplicates: 1, similarDropped: 0 }
+    const database = fakeDb({ organisations: ORGS, task_suggestions: [] })
+    const result = await draftFromNote({
+      database,
+      text: 'remember to renew the domain before it lapses',
+      identity: NATHAN,
+      suggest: suggesterReturning([suggestion({ quote: 'remember to renew the domain before it lapses' })]),
+    })
+    expect(result.reason).toBe('already_on_file')
+    expect(result.reply).toBe(NOTE_REPLY_TEAM_ON_FILE)
+  })
+})
+
+describe('studio note feature grants before context or cards', () => {
+  it.each([
+    ['tasks', 'send the headers to Giant Group'],
+    ['requests', 'send the headers to Giant Group'],
+    ['tasks', 'renew the studio domain'],
+    ['requests', 'renew the studio domain'],
+  ])('refuses denied %s for %s', async (feature, text) => {
+    grantedFeatures.delete(feature)
+    const suggest = vi.fn(suggesterReturning([suggestion()]))
+    const result = await draftFromNote({ database: fakeDb({ organisations: ORGS }), text,
+      identity: identity({ level: 'member', teamMemberId: 'tm_nathan' }), suggest })
+    expect(result.ok).toBe(false)
+    expect(result.reply).toBe(SLACK_DENIED_REPLY)
+    expect(contextReads).toEqual([])
+    expect(suggest).not.toHaveBeenCalled()
+    expect(insertedDrafts).toEqual([])
+  })
+
+  it.each(['roleless', 'missing login', 'permission failure', 'missing studio org'])('fails closed for %s', async failure => {
+    if (failure === 'roleless') activeRoles = []
+    if (failure === 'permission failure') permissionFailure = true
+    if (failure === 'missing studio org') vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', '')
+    const database = fakeDb({ organisations: ORGS, ...(failure === 'missing login' ? { team_members: [] } : {}) })
+    const suggest = vi.fn(suggesterReturning([suggestion()]))
+    const result = await draftFromNote({ database, text: 'renew the studio domain', identity: identity(), suggest })
+    expect(result.ok).toBe(false)
+    expect(contextReads).toEqual([])
+    expect(suggest).not.toHaveBeenCalled()
+    expect(insertedDrafts).toEqual([])
+  })
+
+  it('allows a null-org note with both features and some organisation access', async () => {
+    scopeFor = () => ['o_giant']
+    const result = await draftFromNote({ database: fakeDb({ organisations: ORGS }), text: 'renew the studio domain',
+      identity: identity({ level: 'member' }), suggest: suggesterReturning([suggestion()]) })
+    expect(result.ok).toBe(true)
+    expect(contextReads).toEqual([null])
+    expect(insertedDrafts).toHaveLength(1)
   })
 })
 

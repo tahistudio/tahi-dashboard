@@ -26,13 +26,21 @@
  *
  *   THE CLIENT PATH, which never reaches the model. A client's DM IS the
  *   request. Running it through a suggester would hand them a paraphrase to
- *   approve, and the paraphrase is the part nobody can check.
+ *   approve, and the paraphrase is the part nobody can check. It is open
+ *   only to a client the portal would let file a request (the 'requests'
+ *   feature, lib/slack/entitlement.ts).
+ *
+ * And one thing is guaranteed here: A CARD ONLY EVER SHOWS THE SENDER'S OWN
+ * ROW. A note's dedupe key carries whose it is (and for a client, their
+ * whole message), and every row read back is held to noteRowBelongsTo, so
+ * two people who open their DMs the same way ("Hi Liam!") each get their own
+ * card, and nobody is ever shown somebody else's words.
  */
 
 import { eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import {
-  buildDedupeKey,
+  dedupeKeyForDraft,
   insertSuggestions,
   type SuggestionDraft,
   type SuggestionKind,
@@ -42,6 +50,7 @@ import {
   suggestFromTranscript,
   type SuggestFn,
 } from '@/lib/task-suggester'
+import { clientMayFileRequests, studioReachesOrg } from './entitlement'
 import { SLACK_DENIED_REPLY, can, isStudioLevel, type SlackIdentity } from './identity'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -65,15 +74,64 @@ export const NOTE_REPLY_TEAM = 'Here is what I understood.'
 export const NOTE_REPLY_CLIENT = 'Is this the request?'
 export const NOTE_REPLY_NOTHING = 'I could not find anything to file from that. Say it as one clear ask and I will try again.'
 export const NOTE_REPLY_FAILED = 'I could not read that one just now. Try again in a minute.'
+/** Nothing new was filed and nothing of the sender's is still open to show. */
+export const NOTE_REPLY_TEAM_ON_FILE = 'That is already on file, so there is nothing new to approve.'
+/** The same, for a client: only ever about their own message sent again. */
+export const NOTE_REPLY_CLIENT_ON_FILE = 'You have sent that one already. If it is a new ask, say it in different words.'
 
-export type NoteDraftReason = 'ok' | 'denied' | 'empty' | 'nothing_understood' | 'suggester_failed'
+export type NoteDraftReason = 'ok' | 'denied' | 'empty' | 'nothing_understood' | 'suggester_failed' | 'already_on_file'
 
-/** One filed row, in the shape the Slack card needs. */
+/**
+ * One filed row, in the shape the Slack card needs, with whose it is.
+ *
+ * The owner fields are what noteRowBelongsTo reads: a card is only ever
+ * posted into the DM of the person the row belongs to.
+ */
 export interface NoteSuggestionRow {
   id: string
   kind: string
   proposal: unknown
   quote: string
+  approverType: string
+  approverId: string | null
+  orgId: string | null
+  status: string
+}
+
+/** The one status a card is posted for: a row still waiting on its sender. */
+const CARD_STATUS = 'pending'
+
+/**
+ * Whether this row may be shown as a card in this sender's DM.
+ *
+ *   client   their own draft (approver_type 'contact', approver_id their
+ *            contact id) at their own client, still the create_request their
+ *            card offers, still pending
+ *   studio   their own note (approver_type 'member', approver_id their team
+ *            member id), still pending
+ *
+ * Anything else, including a row the studio has since re-pointed or decided,
+ * and every row belonging to somebody else, is false. The dedupe key already
+ * scopes a note to its sender; this is the fence behind it, so no key
+ * collision, old row or future caller can put one person's words in another
+ * person's DM.
+ */
+export function noteRowBelongsTo(
+  identity: Pick<SlackIdentity, 'level' | 'teamMemberId' | 'contactId' | 'orgId'> | null,
+  row: Pick<NoteSuggestionRow, 'kind' | 'approverType' | 'approverId' | 'orgId' | 'status'>,
+): boolean {
+  if (!identity || row.status !== CARD_STATUS) return false
+  if (identity.level === 'client') {
+    return row.approverType === 'contact'
+      && !!identity.contactId && row.approverId === identity.contactId
+      && !!identity.orgId && row.orgId === identity.orgId
+      && row.kind === 'create_request'
+  }
+  if (isStudioLevel(identity.level)) {
+    return row.approverType === 'member'
+      && !!identity.teamMemberId && row.approverId === identity.teamMemberId
+  }
+  return false
 }
 
 export interface NoteDraftResult {
@@ -180,13 +238,23 @@ async function contactNameOf(database: Drizzle, contactId: string | null): Promi
  *
  * `insertSuggestions` answers with counts rather than ids, because the sweep
  * that wrote it only ever needed counts. A DM needs the ids: every button on
- * the card carries one. The keys are deterministic, so reading back by key
- * finds exactly the rows this note produced, INCLUDING the ones that were
- * duplicates of something already waiting, which is the right answer: the
- * sender asked twice and should see the card that is already open rather
- * than silence.
+ * the card carries one. The keys are deterministic and scoped to the sender
+ * (buildDedupeKey keys a note on whose it is), so reading back by key finds
+ * the rows this note produced, INCLUDING one that was a duplicate of the
+ * sender's own card still waiting, which is the right answer: the sender
+ * asked twice and should see the card that is already open rather than
+ * silence.
+ *
+ * Every row is then held to noteRowBelongsTo, in the order the keys came in:
+ * only the sender's own rows, still pending, ever come back. A row that is
+ * somebody else's, or one already decided, re-pointed or snoozed, is not
+ * shown at all.
  */
-async function readBack(database: Drizzle, keys: readonly string[]): Promise<NoteSuggestionRow[]> {
+async function readBack(
+  database: Drizzle,
+  keys: readonly string[],
+  identity: SlackIdentity,
+): Promise<NoteSuggestionRow[]> {
   if (keys.length === 0) return []
   const rows = await database
     .select({
@@ -195,19 +263,35 @@ async function readBack(database: Drizzle, keys: readonly string[]): Promise<Not
       proposal: schema.taskSuggestions.proposal,
       quote: schema.taskSuggestions.quote,
       dedupeKey: schema.taskSuggestions.dedupeKey,
+      approverType: schema.taskSuggestions.approverType,
+      approverId: schema.taskSuggestions.approverId,
+      orgId: schema.taskSuggestions.orgId,
+      status: schema.taskSuggestions.status,
     })
     .from(schema.taskSuggestions)
     .where(inArray(schema.taskSuggestions.dedupeKey, [...keys]))
 
-  const wanted = new Set(keys)
-  return rows
-    .filter(row => !row.dedupeKey || wanted.has(row.dedupeKey))
-    .map(row => ({
-      id: row.id,
-      kind: row.kind,
-      proposal: parseProposal(row.proposal),
-      quote: row.quote,
-    }))
+  const out: NoteSuggestionRow[] = []
+  const seen = new Set<string>()
+  for (const key of keys) {
+    for (const row of rows) {
+      if (row.dedupeKey !== key || seen.has(row.id)) continue
+      const candidate: NoteSuggestionRow = {
+        id: row.id,
+        kind: row.kind,
+        proposal: parseProposal(row.proposal),
+        quote: row.quote,
+        approverType: row.approverType,
+        approverId: row.approverId ?? null,
+        orgId: row.orgId ?? null,
+        status: row.status,
+      }
+      if (!noteRowBelongsTo(identity, candidate)) continue
+      seen.add(row.id)
+      out.push(candidate)
+    }
+  }
+  return out
 }
 
 function parseProposal(raw: string | null): unknown {
@@ -277,12 +361,26 @@ export async function draftFromNote(input: DraftFromNoteInput): Promise<NoteDraf
   if (!isStudioLevel(identity.level) || !can(identity, 'create_task')) return denied()
   if (!identity.teamMemberId) return denied()
 
-  return studioNoteDraft(input, identity, text)
+  return studioNoteDraft(input, identity, identity.teamMemberId, text)
+}
+
+/**
+ * Nothing new was filed and nothing of the sender's own is still open to
+ * show: the note repeats a card they already decided, or (for a studio note)
+ * something already waiting for the studio. One plain line instead of a
+ * friendly reply with no card under it.
+ */
+function alreadyOnFile(
+  base: Pick<NoteDraftResult, 'orgId' | 'orgName' | 'approverType' | 'approverId' | 'duplicates'>,
+  reply: string,
+): NoteDraftResult {
+  return { ok: false, reason: 'already_on_file', reply, inserted: 0, rows: [], ...base }
 }
 
 async function studioNoteDraft(
   input: DraftFromNoteInput,
   identity: SlackIdentity,
+  teamMemberId: string,
   text: string,
 ): Promise<NoteDraftResult> {
   const { database } = input
@@ -292,6 +390,15 @@ async function studioNoteDraft(
   const roster = await loadOrgRoster(database)
   const orgId = resolveOrgFromText(text, roster)
   const orgName = orgId ? roster.find(org => org.id === orgId)?.name ?? null : null
+
+  // Rule 11, before the model reads anything. The client is picked from the
+  // whole roster by name, and the suggester's context is that client's open
+  // tasks and requests, so a member scoped away from a client who names it in
+  // a DM would otherwise be handed a card built from that client's work. The
+  // dashboard's own scoping decides, as it does for a press on the card.
+  // Notes can propose both kinds of work. Do not load mixed context or file
+  // cards unless the sender can use both features, including with no client.
+  if (!await studioReachesOrg(database, teamMemberId, orgId, ['tasks', 'requests'])) return denied()
 
   let suggestions
   try {
@@ -312,7 +419,7 @@ async function studioNoteDraft(
       orgId,
       orgName,
       approverType: 'member',
-      approverId: identity.teamMemberId,
+      approverId: teamMemberId,
       inserted: 0,
       duplicates: 0,
       rows: [],
@@ -332,7 +439,7 @@ async function studioNoteDraft(
       orgId,
       orgName,
       approverType: 'member',
-      approverId: identity.teamMemberId,
+      approverId: teamMemberId,
       inserted: 0,
       duplicates: 0,
       rows: [],
@@ -353,11 +460,18 @@ async function studioNoteDraft(
     rationale: suggestion.rationale,
     confidence: suggestion.confidence,
     approverType: 'member',
-    approverId: identity.teamMemberId,
+    approverId: teamMemberId,
   }))
 
   const written = await insertSuggestions(database, drafts)
-  const rows = await readBack(database, await dedupeKeysFor(drafts))
+  const rows = await readBack(database, await dedupeKeysFor(drafts), identity)
+
+  if (written.inserted === 0 && rows.length === 0) {
+    return alreadyOnFile(
+      { orgId, orgName, approverType: 'member', approverId: teamMemberId, duplicates: written.duplicates },
+      NOTE_REPLY_TEAM_ON_FILE,
+    )
+  }
 
   return {
     ok: true,
@@ -366,7 +480,7 @@ async function studioNoteDraft(
     orgId,
     orgName,
     approverType: 'member',
-    approverId: identity.teamMemberId,
+    approverId: teamMemberId,
     inserted: written.inserted,
     duplicates: written.duplicates,
     rows,
@@ -384,6 +498,12 @@ async function clientRequestDraft(
   // message changes nothing: the roster is never consulted on this path, so
   // there is no code here that could file their words under somebody else.
   if (!can(identity, 'create_request_own_org') || !identity.orgId || !identity.contactId) return denied()
+
+  // THE PORTAL'S GATE, before anything is written. A contact or org whose
+  // Requests feature is denied cannot file in the portal, so they are not
+  // offered a card here either (and their Approve is refused again at the
+  // press, lib/slack/dispatch-actions.ts, in case the rule changed between).
+  if (!await clientMayFileRequests(database, identity.contactId, identity.orgId)) return denied()
 
   const requesterName = input.contactName ?? (await contactNameOf(database, identity.contactId))
   const orgName = await orgNameOf(database, identity.orgId)
@@ -416,8 +536,27 @@ async function clientRequestDraft(
     approverId: identity.contactId,
   }
 
+  // The key carries this contact, this client and their whole message
+  // (buildDedupeKey), so the row read back is this draft, or this same
+  // message sent before. A pending create_request of theirs is their own
+  // words as they sent them: nothing edits a pending draft's proposal but an
+  // attach, which also changes its kind and so is never shown. Anything else
+  // (decided, re-pointed, somebody else's) is held back by readBack.
   const written = await insertSuggestions(database, [draft])
-  const rows = await readBack(database, await dedupeKeysFor([draft]))
+  const rows = await readBack(database, await dedupeKeysFor([draft]), identity)
+
+  if (written.inserted === 0 && rows.length === 0) {
+    return alreadyOnFile(
+      {
+        orgId: identity.orgId,
+        orgName,
+        approverType: 'contact',
+        approverId: identity.contactId,
+        duplicates: written.duplicates,
+      },
+      NOTE_REPLY_CLIENT_ON_FILE,
+    )
+  }
 
   return {
     ok: true,
@@ -434,12 +573,5 @@ async function clientRequestDraft(
 }
 
 async function dedupeKeysFor(drafts: readonly SuggestionDraft[]): Promise<string[]> {
-  return Promise.all(drafts.map(draft => buildDedupeKey({
-    sourceKind: draft.sourceKind,
-    transcriptId: draft.transcriptId,
-    kind: draft.kind,
-    targetTaskId: draft.targetTaskId,
-    targetRequestId: draft.targetRequestId ?? null,
-    proposal: draft.proposal,
-  })))
+  return Promise.all(drafts.map(draft => dedupeKeyForDraft(draft)))
 }

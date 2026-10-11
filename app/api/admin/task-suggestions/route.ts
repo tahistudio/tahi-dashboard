@@ -1,11 +1,12 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/task-suggestions
  *
  * The inbox read: what a call proposed, still waiting on a founder.
  *
- * Scoped like every other task surface (Rule 11): a scoped team member sees
- * their own clients' suggestions plus the studio's own, which carry no client
- * at all. The rules live in lib/task-suggestions.ts; this route reads the
+ * A team member with a nonempty scope sees their clients' suggestions plus
+ * studio rows with no client. An empty scope admits neither and returns zero
+ * counts. The rules live in lib/task-suggestions.ts; this route reads the
  * query string and applies the scope.
  */
 
@@ -24,6 +25,9 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  // This mixed inbox includes both work families and duplicate candidates.
+  const featureDenied = await requireFeature({ userId, orgId }, ['tasks', 'requests'])
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const requestedStatus = url.searchParams.get('status')
@@ -38,8 +42,8 @@ export async function GET(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  // null means unrestricted; anything else, including [], is a filter that
-  // still admits the studio's own org-less rows.
+  // null is unrestricted; a nonempty list admits its clients plus studio rows.
+  // [] denies all suggestions and counts before any business SQL.
   const scoped = await resolveAccessScoping(drizzle, userId)
   const orgIds = scoped === null ? 'all' as const : scoped
 

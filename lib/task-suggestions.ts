@@ -30,7 +30,7 @@ import { and, eq, gte, inArray, isNull, ne, notInArray, or, desc, sql, type SQL 
 import { schema, type DB } from '@/db/d1'
 import { logAudit } from '@/lib/audit'
 import { normalizeCallInstant, STUDIO_TIME_ZONE } from '@/lib/call-time'
-import { requireAccessToOrg } from '@/lib/require-access'
+import { requireAccessToOrgOrPreClient } from '@/lib/require-access'
 import { handoffReasonShortLabel } from '@/lib/request-handoff-copy'
 import {
   createRequestRecord,
@@ -41,6 +41,7 @@ import {
 } from '@/lib/request-writes'
 import { slackBotToken } from '@/lib/slack/api'
 import { mirrorSuggestionDecision, repostSuggestion } from '@/lib/slack/mirror'
+import { resolveSubmitterBrandId } from '@/lib/submitter-brand'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import { postRequestBotMessage, postTaskComment } from '@/lib/task-comments'
 import { SIMILAR_BLOCK, SIMILAR_WARN, findSimilar, similarityScore } from '@/lib/text-similarity'
@@ -120,9 +121,30 @@ export interface AttachTarget {
 
 export type DecisionInput =
   | { action: 'approve'; proposalOverride?: unknown; force?: boolean }
-  | { action: 'reject' }
+  | { action: 'reject'; reason?: string | null }
   | { action: 'snooze'; until: string }
   | { action: 'attach'; target: AttachTarget }
+
+/**
+ * The most a reject reason may hold, after trimming (CN.3 section 7). A
+ * reason is one line the suggester reads back beside the rejected item, not
+ * an essay, and the whole block it sits in has a budget.
+ */
+export const MAX_REJECT_REASON_CHARS = 200
+
+/**
+ * A reject reason as it is stored: whitespace collapsed, trimmed, clipped to
+ * MAX_REJECT_REASON_CHARS, and null for anything that is not a string or is
+ * blank. Every surface that takes a reason (the decide route, MCP through
+ * it, a direct caller) passes through here, so "no reason" is always null
+ * rather than an empty string that reads as a reason.
+ */
+export function normaliseRejectReason(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const flat = raw.replace(/\s+/g, ' ').trim()
+  if (!flat) return null
+  return flat.slice(0, MAX_REJECT_REASON_CHARS).trim()
+}
 
 export interface DecisionContext {
   actorId: string
@@ -155,6 +177,8 @@ export interface SuggestionRow {
   appliedTaskId: string | null
   appliedRequestId: string | null
   applyError: string | null
+  /** Why a person rejected it, when they said (CN.3). Null on every other row. */
+  rejectReason: string | null
   dedupeKey: string
   slackChannelId: string | null
   slackMessageTs: string | null
@@ -232,6 +256,13 @@ export interface DecisionResult {
   error?: string
   /** What the refused create would have duplicated, best first. */
   similar?: SimilarMatch[]
+  /**
+   * True when this call stored a reject reason. A reject carrying a reason on
+   * a row that is already rejected records the reason and nothing else, and
+   * comes back `changed: false` with this set, which is how a reason picked
+   * after the Reject tap is told apart from a second Reject that did nothing.
+   */
+  reasonRecorded?: boolean
 }
 
 export interface ApplyOutcome {
@@ -447,6 +478,16 @@ export interface DedupeInput {
   targetTaskId?: string | null
   targetRequestId?: string | null
   proposal: unknown
+  /**
+   * Who the row belongs to, read only for a note (sourceKind 'note'): see
+   * noteOwnerMaterial. Ignored for a call, so every call key hashes exactly
+   * what it always did.
+   */
+  orgId?: string | null
+  approverType?: string | null
+  approverId?: string | null
+  /** A client's note keys on their whole message, not on its first sentence. */
+  quote?: string | null
 }
 
 /** JSON with its keys in a fixed order, so two equal objects hash the same. */
@@ -491,6 +532,29 @@ function normalisedTitleOrDiff(kind: SuggestionKind, proposal: unknown): string 
 }
 
 /**
+ * The extra key material for a note (sourceKind 'note', a Slack DM): whose it
+ * is, and for a client, everything they said.
+ *
+ * The approver and the client, because a note is one person's ask and two
+ * people's notes are two rows however alike they read. A founders row never
+ * comes from a note, so the approver type is always member or contact here.
+ *
+ * A client's whole message, lower-cased and whitespace-collapsed, because the
+ * title of their draft is only the first sentence of the DM. "Hi Liam! Fix
+ * the footer." and "Hi Liam! Add a blog page." are two asks with one title;
+ * keyed on the title the second was swallowed as a repeat of the first. The
+ * same message sent twice is still one row, which is the point of the key.
+ *
+ * A studio note keys on the owner only: its titles are the suggester's own
+ * words, and the same note read twice should land on the card already open.
+ */
+function noteOwnerMaterial(input: DedupeInput): string[] {
+  const owner = [input.approverType ?? '', input.approverId ?? '', input.orgId ?? '']
+  if (input.approverType === 'contact') owner.push(collapse(input.quote ?? '').toLowerCase())
+  return owner
+}
+
+/**
  * sha-256 hex over the source, the kind, the target and the normalised
  * change. Web Crypto, because this runs on Workers where node:crypto does
  * not. The UNIQUE index on the column is what actually enforces it; this is
@@ -502,15 +566,23 @@ function normalisedTitleOrDiff(kind: SuggestionKind, proposal: unknown): string 
  * written before CN.1b hashes to exactly what it did: adding a separate slot
  * would have changed the material for every existing task row and orphaned
  * every dedupe key already on production.
+ *
+ * A NOTE IS KEYED TO ITS SENDER (noteOwnerMaterial). The UNIQUE index is
+ * global and a note has no transcript, so without the owner two people whose
+ * notes shared a title shared a key: the second note was counted a duplicate
+ * and never filed, and the Slack DM that read the row back by key showed the
+ * second sender the first sender's row, words and all.
  */
 export async function buildDedupeKey(input: DedupeInput): Promise<string> {
-  const material = [
+  const parts = [
     input.sourceKind,
     input.transcriptId ?? '',
     input.kind,
     input.targetRequestId ?? input.targetTaskId ?? '',
     normalisedTitleOrDiff(input.kind, input.proposal),
-  ].join(':')
+  ]
+  if (input.sourceKind === 'note') parts.push(...noteOwnerMaterial(input))
+  const material = parts.join(':')
 
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material))
   return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('')
@@ -675,6 +747,26 @@ function pendingCreateScope(orgIds: ReadonlyArray<string | null>): SQL | null {
   )!
 }
 
+/**
+ * The dedupe key a draft is filed under. One function for the writer below
+ * and for a caller that reads its own rows back by key (lib/slack/notes.ts),
+ * so the two can never hash a draft differently.
+ */
+export function dedupeKeyForDraft(draft: SuggestionDraft): Promise<string> {
+  return buildDedupeKey({
+    sourceKind: draft.sourceKind,
+    transcriptId: draft.transcriptId,
+    kind: draft.kind,
+    targetTaskId: draft.targetTaskId,
+    targetRequestId: draft.targetRequestId ?? null,
+    proposal: draft.proposal,
+    orgId: draft.orgId,
+    approverType: draft.approverType ?? 'founders',
+    approverId: draft.approverId ?? null,
+    quote: draft.quote,
+  })
+}
+
 export async function insertSuggestions(
   drizzle: Drizzle,
   drafts: readonly SuggestionDraft[],
@@ -683,14 +775,7 @@ export async function insertSuggestions(
 
   const keyed = await Promise.all(drafts.map(async draft => ({
     draft,
-    dedupeKey: await buildDedupeKey({
-      sourceKind: draft.sourceKind,
-      transcriptId: draft.transcriptId,
-      kind: draft.kind,
-      targetTaskId: draft.targetTaskId,
-      targetRequestId: draft.targetRequestId ?? null,
-      proposal: draft.proposal,
-    }),
+    dedupeKey: await dedupeKeyForDraft(draft),
   })))
 
   // ONE READ FOR EVERY GUARD. The dedupe keys already on the table, the
@@ -783,8 +868,15 @@ export async function insertSuggestions(
     // inbox longer and the decision no easier. A match against an existing
     // REQUEST or TASK is deliberately NOT dropped: the human may still want
     // it, and the read-time warning will say so.
+    //
+    // A client's own draft (approver_type 'contact') is never dropped here.
+    // Its title is only the first sentence of their DM, so "Hi Liam!" would
+    // match every other ask that opens the same way, and the ask it dropped
+    // would be gone with the client told it was received. Their DM is the
+    // request; the studio triages likeness on its own side, which is also
+    // why their Approve carries force.
     const createTitle = isCreateKind(entry.draft.kind) ? proposalTitleOf(entry.draft.proposal).trim() : ''
-    if (createTitle) {
+    if (createTitle && entry.draft.approverType !== 'contact') {
       const key = orgKeyOf(entry.draft.orgId)
       const mine = pending.filter(candidate => pendingOrg.get(candidate.id) === key)
       if (findSimilar(createTitle, mine, SIMILAR_BLOCK)[0]) {
@@ -871,6 +963,7 @@ const SUGGESTION_COLUMNS = {
   appliedTaskId: schema.taskSuggestions.appliedTaskId,
   appliedRequestId: schema.taskSuggestions.appliedRequestId,
   applyError: schema.taskSuggestions.applyError,
+  rejectReason: schema.taskSuggestions.rejectReason,
   dedupeKey: schema.taskSuggestions.dedupeKey,
   slackChannelId: schema.taskSuggestions.slackChannelId,
   slackMessageTs: schema.taskSuggestions.slackMessageTs,
@@ -882,11 +975,9 @@ export interface ListSuggestionsOptions {
   status?: string
   callId?: string | null
   /**
-   * 'all' is an unrestricted caller. A list of ids is a scoped one, and a
-   * suggestion with no client is studio housekeeping that every admin sees,
-   * exactly as the tasks list treats a task with no client: SQL `IN` never
-   * matches NULL, so the isNull has to be spelled out or the whole
-   * studio-internal half of the view vanishes for anyone scoped.
+   * 'all' or undefined is unrestricted. A nonempty list admits those clients'
+   * suggestions plus studio rows with no client. An empty list denies every
+   * suggestion, including studio rows, and returns zero counts.
    */
   orgIds?: string[] | 'all'
   limit?: number
@@ -904,7 +995,7 @@ export async function loadSuggestion(drizzle: Drizzle, id: string): Promise<Sugg
 
 function scopeCondition(orgIds: string[] | 'all' | undefined) {
   if (orgIds === undefined || orgIds === 'all') return null
-  if (orgIds.length === 0) return isNull(schema.taskSuggestions.orgId)
+  if (orgIds.length === 0) return sql`0 = 1`
   return or(inArray(schema.taskSuggestions.orgId, orgIds), isNull(schema.taskSuggestions.orgId))!
 }
 
@@ -913,6 +1004,8 @@ export async function listSuggestions(
   drizzle: Drizzle,
   options: ListSuggestionsOptions,
 ): Promise<DecoratedSuggestion[]> {
+  if (Array.isArray(options.orgIds) && options.orgIds.length === 0) return []
+
   const conditions = []
   if (options.status && options.status !== 'all') {
     conditions.push(eq(schema.taskSuggestions.status, options.status))
@@ -969,6 +1062,10 @@ export async function countSuggestions(
   drizzle: Drizzle,
   options: { orgIds?: string[] | 'all' } = {},
 ): Promise<SuggestionCounts> {
+  if (Array.isArray(options.orgIds) && options.orgIds.length === 0) {
+    return { pending: 0, snoozed: 0, calls: 0 }
+  }
+
   const conditions = [inArray(schema.taskSuggestions.status, ['pending', 'snoozed'])]
   const scoped = scopeCondition(options.orgIds)
   if (scoped) conditions.push(scoped)
@@ -1098,17 +1195,15 @@ function unique(values: Array<string | null>): string[] {
 
 /**
  * The access rule for one suggestion, which is the rule its client already
- * has. A suggestion with no client is studio housekeeping and is open to
- * every team member on this surface, the same answer `guardTask` gives for a
- * task with no client.
+ * has. A suggestion with no client requires some current client access,
+ * like other pre-client work. A missing role or empty scope never grants it.
  */
 export async function guardSuggestion(
   drizzle: Drizzle,
   userId: string | null,
   row: SuggestionRow,
 ): Promise<NextResponse | null> {
-  if (!row.orgId) return null
-  return requireAccessToOrg(drizzle, userId, row.orgId)
+  return requireAccessToOrgOrPreClient(drizzle, userId, row.orgId)
 }
 
 // ── snoozing ─────────────────────────────────────────────────────────────────
@@ -1377,6 +1472,17 @@ async function applyRequestSuggestion(
       return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'This suggestion names no client to file the request under' }
     }
 
+    // A client's own draft (a Slack DM, approver_type 'contact') is filed
+    // under that client's brand, by the same rule the portal's POST uses: a
+    // brand-linked contact only sees requests carrying one of their brands,
+    // so a request filed without one is invisible to the person who asked
+    // for it, and so is the "Open #N" link on their card. Read from the
+    // contact's own links, never from the proposal, whoever approves it;
+    // createRequestRecord drops a brand that is not at this client.
+    const brandId = row.approverType === 'contact' && row.approverId
+      ? await resolveSubmitterBrandId(drizzle, row.approverId)
+      : null
+
     const created = await createRequestRecord(drizzle, {
       clientOrgId: row.orgId,
       title: text(proposal.title) ?? '',
@@ -1386,6 +1492,7 @@ async function applyRequestSuggestion(
       priority: text(proposal.priority) ?? undefined,
       dueDate: text(proposal.dueDate),
       assigneeId: (proposal.suggestedAssigneeId as string | null | undefined) ?? null,
+      ...(brandId ? { brandId } : {}),
     }, actor)
     if (!created.ok) {
       return { ok: false, appliedTaskId: null, appliedRequestId: null, error: created.failure.error }
@@ -1681,6 +1788,12 @@ async function attachSuggestion(
  * Approve on the same Slack message is the expected case, and the second
  * click must be a no-op, not a second task and not a red toast.
  *
+ * ONE EXCEPTION, the reject reason (CN.3 section 7). A reject that carries a
+ * reason on a row that is already rejected stores the reason and nothing
+ * else: no decider, no decided time, no Slack rewrite, `changed: false` and
+ * `reasonRecorded: true`. That is the call a reason picked after the Reject
+ * tap makes, and the rejection itself was already recorded by the tap.
+ *
  * Returns null when the id names nothing, which the routes answer as a 404.
  */
 export async function decideSuggestion(
@@ -1691,6 +1804,24 @@ export async function decideSuggestion(
 ): Promise<DecisionResult | null> {
   const row = await loadSuggestion(drizzle, id)
   if (!row) return null
+
+  if (decision.action === 'reject' && row.status === 'rejected') {
+    const reason = normaliseRejectReason(decision.reason)
+    if (reason !== null) {
+      const stamp = now()
+      await drizzle
+        .update(schema.taskSuggestions)
+        .set({ rejectReason: reason, updatedAt: stamp })
+        .where(eq(schema.taskSuggestions.id, id))
+      return {
+        suggestion: { ...row, rejectReason: reason, updatedAt: stamp },
+        changed: false,
+        reasonRecorded: true,
+        appliedTaskId: row.appliedTaskId,
+        appliedRequestId: row.appliedRequestId,
+      }
+    }
+  }
 
   if (!OPEN_STATUSES.includes(row.status)) {
     return {
@@ -1749,6 +1880,7 @@ export async function decideSuggestion(
   }
   let appliedTaskId: string | null = null
   let appliedRequestId: string | null = null
+  let reasonRecorded = false
 
   if (decision.action === 'snooze') {
     // No decidedAt: a snooze is a deferral, not the decision, and the row
@@ -1758,6 +1890,11 @@ export async function decideSuggestion(
   } else if (decision.action === 'reject') {
     updates.status = 'rejected'
     updates.decidedAt = stamp
+    // Written on every reject, null when nobody said why, so the column is
+    // always the answer to "did a person give a reason" and never a leftover.
+    const reason = normaliseRejectReason(decision.reason)
+    updates.rejectReason = reason
+    reasonRecorded = reason !== null
   } else {
     const proposal = decision.proposalOverride !== undefined
       ? JSON.stringify(decision.proposalOverride)
@@ -1813,5 +1950,6 @@ export async function decideSuggestion(
     changed: true,
     appliedTaskId,
     appliedRequestId,
+    ...(reasonRecorded ? { reasonRecorded: true } : {}),
   }
 }

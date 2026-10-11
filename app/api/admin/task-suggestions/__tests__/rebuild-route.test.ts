@@ -71,6 +71,9 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: (orgId: string) => orgId === 'tahi-org',
 }))
 
+vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
+vi.mock('@/lib/access-scoping', () => ({ resolveAccessScoping: async () => null }))
+
 // The sweep is a stand-in that behaves like the real one where the route
 // depends on it: oldest first as named, the budget cutting the list at
 // `sweep.fits`, and `beforeRead` called for each call it takes on. The

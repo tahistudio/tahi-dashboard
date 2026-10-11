@@ -36,8 +36,7 @@
  * rest.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useResource } from '@/lib/use-resource'
 import { ApiError } from '@/lib/swr-fetcher'
 import { apiPath } from '@/lib/api'
@@ -53,6 +52,7 @@ import {
 } from '@/lib/client-home-signals'
 import { isOwedInvoice } from '@/lib/invoice-status'
 import { cadenceWord } from '@/lib/next-invoice-date'
+import { moveQueueItem, nextUpIds, reorderTrackId, unifiedQueue } from '@/lib/track-queue'
 import { CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED } from '@/lib/onboarding-steps'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
 import { portalStatusMeta, portalStageFraction, type PortalChipTone } from '@/lib/portal-status'
@@ -98,15 +98,12 @@ interface RequestsResp {
   page: number
   limit: number
   /**
-   * Liam's client hand-off feature (H2). Neither field exists on today's
-   * `/api/portal/requests` payload; both are typed and read defensively so
-   * the panel lights up the moment H1's schema and API land, with no second
-   * wiring pass. `waitingOnYou` is scoped to the caller's own contact id by
+   * `waitingOnYou` is scoped to the caller's own contact id by
    * the server; `waitingOnOrg` is the org-wide list, present only when the
    * caller is a workspace admin (mirrors `subData.seat`).
    */
-  waitingOnYou?: WaitingOnRequestItem[]
-  waitingOnOrg?: WaitingOnRequestItem[]
+  waitingOnYou?: Array<Omit<WaitingOnRequestItem, 'requestTitle'> & { title: string }>
+  waitingOnOrg?: Array<Omit<WaitingOnRequestItem, 'requestTitle'> & { title: string }>
 }
 
 interface TrackReq {
@@ -410,10 +407,10 @@ function firstNameOf(name: string | null | undefined): string {
   return first
 }
 
-function shortDate(iso: string | null): string {
-  if (!iso) return 'TBC'
+function shortDate(iso: string | null, fallback = 'TBC'): string {
+  if (!iso) return fallback
   const d = new Date(iso)
-  return Number.isFinite(d.getTime()) ? d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' }) : 'TBC'
+  return Number.isFinite(d.getTime()) ? d.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' }) : fallback
 }
 
 function invoiceLabel(inv: InvoiceRow): string {
@@ -620,11 +617,7 @@ function ClientFirstRun({ ctx }: { ctx: OverviewCtx }) {
 
 /* ---------- TrackBoard (retainer, reorderable queue) ---------- */
 
-function laneKey(tracks: TrackItem[]): string {
-  return tracks.map(t => `${t.id}:${t.currentRequest?.id ?? ''}:${t.queue.map(q => q.id).join(',')}`).join('|')
-}
-
-function TrackBoard({
+export function TrackBoard({
   tracks,
   planLabel,
   ro,
@@ -646,40 +639,44 @@ function TrackBoard({
    *  board used to route to the /requests LIST, where the reader had to find
    *  and press New a second time. */
   onStart: () => void
-  onReorder: (trackId: string, requestIds: string[]) => void
+  onReorder: (trackId: string, requestIds: string[]) => Promise<void>
 }) {
-  const key = laneKey(tracks)
-  const [lanes, setLanes] = useState<TrackItem[]>(tracks)
-  // Resync local optimistic lanes whenever the fetched tracks materially change.
+  const incoming = unifiedQueue(tracks)
+  const key = JSON.stringify(tracks)
+  const [optimistic, setOptimistic] = useState<{ key: string; queue: TrackReq[] } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const inFlight = useRef(false)
+  const queue = optimistic?.key === key ? optimistic.queue : incoming
+  const trackId = reorderTrackId(tracks)
+  const next = nextUpIds(queue)
+
   useEffect(() => {
-    setLanes(tracks)
-    // key is the stable signature of tracks; tracks itself is a fresh array each render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setOptimistic(null)
+    setSaveError(null)
   }, [key])
 
-  const moveQ = useCallback(
-    (trackId: string, qi: number, dir: -1 | 1) => {
-      if (ro) return
-      setLanes(prev =>
-        prev.map(t => {
-          if (t.id !== trackId) return t
-          // A synthetic lane has no backing track row: the reorder route
-          // refuses it, so never optimistically move it locally either.
-          if (t.synthetic) return t
-          const q = [...t.queue]
-          const j = qi + dir
-          if (j < 0 || j >= q.length) return t
-          ;[q[qi], q[j]] = [q[j], q[qi]]
-          onReorder(
-            trackId,
-            q.map(r => r.id),
-          )
-          return { ...t, queue: q }
-        }),
-      )
-    },
-    [ro, onReorder],
-  )
+  const moveQ = async (index: number, direction: -1 | 1) => {
+    if (ro || !trackId || inFlight.current) return
+    const moved = moveQueueItem(queue, index, direction)
+    if (!moved) return
+    inFlight.current = true
+    setSaving(true)
+    setSaveError(null)
+    setOptimistic({ key, queue: moved })
+    try {
+      // Persistence is an event effect, never a state-updater side effect.
+      await onReorder(trackId, moved.map(request => request.id))
+    } catch {
+      // Explicit rollback also works when the server returns the same IDs and
+      // order as before, which cannot trigger an incoming-signature effect.
+      setOptimistic({ key, queue: [...queue] })
+      setSaveError('Queue order could not be confirmed. Showing the previous order. Try moving it again.')
+    } finally {
+      inFlight.current = false
+      setSaving(false)
+    }
+  }
 
   // The board holds its shape for the first round trip. "No active tracks yet."
   // to a client with two tracks running was the worst of the CT.3b lies.
@@ -714,7 +711,7 @@ function TrackBoard({
     )
   }
 
-  if (lanes.length === 0) {
+  if (tracks.length === 0) {
     return (
       <div className="ov-trackboard">
         <div className="ov-tb-head">
@@ -740,25 +737,34 @@ function TrackBoard({
           <h3>Your work in motion</h3>
           <span className="ov-mini">
             {planLabel ? `${planLabel} plan · ` : ''}
-            {lanes.length} track{lanes.length === 1 ? '' : 's'} running in parallel
+            {tracks.length} track{tracks.length === 1 ? '' : 's'} on your plan
           </span>
         </div>
       </div>
-      <div className="ov-tb-lanes">
-        {lanes.map((t, ti) => {
+      <div className={'ov-tb-lanes' + (tracks.length === 1 ? ' phq-single' : '')}>
+        {tracks.map((t, ti) => {
           const cur = t.currentRequest
           const meta = cur ? reqMeta(cur.status) : null
           return (
             <div className="ov-lane" key={t.id}>
               <div className="ov-lane-h">
                 <b>Track {ti + 1}</b>
-                {meta && (
+                {t.synthetic ? (
+                  <span className="ov-chip muted">Being set up</span>
+                ) : meta && (
                   <span className={'ov-chip ' + meta.chip} title={meta.gloss || undefined}>
                     {meta.label}
                   </span>
                 )}
               </div>
-              {cur ? (
+              {t.synthetic ? (
+                <div className="ov-lane-now phq-setup">
+                  <div className="ln-t">
+                    <b>On your plan, not live yet.</b>
+                    <small>The studio is setting this track up.</small>
+                  </div>
+                </div>
+              ) : cur ? (
                 <div className="ov-lane-now">
                   <div className="ln-t">
                     <b>{cur.title}</b>
@@ -781,51 +787,45 @@ function TrackBoard({
                   </div>
                 </div>
               )}
-              <div className="ov-lane-next">
-                <span className="ov-lane-lbl">Up next &middot; your order</span>
-                {t.queue.length > 0 ? (
-                  <>
-                    {t.queue.map((q, qi) => (
-                      <div className="ln-q" key={q.id}>
-                        <span className="ln-q-pos">{qi + 1}</span>
-                        <span className="ln-q-t">{q.title}</span>
-                        {/* A synthetic lane (no backing track row) has nothing
-                            of its own to reorder, so the control never renders. */}
-                        {!ro && !t.synthetic && (
-                          <span className="ln-q-ctl">
-                            <button aria-label="Move up" disabled={qi === 0} onClick={() => moveQ(t.id, qi, -1)}>
-                              <Icon n="up" s={12} />
-                            </button>
-                            <button
-                              aria-label="Move down"
-                              disabled={qi === t.queue.length - 1}
-                              onClick={() => moveQ(t.id, qi, 1)}
-                            >
-                              <Icon n="down" s={12} />
-                            </button>
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                    <button className="ln-add" disabled={ro} onClick={onStart}>
-                      + Queue another
-                    </button>
-                  </>
-                ) : (
-                  <button className="ln-open" disabled={ro} onClick={onStart}>
-                    Slot open, submit a request
-                  </button>
-                )}
-              </div>
             </div>
           )
         })}
+      </div>
+      <div className="phq-queue" aria-busy={saving}>
+        <div className="phq-head">
+          <h4>Up next, in your order</h4>
+          <span className="ov-mini">{queue.length} waiting</span>
+        </div>
+        {queue.length ? (
+          <ol className="phq-list" aria-label="Request queue">
+            {queue.map((q, index) => (
+              <li className="phq-row" key={q.id}>
+                <span className="phq-position" aria-hidden="true">{index + 1}</span>
+                <span className="phq-title"><b>{q.title}</b><small>{typeLabel(q.type)}</small></span>
+                {next.has(q.id) && <span className="ov-chip brand">Next up</span>}
+                {!ro && trackId && (
+                  <span className="phq-controls">
+                    <button type="button" aria-label={`Move ${q.title} up`} disabled={saving || index === 0} onClick={() => moveQ(index, -1)}>
+                      <Icon n="up" s={14} />
+                    </button>
+                    <button type="button" aria-label={`Move ${q.title} down`} disabled={saving || index === queue.length - 1} onClick={() => moveQ(index, 1)}>
+                      <Icon n="down" s={14} />
+                    </button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        ) : <p className="ov-mini">Your queue is empty.</p>}
+        {saving && <p className="ov-mini" role="status">Saving queue order...</p>}
+        {saveError && <p className="phq-error" role="alert">{saveError}</p>}
       </div>
       {/* "Add a track" used to route to /billing, a page absent from the
           client nav that they could never navigate back from. Another track is
           a conversation, so it files a request instead, which is a door that
           exists. */}
-      <div className="ov-tb-foot">
+      <div className="phq-footer">
+        <button type="button" className="phq-button" disabled={ro} onClick={onStart}>+ Queue another</button>
         <span className="ov-mini">Need more done at once?</span>
         <button className="ov-cta ghost" disabled={ro} onClick={onStart}>
           Ask about another track
@@ -941,6 +941,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // Money is gated separately: Act as client turns `ro` off for the client's
   // WORK but never for reaching their payment page. See OverviewCtx.
   const moneyRo = ctx.isMoneyReadOnly ?? ctx.isReadOnly
+  const payReason = moneyRo
+    ? ro ? 'Read-only in client view' : `Money stays read-only while you are acting as ${ctx.previewName ?? 'the client'}`
+    : undefined
 
   // ── data ───────────────────────────────────────────────────────────────────
   const { data: activityData } = useResource<ActivityResp>('/api/portal/activity')
@@ -961,7 +964,6 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // can never be an artefact of pagination.
   const {
     data: reviewData,
-    isLoading: reviewLoading,
     error: reviewError,
     mutate: mutateReview,
   } = useResource<RequestsResp>('/api/portal/requests?status=client_review&limit=200')
@@ -970,7 +972,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // an unlinked login 403 here too. Without this the card said "No invoices
   // yet." to somebody whose org has plenty, and offered them a Pay button on a
   // list it was never given. A 403 means "not yours to see", not "none".
-  const { data: invoicesData, error: invoicesError } = useResource<InvoicesResp>(
+  const { data: invoicesData, error: invoicesError, mutate: mutateInvoices } = useResource<InvoicesResp>(
     '/api/portal/invoices?status=all',
   )
   const invoicesDenied = invoicesError instanceof ApiError && invoicesError.status === 403
@@ -982,7 +984,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // vanishing, so the plan card beside it does not change width under the
   // reader on the ordinary path.
   const invoicesSettled = !!invoicesData || !!invoicesError
-  const { data: subData, isLoading: subLoading } = useResource<SubscriptionResp>('/api/portal/subscription')
+  const { data: subData, error: subError, mutate: mutateSubscription } = useResource<SubscriptionResp>('/api/portal/subscription')
+  const subFailed = !subData && !!subError
+  const subLoading = !subData && !subError
+  const invoicesFailed = !invoicesData && !!invoicesError && !invoicesDenied
   // A member seat (not a workspace admin of their own org, and not a studio
   // session previewing one) never gets a `subscription` object back from the
   // server - see app/api/portal/subscription/route.ts. This only decides
@@ -991,10 +996,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // already handed.
   const isMemberSeat = isClientHomeMemberSeat(subData)
 
-  // Retainer (TrackBoard) vs project (ProjectBoard): derived from the real
-  // subscription signal; ctx.clientType is a preview-only override. Defaults to
-  // retainer until the subscription loads (the common case).
-  const isProject = (ctx.clientType ?? subData?.clientType) === 'project'
+  // An unavailable subscription cannot identify the engagement or the seat.
+  const clientType = ctx.clientType ?? subData?.clientType
+  const isProject = clientType === 'project'
   const {
     data: callsData,
     isLoading: callsLoading,
@@ -1018,7 +1022,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     isLoading: tracksLoading,
     error: tracksError,
     mutate: mutateTracks,
-  } = useResource<TracksResp>(isProject ? null : '/api/portal/tracks')
+  } = useResource<TracksResp>(clientType === 'retainer' ? '/api/portal/tracks' : null)
   const {
     data: projectData,
     isLoading: projectLoading,
@@ -1046,9 +1050,18 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     void mutateRequests()
     void mutateReview()
   }, [mutateRequests, mutateReview])
+  const retryWaiting = useCallback(() => {
+    if (requestsFailed || reviewFailed) retryRequests()
+    if (invoicesFailed) void mutateInvoices()
+    if (callsFailed) void mutateCalls()
+  }, [requestsFailed, reviewFailed, invoicesFailed, callsFailed, retryRequests, mutateInvoices, mutateCalls])
+  const waitingPartial = requestsFailed || reviewFailed || invoicesFailed || callsFailed
 
   const requests = useMemo(() => requestsData?.requests ?? [], [requestsData])
-  const invoices = useMemo(() => invoicesData?.items ?? [], [invoicesData])
+  const invoices = useMemo(
+    () => isMemberSeat || invoicesDenied ? [] : invoicesData?.items ?? [],
+    [invoicesData, isMemberSeat, invoicesDenied],
+  )
   const calls = callsData?.items ?? []
   const files = filesData?.items ?? []
   const team = teamData?.items ?? []
@@ -1126,7 +1139,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       key: `handoff-${h.requestId}`,
       kind: 'handoff',
       ic: 'users',
-      title: h.requestTitle,
+      title: h.title,
       sub: `${handoffReasonLabel(reason)}${h.waitingOn.note ? `. ${h.waitingOn.note}` : ''}`,
       open: { label: 'Open request', onOpen: () => go(requestRouteId(h.requestId)) },
       primary: { label: verb, onAct: () => go(requestRouteId(h.requestId)) },
@@ -1163,6 +1176,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       primary: {
         label: 'Pay',
         onAct: moneyRo ? undefined : () => openDestination(invoicePayDestination(nearestUnpaid)),
+        reason: payReason,
       },
     })
   }
@@ -1190,7 +1204,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const waitingOnTeamItems = (requestsData?.waitingOnOrg ?? []).map(item => ({
     key: item.requestId,
     contactName: firstNameOf(item.waitingOn.contactName),
-    requestTitle: item.requestTitle,
+    requestTitle: item.title,
     reasonLabel: handoffReasonShortLabel(item.waitingOn.reason),
     daysWaiting: item.waitingOn.daysWaiting ?? daysWaitingOn(item.waitingOn.since),
     onOpen: () => go(requestRouteId(item.requestId)),
@@ -1206,7 +1220,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // The dedicated status=client_review read is authoritative, and the page-one
   // slice of the active list stands in until it lands, so this is only unknown
   // while BOTH are still in flight.
-  const reviewUnknown = requestsLoading && reviewLoading
+  const reviewUnknown = !requestsData && !reviewData && !reviewSignalFailed
   const waitingUnsettled = reviewUnknown || !invoicesSettled || callsLoading
   const waitingLoading = waiting.length === 0 ? waitingUnsettled : reviewUnknown
   // A failed requests read must never become "Nothing here yet. Send us the
@@ -1216,16 +1230,15 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   const noRequestsAtAll = !requestsLoading && !requestsFailed && requests.length === 0
 
   // -- vitals ------------------------------------------------------------------
-  // A vital whose read failed is LEFT OUT rather than printed as a 0. "Open
-  // requests 0 / in progress" is a claim, and a 403 is not evidence for it.
-  // The strip is flex, so the rest simply share the width, exactly as the
-  // invoices vital already does when that read is denied.
+  // Unavailable readings keep their place and say Unknown. Money denied to
+  // this seat stays absent entirely.
   const vitals: VitalItem[] = []
-  if (!requestsFailed) {
+  {
     vitals.push({
       lbl: 'Open requests',
-      num: requestsLoading ? <SkelFigure width="2.5rem" /> : openReqs.length,
-      sub: requestsLoading ? <SkelFigure width="4.5rem" /> : 'in progress',
+      num: requestsFailed ? 'Unknown' : requestsLoading ? <SkelFigure width="2.5rem" /> : openReqs.length,
+      muted: requestsFailed,
+      sub: requestsFailed ? 'we could not check just now' : requestsLoading ? <SkelFigure width="4.5rem" /> : 'in progress',
     })
   }
   // "To approve", NOT "Waiting on you". The tile directly above it is headed
@@ -1234,12 +1247,12 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // with one delivery, one bill and one call read "Waiting on you 3" sitting on
   // top of "Waiting on you / 1". The tile owns the phrase; this vital says the
   // narrower thing it actually counts.
-  if (!reviewSignalFailed) {
+  {
     vitals.push({
       lbl: 'To approve',
-      num: reviewUnknown ? <SkelFigure width="2.5rem" /> : inReview.length,
-      muted: !reviewUnknown && inReview.length === 0,
-      sub: reviewUnknown ? (
+      num: reviewSignalFailed ? 'Unknown' : reviewUnknown ? <SkelFigure width="2.5rem" /> : inReview.length,
+      muted: reviewSignalFailed || (!reviewUnknown && inReview.length === 0),
+      sub: reviewSignalFailed ? 'we could not check just now' : reviewUnknown ? (
         <SkelFigure width="6rem" />
       ) : inReview.length === 0 ? (
         'nothing right now'
@@ -1248,18 +1261,18 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
       ),
     })
   }
-  if (!requestsFailed) {
+  {
     vitals.push({
       lbl: 'Next delivery',
-      num: requestsLoading ? (
+      num: requestsFailed ? 'Unknown' : requestsLoading ? (
         <SkelFigure width="4rem" />
       ) : nextDelivery ? (
         deliveryLabel(nextDelivery.dueDate)
       ) : (
         'None'
       ),
-      muted: !requestsLoading && !nextDelivery,
-      sub: requestsLoading ? (
+      muted: requestsFailed || (!requestsLoading && !nextDelivery),
+      sub: requestsFailed ? 'we could not check just now' : requestsLoading ? (
         <SkelFigure width="6rem" />
       ) : nextDelivery ? (
         nextDelivery.title
@@ -1271,7 +1284,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // A project client used to read their overall percentage off the hero. The
   // hero is now the "Waiting on you" tile, so the figure moves here rather than
   // being dropped.
-  if (isProject && !projectFailed) {
+  if (isProject) {
     const projectPhases = projectData?.phases ?? []
     const activePhase = projectPhases.find(ph => ph.state === 'active') ?? null
     const doneCount = projectPhases.filter(ph => ph.state === 'done').length
@@ -1281,20 +1294,20 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
     const knownProgress = !!projectData?.progressKnown && projectPhases.length > 0
     vitals.push({
       lbl: 'Project progress',
-      num: projectLoading ? (
+      num: projectFailed ? 'Unknown' : projectLoading ? (
         <SkelFigure width="3rem" />
       ) : knownProgress ? (
         `${overallPct}%`
       ) : (
-        activePhase?.name ?? projectData?.project?.status ?? 'Getting started'
+        'Not set'
       ),
-      muted: !projectLoading && !knownProgress,
-      sub: projectLoading ? (
+      muted: projectFailed || (!projectLoading && !knownProgress),
+      sub: projectFailed ? 'we could not check just now' : projectLoading ? (
         <SkelFigure width="6rem" />
       ) : activePhase ? (
         activePhase.name
       ) : (
-        'your plan is being set up'
+        'no dated progress available'
       ),
     })
   }
@@ -1303,13 +1316,13 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // The strip is flex, so the rest simply share the width. It stays away until
   // the read has answered, too: a reassurance nobody has checked yet is the
   // same lie one round trip earlier.
-  if (invoicesSettled && !invoicesDenied) {
+  if (invoicesSettled && !invoicesDenied && !isMemberSeat) {
     vitals.push({
       lbl: 'Invoices due',
-      num: invDueDisplay,
-      muted: unpaid.length === 0,
+      num: invoicesFailed ? 'Unknown' : invDueDisplay,
+      muted: invoicesFailed || unpaid.length === 0,
       sub:
-        unpaid.length === 0
+        invoicesFailed ? 'we could not check just now' : unpaid.length === 0
           ? 'all settled'
           : `${unpaid.length} \u00b7 ${nearestUnpaid ? dueLabel(nearestUnpaid.dueDate) : 'due soon'}`,
     })
@@ -1319,17 +1332,18 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // ── track reorder persistence ───────────────────────────────────────────────
   const onReorder = useCallback(
     async (trackId: string, requestIds: string[]) => {
-      if (ro || requestIds.length === 0) return
+      if (ro || requestIds.length === 0) throw new Error('Queue reorder is unavailable')
+      const response = await fetch(apiPath(`/api/portal/tracks/${trackId}/reorder`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestIds }),
+      })
+      if (!response.ok) throw new Error('Queue reorder failed')
       try {
-        await fetch(apiPath(`/api/portal/tracks/${trackId}/reorder`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestIds }),
-        })
+        await mutateTracks()
       } catch {
-        /* network error - revalidate to restore the server order */
+        // The write was acknowledged. Keep its order if only the refresh fails.
       }
-      mutateTracks()
     },
     [ro, mutateTracks],
   )
@@ -1349,10 +1363,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   // can (see lib/next-invoice-date.ts); only when it truly cannot does this
   // name the rail rather than leaving the reader guessing.
   const nextInvoiceLabel = subData?.subscription?.nextInvoiceDate
-    ? shortDate(subData.subscription.nextInvoiceDate)
+    ? shortDate(subData.subscription.nextInvoiceDate, 'No invoice date available')
     : subData?.subscription?.invoiceChannel === 'xero'
       ? `Invoiced ${cadenceWord(subData.subscription.billingInterval)} through Xero`
-      : 'TBC'
+      : 'No invoice date available'
   const firstName = firstNameOf(ctx.userName)
   const [today, setToday] = useState('')
   useEffect(() => {
@@ -1360,10 +1374,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
   }, [])
   const recent = requests.slice(0, 5)
   const nextCall = calls[0] ?? null
-  const payDisabled: CSSProperties = moneyRo ? { opacity: 0.5, pointerEvents: 'none' } : {}
 
   return (
-    <div className="ov" data-ro={ro ? '1' : '0'}>
+    <div className="ov ov-client" data-ro={ro ? '1' : '0'}>
       {/* A header, at last. This page had no greeting, no date and no top-level
           way to start a request: the only primary CTA was a menu tucked inside
           the hero that routed to the requests LIST.
@@ -1416,8 +1429,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
           items={waiting}
           loading={waitingLoading}
           failed={reviewSignalFailed}
-          onRetry={retryRequests}
+          onRetry={retryWaiting}
           ro={ro}
+          moneyRo={moneyRo}
+          partial={waitingPartial ? 'Some checks did not answer, so this list may be incomplete.' : null}
           previewName={ctx.previewName}
           onStart={startRequest}
           isFirstRun={noRequestsAtAll}
@@ -1429,17 +1444,17 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
         {vitals.length > 0 && <Vitals items={vitals} />}
       </div>
 
-      {/* Also waiting on your team: an org admin's read-only view of hand-offs
-          addressed to a colleague at the same org. Sits directly under the
-          hero. No loading state wired here on purpose: `waitingOnOrg` does
-          not exist on the payload yet (H1's schema + API), so `items` is
-          always [] today and the card renders nothing rather than flashing a
-          skeleton on every client's home for a feature that is not live. */}
+      {/* Org-wide hand-offs are supplied only to the permitted seat by the API. */}
       <WaitingOnTeam items={waitingOnTeamItems} />
 
       <Zone label="Your work">
         <div className="ov-col-12">
-          {isProject ? (
+          {!clientType ? (
+            <div className="ov-trackboard">
+              <div className="ov-tb-head"><h3>Your work</h3></div>
+              {subFailed ? <CardError what="Your work" onRetry={() => { void mutateSubscription() }} /> : <SkelRows rows={2} height="5.5rem" />}
+            </div>
+          ) : isProject ? (
             <ProjectBoard
               project={projectData}
               loading={subLoading || projectLoading}
@@ -1637,7 +1652,9 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
               different page in the client's head (and at a real /billing route
               that is not in their nav). */}
           <CardH ic="receipt" title="Invoices" link="All invoices" onLink={() => go('invoices')} />
-          {invoices.length > 0 ? (
+          {invoicesFailed ? (
+            <CardError what="Your invoices" onRetry={() => { void mutateInvoices() }} />
+          ) : invoices.length > 0 ? (
             <div className="ov-rows">
               {invoices.slice(0, 4).map(inv => {
                 const paid = inv.status === 'paid'
@@ -1660,9 +1677,10 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                               minimum. This is the only control on the client
                               home that reaches a payment page. */}
                           <button
+                            type="button"
                             className="ov-cta ov-pay"
                             disabled={moneyRo}
-                            style={payDisabled}
+                            title={payReason}
                             onClick={() => openDestination(invoicePayDestination(inv))}
                           >
                             Pay
@@ -1685,6 +1703,13 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             {/* No "Details" link: /proposals redirects a client to /requests,
                 and this branch removed it from the client nav for that reason. */}
             <CardH ic="wallet" title="Your project" />
+            {subFailed ? (
+              <CardError what="Your plan" onRetry={() => { void mutateSubscription() }} />
+            ) : subLoading || projectLoading ? (
+              <SkelRows rows={3} />
+            ) : projectFailed ? (
+              <CardError what="Your project" onRetry={() => { void mutateProject() }} />
+            ) : <>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ font: "700 20px 'Manrope',sans-serif", color: 'var(--text)' }}>
                 {projectData?.project?.name ?? projectData?.scheduleTitle ?? 'Your project'}
@@ -1697,23 +1722,24 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
             <div className="ov-subrows">
               <div className="ov-subrow">
                 <span>Phase</span>
-                <b>{projectData?.phases.find(p => p.state === 'active')?.name ?? 'In progress'}</b>
+                <b>{projectData?.phases?.find(p => p.state === 'active')?.name ?? 'No active phase available'}</b>
               </div>
               <div className="ov-subrow">
                 <span>Next milestone</span>
                 <b>
                   {projectData?.nextMilestone
                     ? `${projectData.nextMilestone.name}${
-                        projectData.nextMilestone.dateISO ? ` · ${shortDate(projectData.nextMilestone.dateISO)}` : ''
+                        projectData.nextMilestone.dateISO ? ` · ${shortDate(projectData.nextMilestone.dateISO, 'Date not available')}` : ''
                       }`
-                    : 'TBC'}
+                    : 'No milestone date available'}
                 </b>
               </div>
               <div className="ov-subrow">
                 <span>Next invoice</span>
-                <b>{projectData?.nextInvoice ? shortDate(projectData.nextInvoice.dateISO) : 'On launch'}</b>
+                <b>{projectData?.nextInvoice ? shortDate(projectData.nextInvoice.dateISO, 'No invoice date available') : 'No invoice date available'}</b>
               </div>
             </div>
+            </>}
           </Card>
         ) : (
           <Card section="Your plan" span={invoicesDenied ? 12 : 5}>
@@ -1721,6 +1747,13 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                 client nav, so a client who pressed it had no way back. Another
                 track is a conversation, so the card asks for one instead. */}
             <CardH ic="wallet" title="Your plan" />
+            {subFailed ? (
+              <CardError what="Your plan" onRetry={() => { void mutateSubscription() }} />
+            ) : subLoading ? (
+              <SkelRows rows={3} />
+            ) : !subData?.subscription ? (
+              <div className="phq-plan-setup"><b>Being set up.</b><p>Your plan shows here once the studio has set it up.</p></div>
+            ) : <>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ font: "700 20px 'Manrope',sans-serif", color: 'var(--text)' }}>
                 {planLabel ?? 'Retainer'}
@@ -1756,8 +1789,8 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                 <span>Tracks</span>
                 <b>
                   {subData?.subscription
-                    ? `${subData.subscription.trackCount} active`
-                    : `${tracks.length} active`}
+                    ? `${subData.subscription.trackCount} on your plan`
+                    : `${tracks.length} on your plan`}
                 </b>
               </div>
             </div>
@@ -1766,6 +1799,7 @@ export function ClientHome({ ctx }: { ctx: OverviewCtx }) {
                 Ask about your plan
               </button>
             </div>
+            </>}
           </Card>
         )}
         </>

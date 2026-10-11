@@ -118,8 +118,8 @@ export function RailSelect({
   // The chevron stays pinned to the right edge in every state, so a row of
   // controls keeps one vertical line down the rail. The clear button is laid
   // over the gap just before it, and the value simply keeps clear of both.
-  const clearSize = touch ? '2rem' : '1.25rem'
-  const valueGutter = active ? (touch ? '3.125rem' : '2.375rem') : '0'
+  const clearSize = touch ? '2.75rem' : '1.25rem'
+  const valueGutter = active ? (touch ? '3.875rem' : '2.375rem') : '0'
 
   return (
     <div style={{ position: 'relative' }}>

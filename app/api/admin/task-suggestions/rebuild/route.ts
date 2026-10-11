@@ -78,11 +78,10 @@
  * throws is reported as `readError` beside the rest rather than as a 500,
  * because the rebuild still did what it could.
  *
- * Tahi admin only, and unscoped on purpose: this is a workspace-wide
- * operation rather than a per-client one, so a team member scoped to a
- * subset of clients has no business half-clearing the queue. `isTahiAdmin`
- * is the gate the other cutover routes (the importers, the migration runner)
- * use for the same reason.
+ * Both inbox features are required. Scoped callers may queue only calls
+ * they can reach, including pre-client calls when their scope is nonempty.
+ * Inline reads require unrestricted scope because the sweep also performs
+ * workspace-wide snooze and organisation repairs.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -91,6 +90,10 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, inArray, isNotNull, notLike, sql } from 'drizzle-orm'
 import { MAX_SWEEP_BATCH, runSuggestionSweep, sweepWillReach, type SweepSummary } from '@/lib/task-suggester'
+import { requireFeature } from '@/lib/require-feature'
+import { resolveAccessScoping } from '@/lib/access-scoping'
+import { requireAccessToOrgOrPreClient } from '@/lib/require-access'
+import { taskSuggestionOrgCondition } from '@/lib/task-suggestions-overview'
 
 /**
  * Ids per IN clause. D1 caps bound parameters at 100 per statement, and the
@@ -133,7 +136,80 @@ type SkipReason = 'not_found' | 'unlinked' | 'too_old_to_defer'
 interface Candidate {
   id: string
   callId: string | null
+  callKind: string | null
   receivedAt: string
+}
+
+/** Check every current client link before a scoped caller queues this call.
+ * Attendees matter too: the sweep can resolve a client from their addresses. */
+async function canQueueTranscript(
+  database: ReturnType<typeof import('drizzle-orm/d1').drizzle>,
+  userId: string,
+  transcript: Candidate,
+): Promise<boolean> {
+  if (!transcript.callId) return true // Reported as unlinked, never queued.
+  const orgIds = new Set<string | null>()
+  if (transcript.callKind === 'scheduled') {
+    const [call] = await database.select({ orgId: schema.scheduledCalls.orgId })
+      .from(schema.scheduledCalls).where(eq(schema.scheduledCalls.id, transcript.callId)).limit(1)
+    if (!call) return false
+    orgIds.add(call.orgId)
+  } else if (transcript.callKind === 'discovery' || transcript.callKind === null) {
+    const [call] = await database.select({
+      orgId: schema.discoveryCalls.orgId,
+      dealId: schema.discoveryCalls.dealId,
+      requestId: schema.discoveryCalls.requestId,
+      taskId: schema.discoveryCalls.taskId,
+      attendees: schema.discoveryCalls.attendees,
+    }).from(schema.discoveryCalls).where(eq(schema.discoveryCalls.id, transcript.callId)).limit(1)
+    if (!call) return false
+    let hasSweepOrg = Boolean(call.orgId)
+    if (call.orgId) orgIds.add(call.orgId)
+    if (call.dealId) {
+      const [deal] = await database.select({ orgId: schema.deals.orgId })
+        .from(schema.deals).where(eq(schema.deals.id, call.dealId)).limit(1)
+      if (!deal) return false
+      if (deal.orgId) {
+        orgIds.add(deal.orgId)
+        hasSweepOrg = true
+      }
+    }
+    if (call.requestId) {
+      const [request] = await database.select({ orgId: schema.requests.orgId })
+        .from(schema.requests).where(eq(schema.requests.id, call.requestId)).limit(1)
+      if (!request) return false
+      if (request.orgId) orgIds.add(request.orgId)
+    }
+    if (call.taskId) {
+      const [task] = await database.select({ orgId: schema.tasks.orgId })
+        .from(schema.tasks).where(eq(schema.tasks.id, call.taskId)).limit(1)
+      if (!task) return false
+      if (task.orgId) orgIds.add(task.orgId)
+    }
+    // Direct/deal links take precedence in the sweep. With neither, guest
+    // contacts can supply its effective org, even when the call itself is null.
+    if (!hasSweepOrg && call.attendees) {
+      let attendees: unknown
+      try { attendees = JSON.parse(call.attendees) } catch { attendees = [] }
+      const emails = Array.isArray(attendees) ? attendees.flatMap((attendee: unknown) => {
+        const email = attendee && typeof attendee === 'object' && 'email' in attendee && typeof attendee.email === 'string'
+          ? attendee.email.trim().toLowerCase() : ''
+        return email && !email.endsWith('@tahi.studio') ? [email] : []
+      }) : []
+      for (const batch of chunk([...new Set(emails)])) {
+        const contacts = await database.select({ orgId: schema.contacts.orgId })
+          .from(schema.contacts).where(inArray(sql`lower(${schema.contacts.email})`, batch))
+        for (const contact of contacts) if (contact.orgId) orgIds.add(contact.orgId)
+      }
+    }
+    if (orgIds.size === 0) orgIds.add(null)
+  } else {
+    return false
+  }
+  for (const orgId of orgIds) {
+    if (await requireAccessToOrgOrPreClient(database, userId, orgId)) return false
+  }
+  return true
 }
 
 export async function POST(req: NextRequest) {
@@ -141,7 +217,13 @@ export async function POST(req: NextRequest) {
   // out of the same budget as the read.
   const startedAt = Date.now()
   const { orgId, userId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
+  if (!isTahiAdmin(orgId) || !userId) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  try {
+    const denied = await requireFeature({ userId, orgId }, ['tasks', 'requests'])
+    if (denied) return denied
+  } catch {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -167,6 +249,17 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  let scope: string[] | null
+  try {
+    scope = await resolveAccessScoping(drizzle, userId)
+  } catch {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (scope?.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (scope !== null && readNow) {
+    return NextResponse.json({ error: 'Inline rebuild requires unrestricted client access. Use readNow: false to queue permitted calls.' }, { status: 403 })
+  }
+  const suggestionScope = taskSuggestionOrgCondition(scope)
 
   // Which transcripts. `all` means every transcript that has actually been
   // read, not every row: a recent unread one is already the sweep's to read,
@@ -176,6 +269,7 @@ export async function POST(req: NextRequest) {
   const columns = {
     id: schema.callTranscripts.id,
     callId: schema.callTranscripts.callId,
+    callKind: schema.callTranscripts.callKind,
     receivedAt: schema.callTranscripts.receivedAt,
   }
   const found: Candidate[] = []
@@ -201,6 +295,16 @@ export async function POST(req: NextRequest) {
   // to falling out of the sweep's window are the ones read inline.
   const candidates: Candidate[] = []
   for (const row of found) {
+    if (scope !== null) {
+      try {
+        if (!(await canQueueTranscript(drizzle, userId, row))) {
+          if (!all) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+          continue
+        }
+      } catch {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
     if (row.callId) candidates.push(row)
     else skipped.push({ transcriptId: row.id, reason: 'unlinked' })
   }
@@ -229,6 +333,7 @@ export async function POST(req: NextRequest) {
         .where(and(
           inArray(schema.taskSuggestions.transcriptId, batch),
           inArray(schema.taskSuggestions.status, ['pending', 'snoozed']),
+          suggestionScope,
         ))
 
       if (!replace) {
@@ -253,7 +358,7 @@ export async function POST(req: NextRequest) {
               decidedAt: stamp,
               updatedAt: stamp,
             })
-            .where(inArray(schema.taskSuggestions.id, rows))
+            .where(and(inArray(schema.taskSuggestions.id, rows), suggestionScope))
         }
       }
 
@@ -266,6 +371,7 @@ export async function POST(req: NextRequest) {
           inArray(schema.taskSuggestions.transcriptId, batch),
           eq(schema.taskSuggestions.status, 'expired'),
           notLike(schema.taskSuggestions.dedupeKey, 'expired:%'),
+          suggestionScope,
         ))
 
       // Last, and deliberately: in replace mode a failure above must not

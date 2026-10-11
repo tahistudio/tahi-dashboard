@@ -53,6 +53,7 @@ import {
 // bell and email) lives in the shared writer, so an approved call suggestion
 // hands a request over exactly the way this route does.
 import { handOffRequest, MAX_HANDOFF_NOTE_CHARS, type HandOffInput } from '@/lib/request-writes'
+import { queueWorkSync, workSyncArmed } from '@/lib/slack/work-sync'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -190,5 +191,38 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     },
   )
 
+  // The Slack thread line (CN.3), the counterpart of the hand-off's own line:
+  // "Liam took it back from Ngaire Hutchins". The contact's name is read only
+  // when a line could go out at all, so a studio without Slack does exactly
+  // the work it did before.
+  if (workSyncArmed()) {
+    const name = await contactName(drizzle, request.waitingOnContactId)
+    await queueWorkSync(drizzle, [{
+      entityType: 'request',
+      entityId: id,
+      actor: { type: 'studio', clerkUserId: userId ?? null },
+      changes: [{
+        field: 'waitingOn',
+        from: name,
+        to: null,
+        phrase: name ? `took it back from ${name}` : 'took it back from the client',
+      }],
+    }])
+  }
+
   return NextResponse.json({ request: { id, waitingOn: null } })
+}
+
+/** A contact's name for the thread line, or null when it cannot be read. */
+async function contactName(drizzle: Drizzle, contactId: string): Promise<string | null> {
+  try {
+    const [row] = await drizzle
+      .select({ name: schema.contacts.name })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId))
+      .limit(1)
+    return row?.name?.trim() || null
+  } catch {
+    return null
+  }
 }

@@ -38,6 +38,7 @@ import { isTaskLevel, type TaskLevel } from '@/lib/tasks-views'
 import { coerceTaskLinks, setTaskLevel } from '@/lib/task-consistency'
 import { loadTaskLinks, requestOrgId, resolveAssigneeType } from '@/lib/task-access'
 import { resolveTeamMember } from '@/lib/team-identity'
+import { diffWorkFields, queueWorkSync, workSyncArmed, type WorkField } from '@/lib/slack/work-sync'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -461,6 +462,12 @@ export async function updateTaskRecord(
     updates.requestId = links.requestId
   }
 
+  // The before-state for the Slack thread line (CN.3), read only when a line
+  // could go out at all: Slack configured and a person writing. A system
+  // apply is the suggestion itself, whose card already says it was approved.
+  const syncing = actor.actorType === 'team_member' && workSyncArmed()
+  const before = syncing ? await readSyncedFields(drizzle, taskId) : null
+
   await drizzle.update(schema.tasks).set(updates).where(eq(schema.tasks.id, taskId))
 
   const task = await readTask(drizzle, taskId)
@@ -487,7 +494,65 @@ export async function updateTaskRecord(
     metadata: { fields: Object.keys(updates).filter(key => key !== 'updatedAt') },
   })
 
+  if (syncing) {
+    const changes = diffWorkFields(before ?? {}, writtenSyncedFields(updates))
+    if (changes.length > 0) {
+      await queueWorkSync(drizzle, [{
+        entityType: 'task',
+        entityId: taskId,
+        actor: { type: 'studio', clerkUserId: actor.actorId },
+        changes,
+      }])
+    }
+  }
+
   return { ok: true, task }
+}
+
+/**
+ * The fields a Slack thread line talks about, as the task stood before the
+ * write. Null when the row cannot be read, which diffs as "not read" rather
+ * than failing a write over a Slack nicety.
+ */
+async function readSyncedFields(
+  drizzle: Drizzle,
+  taskId: string,
+): Promise<Partial<Record<WorkField, string | null>> | null> {
+  try {
+    const [row] = await drizzle
+      .select({
+        status: schema.tasks.status,
+        assigneeId: schema.tasks.assigneeId,
+        dueDate: schema.tasks.dueDate,
+        priority: schema.tasks.priority,
+        title: schema.tasks.title,
+      })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, taskId))
+      .limit(1)
+    if (!row) return null
+    return {
+      status: row.status ?? null,
+      assignee: row.assigneeId ?? null,
+      dueDate: row.dueDate ?? null,
+      priority: row.priority ?? null,
+      title: row.title ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** The same fields as written, only those this patch actually set. */
+function writtenSyncedFields(updates: Record<string, unknown>): Partial<Record<WorkField, string | null>> {
+  const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
+  const after: Partial<Record<WorkField, string | null>> = {}
+  if ('status' in updates) after.status = text(updates.status)
+  if ('assigneeId' in updates) after.assignee = text(updates.assigneeId)
+  if ('dueDate' in updates) after.dueDate = text(updates.dueDate)
+  if ('priority' in updates) after.priority = text(updates.priority)
+  if ('title' in updates) after.title = text(updates.title)
+  return after
 }
 
 /** The task row, in the shape both writers return. */

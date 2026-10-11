@@ -451,6 +451,100 @@
   50% { opacity: 1; }
 }
 
+/* ---------- incomplete reads, on the fixed forest tile ---------- */
+
+.pfh-tile .pfh-partial,
+.pfh-tile .pfh-state-copy {
+  position: relative;
+  z-index: 1;
+  margin: 0.875rem 0;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.625rem;
+  background: rgba(0, 0, 0, 0.24);
+  color: #ffffff;
+  font: 500 0.8125rem/1.5 'Manrope', sans-serif;
+  overflow-wrap: anywhere;
+}
+.pfh-tile .pfh-partial { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+.pfh-tile .pfh-partial p { flex: 1 1 14rem; margin: 0; }
+.pfh-tile .pfh-state-copy p { margin: 0.25rem 0 0; }
+.pfh-tile .pfh-partial .pfh-btn,
+.pfh-tile .pfh-state-copy + .pfh-btn { min-height: 2.75rem; }
+
+/* ---------- one queue shared by the client home's lanes ---------- */
+
+.ov-client .ov-tb-lanes.phq-single { grid-template-columns: minmax(0, 1fr); }
+.ov-client .ov-lane { min-width: 0; }
+.ov-client .ov-lane-now .ln-t { overflow-wrap: anywhere; }
+.ov-client .phq-setup { border-style: dashed; background: transparent; }
+.ov-client .phq-queue { margin-top: 1rem; min-width: 0; }
+.ov-client .phq-head,
+.ov-client .phq-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+.ov-client .phq-head { justify-content: space-between; margin-bottom: 0.625rem; }
+.ov-client .phq-head h4 { margin: 0; color: var(--text); font: 700 0.8125rem 'Manrope', sans-serif; }
+.ov-client .phq-list { display: flex; flex-direction: column; gap: 0.5rem; list-style: none; padding: 0; margin: 0; }
+.ov-client .phq-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--bg-secondary);
+}
+.ov-client .phq-position {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  border-radius: var(--radius-leaf-sm);
+  background: var(--brand-100);
+  color: var(--brand-strong);
+  font: 700 0.75rem 'Manrope', sans-serif;
+}
+.ov-client .phq-title { min-width: 0; overflow-wrap: anywhere; }
+.ov-client .phq-title b { display: block; color: var(--text); font: 600 0.8125rem/1.4 'Manrope', sans-serif; }
+.ov-client .phq-title small { display: block; color: var(--text-muted); font: 500 0.75rem/1.4 'Manrope', sans-serif; }
+.ov-client .phq-controls { display: flex; gap: 0.25rem; }
+.ov-client .phq-controls button,
+.ov-client .phq-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.ov-client .phq-button { padding: 0.5rem 0.875rem; font: 600 0.8125rem 'Manrope', sans-serif; }
+.ov-client .phq-controls button:hover:not(:disabled),
+.ov-client .phq-button:hover:not(:disabled),
+.ov-client .phq-footer .ov-cta:hover:not(:disabled) { background: var(--brand-100); border-color: var(--brand); }
+.ov-client .phq-controls button:focus-visible,
+.ov-client .phq-button:focus-visible,
+.ov-client .phq-footer .ov-cta:focus-visible { outline: 0.125rem solid var(--brand); outline-offset: 0.125rem; }
+.ov-client .phq-controls button:disabled,
+.ov-client .phq-button:disabled,
+.ov-client .phq-footer .ov-cta:disabled,
+.ov-client .ov-pay:disabled { opacity: 0.5; cursor: not-allowed; }
+.ov-client .phq-error { color: var(--color-danger-ink, var(--text)); font: 600 0.8125rem/1.5 'Manrope', sans-serif; }
+.ov-client .phq-footer { margin-top: 1rem; }
+.ov-client .phq-footer .ov-cta { margin-left: auto; min-height: 2.75rem; }
+.ov-client .phq-plan-setup { color: var(--text); font: 600 0.875rem/1.5 'Manrope', sans-serif; }
+.ov-client .phq-plan-setup p { color: var(--text-muted); font-size: 0.8125rem; font-weight: 500; }
+
+@container (max-width: 46rem) {
+  .ov-client .phq-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .ov-client .phq-controls { grid-column: 2 / -1; justify-self: end; }
+  .ov-client .phq-footer { align-items: stretch; flex-direction: column; }
+  .ov-client .phq-footer .ov-cta { margin-left: 0; }
+}
+
 /* ---------- the studio team card (request detail rail, client audience) ---- */
 
 .pfh-team-rows {
