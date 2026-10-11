@@ -775,3 +775,6 @@ Liam's design-review boxes remain empty. REC.0 and WQA.0 are documented scopes,
 with audio-only calendar detection, PC audio/microphone capture, accurate cheap
 transcripts and manual recording preserved. No recorder or website QA embed
 was built in this batch. Vivaldi is saved as Liam's preferred browser.
+## 2026-10-11, Opus review of the Codex batch and the next 20
+
+Liam asked for Codex's 9 to 11 October work to be checked. Three fresh-context Opus reviews (billing, CN.3 integration, permissions) passed it with notes; findings and the ranked next 20 are in docs/superpowers/plans/2026-10-11-next-20.md, built from the Sonnet inventory docs/superpowers/plans/2026-10-11-open-task-inventory.md (158 open items, 85 verify-only, 24 contradictions). The billing review found that the 15:00 UTC sync-stripe run, the first unattended pass on the corrected live key, would auto-create a new client for every unmatched Stripe customer (about 25 active orgs have no stripe_customer_id). Fixed by Opus in 962b184b (auto-create off unless opted in; unmatched money skipped as no_client_linked and listed in the cron log), checked by a fresh Opus review and the full suite (423 files, 7,534 tests), deployed green at 10:46 UTC. Working model agreed with Liam: Opus leads, Sonnet builds, Codex takes grunt work, reviews scale to stakes, fresh session per batch.
