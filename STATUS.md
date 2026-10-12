@@ -1,11 +1,24 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-12** by Claude Code (per-person MCP connector with a designer profile, committed locally, NOT deployed). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-12** by Claude Code (per-person MCP connector with a designer profile LIVE; Liam to reconnect). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
-## Work in progress, 2026-10-12: per-person MCP connector (Decision #070)
+## Live 2026-10-12: per-person MCP connector (Decision #070)
 
-Built and committed locally. The worker MCP consent is a Clerk sign-in at
+LIVE on production 2026-10-12 (NZ): dashboard 0870fb71 (Deploy dashboard
+38187345857 green), migration 0112 applied (Liam full, Staci designer, read
+back through /api/admin/mcp/identity), MCP_IDENTITY_SECRET on both workers,
+OAUTH_TOKEN_SIGNING_KEY and OAUTH_TOKEN_EPOCH on tahi-mcp-server, worker
+2a01b12b (MCP worker deploy 38190140830 green, version fd518c44, rollback
+target cf744676 is the old shared-key build). Smoke: key form 410,
+client_credentials refused, unauthenticated calls 401, dashboard health green.
+There never was an OAUTH_APPROVAL_KEY secret (the old form fell back to
+OAUTH_CLIENT_SECRET). Waiting on Liam: reconnect and run the test checklist
+(first item: the consent cookie survives the cross-site callback), then
+Staci connects. Not yet seen live: the signed-in consent page at 375px and in
+dark mode.
+
+The design as built: The worker MCP consent is a Clerk sign-in at
 /mcp/authorize instead of the shared approval key; every token names one team
 member and their profile (team_members.mcp_profile, migration 0112). Liam is
 full (unchanged behaviour), Staci is designer (reads everything, writes tasks,
@@ -16,7 +29,7 @@ lib/mcp-designer-routes.ts). MCP writes record the real person through a
 signed actor header; authorisation is still the service token. New tool
 hand_off_to_developer.
 
-Cutover order (each step verified before the next): push the dashboard
+Cutover order used (each step verified before the next): push the dashboard
 commit alone and wait for Deploy dashboard green; apply 0112 and check the
 profile rows; list any active_timers rows whose user_id is api-service (they
 become unreachable once timers are owned per person) and stop only those more
