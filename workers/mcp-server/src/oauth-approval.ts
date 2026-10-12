@@ -3,10 +3,11 @@
  *
  * Before this module existed, GET /authorize minted an authorization code
  * for anyone who knew the (semi public) client id, and that code exchanged
- * for a full admin access token over every client's data. The endpoint now
- * renders a consent page that requires a pre shared approval key, and the
- * callback target is checked against an allowlist so a forged authorize
- * link cannot ship the code to somebody else's server.
+ * for a full admin access token over every client's data. Consent is now a
+ * Clerk sign-in on the dashboard naming one team member and their MCP
+ * profile (Decision #070), and the callback target is checked against an
+ * allowlist so a forged authorize link cannot ship the code to somebody
+ * else's server.
  *
  * Everything here is string in, string out so it can be unit tested from
  * the app's Vitest run (workers/** is excluded from test collection, so the
@@ -158,46 +159,20 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-export type ApprovalPageParams = {
-  clientId: string
-  redirectUri: string
-  state: string | null
-  codeChallenge: string
-  codeChallengeMethod: string
-  /** Set when re-rendering after a rejected key. */
-  error?: string
-}
-
-function hiddenField(name: string, value: string | null): string {
-  if (value === null) return ''
-  return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`
-}
-
-/** Human readable host for the "this code will be sent to" line. */
-export function redirectHost(redirectUri: string): string {
-  try {
-    return new URL(redirectUri).host
-  } catch {
-    return redirectUri
-  }
-}
-
 /**
- * The consent screen. A Tahi admin has to paste the approval key here
- * before any authorization code is minted.
+ * The page the worker shows when a consent callback cannot be honoured
+ * (expired request, bad assertion, throttled). Consent itself happens on the
+ * dashboard's /mcp/authorize page behind a Clerk sign-in (Decision #070);
+ * the shared approval key form that used to live here is retired.
  */
-export function renderApprovalPage(params: ApprovalPageParams): string {
-  const errorBlock = params.error
-    ? `<p class="error" role="alert">${escapeHtml(params.error)}</p>`
-    : ''
-
+export function renderConsentErrorPage(message: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>Approve MCP access</title>
+<title>Connect Claude</title>
 <style>
   :root {
     --surface: #ffffff;
@@ -205,10 +180,15 @@ export function renderApprovalPage(params: ApprovalPageParams): string {
     --ink: #121a0f;
     --ink-muted: #5a6657;
     --line: #d4e0d0;
-    --brand: #5a824e;
-    --brand-dark: #425f39;
-    --danger: #b3261e;
-    --danger-bg: #fef2f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1b1a18;
+      --surface-sunk: #131211;
+      --ink: #f2f0ea;
+      --ink-muted: #b4b0a6;
+      --line: #34322e;
+    }
   }
   * { box-sizing: border-box; }
   body {
@@ -233,79 +213,13 @@ export function renderApprovalPage(params: ApprovalPageParams): string {
     padding: 1.75rem;
   }
   h1 { margin: 0 0 0.5rem; font-size: 1.25rem; }
-  p { margin: 0 0 1rem; color: var(--ink-muted); font-size: 0.875rem; }
-  dl { margin: 0 0 1.25rem; font-size: 0.8125rem; }
-  dt { color: var(--ink-muted); }
-  dd { margin: 0 0 0.5rem; word-break: break-all; }
-  dd .full { display: block; color: var(--ink-muted); }
-  label { display: block; font-size: 0.8125rem; font-weight: 600; margin-bottom: 0.375rem; }
-  input[type="password"] {
-    width: 100%;
-    min-height: 2.75rem;
-    padding: 0 0.75rem;
-    font-size: 1rem;
-    color: var(--ink);
-    background: var(--surface);
-    border: 0.0625rem solid var(--line);
-    border-radius: 0.5rem;
-  }
-  button {
-    width: 100%;
-    min-height: 2.75rem;
-    margin-top: 1rem;
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--surface);
-    background: var(--brand);
-    border: 0.0625rem solid var(--brand);
-    border-radius: 0 0.625rem 0 0.625rem;
-    cursor: pointer;
-  }
-  button:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
-  input:focus-visible, button:focus-visible {
-    outline: 0.125rem solid var(--brand-dark);
-    outline-offset: 0.125rem;
-  }
-  .error {
-    color: var(--danger);
-    background: var(--danger-bg);
-    border: 0.0625rem solid var(--danger);
-    border-radius: 0.5rem;
-    padding: 0.625rem 0.75rem;
-    font-size: 0.8125rem;
-  }
+  p { margin: 0; color: var(--ink-muted); font-size: 0.875rem; }
 </style>
 </head>
 <body>
   <main class="card">
-    <h1>Approve MCP access</h1>
-    <p>
-      This grants the Tahi Dashboard MCP connector full admin access to every
-      client's data for 24 hours, with refresh. Only approve a request you
-      started yourself, and read the whole callback address below before you
-      do: the host on its own does not tell you where the code lands.
-    </p>
-    ${errorBlock}
-    <dl>
-      <dt>Callback</dt>
-      <dd>
-        <strong>${escapeHtml(redirectHost(params.redirectUri))}</strong>
-        <span class="full">${escapeHtml(params.redirectUri)}</span>
-      </dd>
-      <dt>Client</dt>
-      <dd>${escapeHtml(params.clientId)}</dd>
-    </dl>
-    <form method="POST" action="/authorize" autocomplete="off">
-      ${hiddenField('client_id', params.clientId)}
-      ${hiddenField('redirect_uri', params.redirectUri)}
-      ${hiddenField('response_type', 'code')}
-      ${hiddenField('state', params.state)}
-      ${hiddenField('code_challenge', params.codeChallenge)}
-      ${hiddenField('code_challenge_method', params.codeChallengeMethod)}
-      <label for="approval_key">Approval key</label>
-      <input id="approval_key" name="approval_key" type="password" required autofocus />
-      <button type="submit">Approve access</button>
-    </form>
+    <h1>Could not connect Claude</h1>
+    <p role="alert">${escapeHtml(message)}</p>
   </main>
 </body>
 </html>`

@@ -1,10 +1,11 @@
 /**
  * Tahi Dashboard MCP Server (Cloudflare Worker)
  *
- * Implements MCP JSON-RPC 2.0 over HTTP transport.
- * Proxies tool calls to the Tahi Dashboard API at Webflow Cloud.
- *
- * Full feature parity with the stdio MCP server (mcp-server/index.ts).
+ * Implements MCP JSON-RPC 2.0 over HTTP transport and proxies tool calls to
+ * the Tahi Dashboard API. Every session belongs to one team member with one
+ * MCP profile (Decision #070): tools/list and tools/call both apply the
+ * profile table in tool-profiles.ts, and every dashboard call carries a
+ * signed actor header so writes are recorded against that person.
  */
 
 import { requestToolCall } from './request-tools'
@@ -22,22 +23,44 @@ import {
   parseTokenEpoch,
   pruneApprovalAttempts,
   recordFailedApproval,
-  renderApprovalPage,
+  renderConsentErrorPage,
   timingSafeEquals,
   type ApprovalAttempts,
 } from './oauth-approval'
 import { coerceArgs, coerceBoolean, coerceSubtasks } from './coerce'
+import { gateToolCall, instructionsForProfile, toolsForProfile } from './tool-profiles'
+import { assertSafeIdArgs, assertSafePath } from './path-safety'
+import {
+  CONSENT_REQUEST_TTL_SECONDS,
+  MCP_ACTOR_HEADER,
+  actorClaims,
+  isUsableIdentitySecret,
+  nowSeconds,
+  parseMcpProfile,
+  randomNonce,
+  signIdentityEnvelope,
+  verifyIdentityEnvelope,
+  type ConsentRequestClaims,
+  type McpProfile,
+} from '../../../lib/mcp-identity'
 
 interface Env {
   TAHI_API_TOKEN: string
   OAUTH_CLIENT_ID: string
-  OAUTH_CLIENT_SECRET: string
-  // Pre shared key a Tahi admin types on the /authorize consent screen.
-  // Without it no authorization code is ever minted. Falls back to
-  // OAUTH_CLIENT_SECRET so the connector keeps working before the
-  // dedicated secret is set. Set it with:
-  //   wrangler secret put OAUTH_APPROVAL_KEY
-  OAUTH_APPROVAL_KEY?: string
+  // Kept for the connector configuration only; no longer a signing key and
+  // no longer accepted as a client_credentials password (Decision #070).
+  OAUTH_CLIENT_SECRET?: string
+  // Signs every authorization code, access token and refresh token. Its own
+  // value, never shared with the connector settings, at least 32 characters.
+  // Rotating it ends every session. Set it with:
+  //   wrangler secret put OAUTH_TOKEN_SIGNING_KEY
+  OAUTH_TOKEN_SIGNING_KEY?: string
+  // Shared with the dashboard (same value on both). Signs the consent request
+  // the worker sends to /mcp/authorize, the consent assertion the dashboard
+  // sends back, and the per-call actor header. At least 32 characters.
+  // Without it /authorize answers 503 and no code is ever minted. Set it with:
+  //   wrangler secret put MCP_IDENTITY_SECRET
+  MCP_IDENTITY_SECRET?: string
   // Extra hosts allowed as OAuth callback targets, comma separated.
   // claude.ai, claude.com and loopback are always allowed.
   OAUTH_REDIRECT_HOSTS?: string
@@ -82,11 +105,28 @@ function corsResponse(body: unknown, status = 200): Response {
 // Dashboard API proxy
 // ---------------------------------------------------------------------------
 
+/**
+ * What every dashboard call authenticates with: the service bearer (the
+ * authorisation) and, for a named person's session, the signed actor
+ * envelope (the recorded actor only).
+ */
+interface DashboardCredential {
+  bearer: string
+  actor: string | null
+}
+
+function dashboardHeaders(token: DashboardCredential): Record<string, string> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token.bearer}` }
+  if (token.actor) headers[MCP_ACTOR_HEADER] = token.actor
+  return headers
+}
+
 async function apiFetch(
   path: string,
-  token: string,
+  token: DashboardCredential,
   opts?: { method?: string; body?: Record<string, unknown>; params?: Record<string, string> },
 ): Promise<unknown> {
+  assertSafePath(DASHBOARD_URL, path)
   const url = new URL(`${DASHBOARD_URL}${path}`)
   if (opts?.params) {
     for (const [k, v] of Object.entries(opts.params)) {
@@ -97,7 +137,7 @@ async function apiFetch(
   const res = await fetch(url.toString(), {
     method: opts?.method ?? 'GET',
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...dashboardHeaders(token),
       'Content-Type': 'application/json',
     },
     body: opts?.body ? JSON.stringify(opts.body) : undefined,
@@ -112,12 +152,12 @@ async function apiFetch(
 }
 
 /** Shorthand: GET with optional query params */
-function apiGet(path: string, token: string, params?: Record<string, string>) {
+function apiGet(path: string, token: DashboardCredential, params?: Record<string, string>) {
   return apiFetch(path, token, { params })
 }
 
 /** Shorthand: POST/PATCH/PUT/DELETE with body */
-function apiWrite(path: string, token: string, method: string, body?: Record<string, unknown>) {
+function apiWrite(path: string, token: DashboardCredential, method: string, body?: Record<string, unknown>) {
   return apiFetch(path, token, { method, body: body ?? {} })
 }
 
@@ -160,6 +200,7 @@ async function mrFetch(
 ): Promise<unknown> {
   if (!cfg.token) throw new Error(MANYREQUESTS_TOKEN_MISSING)
 
+  assertSafePath(cfg.baseUrl, path)
   const url = new URL(`${cfg.baseUrl}${path}`)
   if (opts?.params) {
     for (const [k, v] of Object.entries(opts.params)) {
@@ -1926,6 +1967,11 @@ export const TOOLS: ToolDef[] = [
     note: prop('string', 'Optional note giving the contact more context'),
     due_at: prop('string', 'Optional ISO date the studio needs an answer by'),
   }, ['request_id', 'contact_id', 'reason']),
+  tool('hand_off_to_developer', 'Hand a task or request to the developer (Liam) when it needs developer work. Adds him to it without removing anyone (as a request assignee, or as the task assignee when the task has none), posts an internal note saying what is needed, and notifies him in the dashboard. Never emails anyone and never reaches a client.', {
+    subjectType: prop('string', 'What is being handed off', { enum: ['task', 'request'] }),
+    subjectId: prop('string', 'The task id or request id'),
+    note: prop('string', 'What developer work is needed, in a sentence or two (at most 2000 characters)'),
+  }, ['subjectType', 'subjectId', 'note']),
   tool('hand_back_request', 'Hand a request back from the client contact it is waiting on: clears the pointer and notifies the Tahi owner. Also happens automatically when the named contact approves, uploads a file, or replies on the request.', {
     request_id: prop('string', 'Request ID'),
     note: prop('string', 'Optional note explaining the hand-back'),
@@ -2099,10 +2145,10 @@ export const TOOLS: ToolDef[] = [
 // Tool executor
 // ---------------------------------------------------------------------------
 
-async function executeTool(
+export async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  token: string,
+  token: DashboardCredential,
   mr: MrConfig,
 ): Promise<string> {
   const json = (data: unknown) => JSON.stringify(data, null, 2)
@@ -3272,6 +3318,12 @@ async function executeTool(
         dueAt: s('due_at'),
       }))
     }
+    case 'hand_off_to_developer':
+      return json(await apiWrite('/api/admin/developer-handoff', token, 'POST', {
+        subjectType: need('subjectType'),
+        subjectId: need('subjectId'),
+        note: need('note'),
+      }))
     case 'hand_back_request': {
       const requestId = s('request_id')
       if (!requestId) throw new Error('request_id is required')
@@ -3377,7 +3429,7 @@ async function executeTool(
       // Export returns raw markdown, not JSON. Fetch + return as-is.
       const url = new URL(`${DASHBOARD_URL}/api/admin/sitemap/export`)
       const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: dashboardHeaders(token),
       })
       if (!res.ok) throw new Error(`Export failed: ${res.status}`)
       return res.text()
@@ -3483,10 +3535,23 @@ function jsonRpcError(
   return corsResponse({ jsonrpc: '2.0', id, error: { code, message } }, status)
 }
 
-async function handleJsonRpc(body: JsonRpcRequest, env: Env): Promise<Response> {
+/**
+ * The credential every dashboard call carries: the service bearer, which is
+ * the authorisation, plus the signed actor envelope naming the person the
+ * call is made for, which only changes the recorded actor
+ * (lib/server-auth.ts). Signed per call with a five minute life.
+ */
+async function dashboardCredential(session: McpSession, env: Env): Promise<DashboardCredential> {
+  const actor = await signIdentityEnvelope(actorClaims(session.identity), env.MCP_IDENTITY_SECRET)
+  return { bearer: env.TAHI_API_TOKEN, actor }
+}
+
+async function handleJsonRpc(body: JsonRpcRequest, env: Env, session: McpSession): Promise<Response> {
   if (body.jsonrpc !== '2.0') {
     return jsonRpcError(body.id, -32600, 'Invalid JSON-RPC version', 400)
   }
+
+  const personName = session.identity.name || 'the person you are working for'
 
   switch (body.method) {
     case 'initialize':
@@ -3495,15 +3560,16 @@ async function handleJsonRpc(body: JsonRpcRequest, env: Env): Promise<Response> 
         capabilities: { tools: {} },
         serverInfo: {
           name: 'Tahi Dashboard MCP Server',
-          version: '2.0.0',
+          version: '3.0.0',
         },
+        instructions: instructionsForProfile(session.profile, personName),
       })
 
     case 'notifications/initialized':
       return jsonRpcSuccess(body.id, {})
 
     case 'tools/list':
-      return jsonRpcSuccess(body.id, { tools: TOOLS })
+      return jsonRpcSuccess(body.id, { tools: toolsForProfile(TOOLS, session.profile) })
 
     case 'tools/call': {
       const toolParams = body.params as
@@ -3519,14 +3585,39 @@ async function handleJsonRpc(body: JsonRpcRequest, env: Env): Promise<Response> 
         return jsonRpcError(body.id, -32602, `Unknown tool: ${toolParams.name}`)
       }
 
+      // Normalise once against the tool's own schema: connectors send
+      // booleans as strings and arrays as one string, and every dispatcher
+      // below reads arguments as typed. Then the profile gate: the same
+      // table that hid the tool from tools/list refuses it here, and the
+      // confirmation flag is stripped before anything reaches the dashboard.
+      const coerced = coerceArgs(toolDef.inputSchema, toolParams.arguments ?? {})
       try {
-        // Normalise once against the tool's own schema: connectors send
-        // booleans as strings and arrays as one string, and every dispatcher
-        // below reads arguments as typed.
+        // Ids end up in URL paths; one that is not an id could steer the call
+        // to another route (security review H1). Every profile.
+        assertSafeIdArgs(coerced)
+      } catch (err) {
+        return jsonRpcSuccess(body.id, {
+          content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : 'invalid id'}` }],
+          isError: true,
+        })
+      }
+      const gate = gateToolCall(toolParams.name, coerced, session.profile, personName, {
+        declaredArgs: Object.keys(toolDef.inputSchema.properties ?? {}),
+        teamMemberId: session.identity.tm,
+      })
+      if (!gate.ok) {
+        console.warn(`[tools/call] ${session.profile} profile refused ${toolParams.name} for ${session.identity.tm}`)
+        return jsonRpcSuccess(body.id, {
+          content: [{ type: 'text', text: `Error: ${gate.message}` }],
+          isError: true,
+        })
+      }
+
+      try {
         const text = await executeTool(
           toolParams.name,
-          coerceArgs(toolDef.inputSchema, toolParams.arguments ?? {}),
-          env.TAHI_API_TOKEN,
+          gate.args,
+          await dashboardCredential(session, env),
           mrConfigFromEnv(env),
         )
         return jsonRpcSuccess(body.id, {
@@ -3549,12 +3640,59 @@ async function handleJsonRpc(body: JsonRpcRequest, env: Env): Promise<Response> 
 // ---------------------------------------------------------------------------
 // OAuth 2.1 Authorization Code Flow with PKCE
 // ---------------------------------------------------------------------------
+// Every token names one team member and their MCP profile (Decision #070).
+// The consent step is a Clerk sign-in on the dashboard, not a shared key:
+//
+//   GET /authorize           validate the OAuth params, sign them into an
+//                            mcp_consent_request and send the browser to the
+//                            dashboard's /mcp/authorize. Mints nothing.
+//   GET /authorize/callback  the dashboard sends the browser back with the
+//                            same request and a two minute mcp_consent
+//                            assertion (who approved, which profile). Both
+//                            verify, the nonces match, then the code is minted.
+//   POST /oauth/token        code exchange (PKCE) and refresh. Refresh asks
+//                            the dashboard whether the member is still active
+//                            with the same profile, so access is revoked by
+//                            clearing team_members.mcp_profile, no epoch bump.
+//
+// Tokens minted by the retired shared-key flow carry no identity and are
+// refused outright, so deploying this ends every old session at once.
 
 const TOKEN_EXPIRY_SECONDS = 60 * 60 * 24      // 24 hours (Decision #049)
 const REFRESH_EXPIRY_SECONDS = 60 * 60 * 24 * 30 // 30 days
-const CODE_EXPIRY_SECONDS = 600                  // 10 minutes
+// Codes are not single use (no server side store), so their window is kept
+// short; Claude exchanges them immediately (security review L2).
+const CODE_EXPIRY_SECONDS = 120                  // 2 minutes
 
-/** Sign a payload with HMAC-SHA256 using the client secret */
+/** Cookie binding the consent round trip to the browser that started it. */
+const CONSENT_COOKIE = '__Host-tahi_mcp_consent'
+
+/** The person a token belongs to. Carried in codes, access and refresh tokens. */
+interface McpIdentity {
+  tm: string
+  cu: string
+  p: McpProfile
+  name: string
+}
+
+/** What a validated access token grants this request. */
+interface McpSession {
+  profile: McpProfile
+  identity: McpIdentity
+}
+
+/**
+ * The key every code and token is signed with. Separate from
+ * OAUTH_CLIENT_SECRET (security review M3): the client secret sits in
+ * connector settings, and whoever holds the signing key can forge any
+ * identity. Null when unset or short, which fails every flow closed.
+ */
+function signingKey(env: Env): string | null {
+  const key = env.OAUTH_TOKEN_SIGNING_KEY?.trim()
+  return key && key.length >= 32 ? key : null
+}
+
+/** Sign a payload with HMAC-SHA256 using the token signing key */
 async function hmacSign(payload: string, secret: string): Promise<string> {
   const encoder = new TextEncoder()
   const key = await crypto.subtle.importKey(
@@ -3571,9 +3709,30 @@ async function hmacSign(payload: string, secret: string): Promise<string> {
     .replace(/=+$/, '')
 }
 
+/** UTF-8 safe base64url of a JSON payload (names may carry non-ASCII). */
+function encodePayload(payload: Record<string, unknown>): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload))
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function decodePayload(encoded: string): Record<string, unknown> | null {
+  try {
+    const padded = encoded.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - (encoded.length % 4)) % 4)
+    const binary = atob(padded)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
 /** Create a signed token: base64(payload).signature */
 async function createSignedToken(payload: Record<string, unknown>, secret: string): Promise<string> {
-  const encoded = btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const encoded = encodePayload(payload)
   const signature = await hmacSign(encoded, secret)
   return `${encoded}.${signature}`
 }
@@ -3586,80 +3745,103 @@ async function validateSignedToken(token: string, secret: string): Promise<Recor
   const [encoded, signature] = parts
   const expectedSig = await hmacSign(encoded, secret)
   // Length safe compare: this is the one comparison that decides whether a
-  // token is genuine, so it gets the same treatment as the approval key.
+  // token is genuine.
   if (!timingSafeEquals(signature, expectedSig)) return null
 
-  try {
-    const padded = encoded.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - (encoded.length % 4)) % 4)
-    const payload = JSON.parse(atob(padded)) as Record<string, unknown>
-    if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) return null
-    return payload
-  } catch {
-    return null
-  }
+  const payload = decodePayload(encoded)
+  if (!payload) return null
+  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) return null
+  return payload
 }
 
-/** Create a signed access token */
-async function createAccessToken(clientId: string, secret: string): Promise<{ token: string; expiresIn: number }> {
+function identityClaims(identity: McpIdentity): Record<string, unknown> {
+  return { tm: identity.tm, cu: identity.cu, p: identity.p, name: identity.name }
+}
+
+/** Read the identity a code or token carries, or null when it has none. */
+function readIdentity(payload: Record<string, unknown>): McpIdentity | null {
+  const profile = parseMcpProfile(payload.p)
+  if (typeof payload.tm !== 'string' || !payload.tm) return null
+  if (typeof payload.cu !== 'string' || !payload.cu) return null
+  if (!profile) return null
+  return { tm: payload.tm, cu: payload.cu, p: profile, name: typeof payload.name === 'string' ? payload.name : '' }
+}
+
+/** Create a signed access token for one person. */
+async function createAccessToken(clientId: string, identity: McpIdentity, secret: string): Promise<{ token: string; expiresIn: number }> {
   const now = Math.floor(Date.now() / 1000)
   const token = await createSignedToken({
     sub: clientId,
     iat: now,
     exp: now + TOKEN_EXPIRY_SECONDS,
     type: 'access_token',
+    ...identityClaims(identity),
   }, secret)
   return { token, expiresIn: TOKEN_EXPIRY_SECONDS }
 }
 
 /** Create a signed refresh token (Decision #049). Long-lived so Claude can
  *  silently mint a new access token instead of forcing the user to re-auth. */
-async function createRefreshToken(clientId: string, secret: string): Promise<{ token: string; expiresIn: number }> {
+async function createRefreshToken(clientId: string, identity: McpIdentity, secret: string): Promise<{ token: string; expiresIn: number }> {
   const now = Math.floor(Date.now() / 1000)
   const token = await createSignedToken({
     sub: clientId,
     iat: now,
     exp: now + REFRESH_EXPIRY_SECONDS,
     type: 'refresh_token',
+    ...identityClaims(identity),
   }, secret)
   return { token, expiresIn: REFRESH_EXPIRY_SECONDS }
 }
 
 /**
- * Refuse anything minted before OAUTH_TOKEN_EPOCH. Tokens carry no server
- * side record, so this is the only way to kill a refresh token early: a
- * payload with no `iat` predates the claim and is always older than a set
- * epoch, which is what revokes everything the auto-approving /authorize
- * handed out.
+ * Refuse anything minted before OAUTH_TOKEN_EPOCH. Kept as the emergency
+ * lever (a leaked OAUTH_TOKEN_SIGNING_KEY, say); day to day revocation is
+ * clearing a person's team_members.mcp_profile, which refresh checks.
  */
 function isRevokedByEpoch(payload: Record<string, unknown>, env: Env): boolean {
   return isMintedBeforeEpoch(payload, parseTokenEpoch(env.OAUTH_TOKEN_EPOCH))
 }
 
-/** Validate an access token */
-async function validateAccessToken(token: string, env: Env): Promise<boolean> {
-  const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
-  if (!payload) return false
-  if (isRevokedByEpoch(payload, env)) return false
-  return payload.sub === env.OAUTH_CLIENT_ID && payload.type === 'access_token'
-}
-
-/** Validate a refresh token. Returns the payload (so callers can check sub)
- *  or null if invalid/expired. */
-async function validateRefreshToken(token: string, env: Env): Promise<Record<string, unknown> | null> {
-  const payload = await validateSignedToken(token, env.OAUTH_CLIENT_SECRET)
+/**
+ * Validate an access token into a session. Every session names a person:
+ * identity-less tokens (the retired shared-key flow, the dropped
+ * client_credentials grant) are refused.
+ */
+async function validateAccessToken(token: string, env: Env): Promise<McpSession | null> {
+  const key = signingKey(env)
+  if (!key) return null
+  const payload = await validateSignedToken(token, key)
   if (!payload) return null
   if (isRevokedByEpoch(payload, env)) return null
-  if (payload.type !== 'refresh_token') return null
-  if (payload.sub !== env.OAUTH_CLIENT_ID) return null
-  return payload
+  if (payload.sub !== env.OAUTH_CLIENT_ID || payload.type !== 'access_token') return null
+  const identity = readIdentity(payload)
+  return identity ? { profile: identity.p, identity } : null
 }
 
-/** Create a signed authorization code (contains PKCE challenge + redirect_uri for validation) */
+/** Validate a refresh token, or say why not (logged for diagnosis). */
+async function validateRefreshToken(
+  token: string,
+  env: Env,
+): Promise<{ ok: true; identity: McpIdentity } | { ok: false; reason: string }> {
+  const key = signingKey(env)
+  if (!key) return { ok: false, reason: 'signing_key_missing' }
+  const payload = await validateSignedToken(token, key)
+  if (!payload) return { ok: false, reason: 'signature_or_expiry' }
+  if (isRevokedByEpoch(payload, env)) return { ok: false, reason: 'epoch' }
+  if (payload.type !== 'refresh_token') return { ok: false, reason: 'type' }
+  if (payload.sub !== env.OAUTH_CLIENT_ID) return { ok: false, reason: 'client' }
+  const identity = readIdentity(payload)
+  if (!identity) return { ok: false, reason: 'no_identity' }
+  return { ok: true, identity }
+}
+
+/** Create a signed authorization code (PKCE challenge, redirect_uri and the approving person). */
 async function createAuthCode(
   clientId: string,
   codeChallenge: string,
-  codeChallengeMethod: string,
   redirectUri: string,
+  identity: McpIdentity,
   secret: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
@@ -3669,38 +3851,67 @@ async function createAuthCode(
     exp: now + CODE_EXPIRY_SECONDS,
     type: 'auth_code',
     cc: codeChallenge,
-    ccm: codeChallengeMethod,
+    ccm: 'S256',
     ruri: redirectUri,
+    ...identityClaims(identity),
   }, secret)
 }
 
-/** Verify PKCE code_verifier against stored code_challenge */
+/** Verify a PKCE code_verifier against the stored S256 code_challenge. */
 async function verifyPkce(codeVerifier: string, codeChallenge: string, method: string): Promise<boolean> {
-  if (method === 'S256') {
-    const encoder = new TextEncoder()
-    const digest = await crypto.subtle.digest('SHA-256', encoder.encode(codeVerifier))
-    const computed = btoa(String.fromCharCode(...new Uint8Array(digest)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '')
-    return computed === codeChallenge
+  // Only S256 is ever minted (checkAuthorizeParams refuses anything else).
+  if (method !== 'S256') return false
+  const encoder = new TextEncoder()
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(codeVerifier))
+  const computed = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+  return timingSafeEquals(computed, codeChallenge)
+}
+
+/**
+ * Ask the dashboard whether this person still has MCP access with the same
+ * profile. 'unavailable' means the question could not be answered (network,
+ * 5xx): the caller answers 503 so Claude keeps its refresh token and retries,
+ * rather than invalid_grant, which would force a fresh consent.
+ */
+async function recheckIdentity(
+  identity: McpIdentity,
+  env: Env,
+): Promise<{ ok: true; name: string } | { ok: false; reason: string } | 'unavailable'> {
+  let res: Response
+  try {
+    const url = new URL(`${DASHBOARD_URL}/api/admin/mcp/identity`)
+    url.searchParams.set('teamMemberId', identity.tm)
+    res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${env.TAHI_API_TOKEN}` },
+    })
+  } catch {
+    return 'unavailable'
   }
-  // plain method
-  return codeVerifier === codeChallenge
+  // Only a 200 carrying a definite answer can revoke. Anything else (a 404
+  // during a deploy gap, a 403 from a token mix-up, a 429, a 5xx) is a
+  // server problem, answered as retryable so the person keeps their session.
+  if (!res.ok) {
+    console.warn(`[oauth/token] identity check answered HTTP ${res.status}`)
+    return 'unavailable'
+  }
+  let body: { active?: unknown; profile?: unknown; clerkUserId?: unknown; name?: unknown }
+  try {
+    body = (await res.json()) as typeof body
+  } catch {
+    return 'unavailable'
+  }
+  if (body.active !== true) return { ok: false, reason: 'inactive' }
+  if (parseMcpProfile(body.profile) !== identity.p) return { ok: false, reason: 'profile_changed' }
+  if (body.clerkUserId !== identity.cu) return { ok: false, reason: 'login_changed' }
+  return { ok: true, name: typeof body.name === 'string' && body.name ? body.name : identity.name }
 }
 
 // ---------------------------------------------------------------------------
-// /authorize: consent before any authorization code is minted
+// /authorize: consent through a Clerk sign-in on the dashboard
 // ---------------------------------------------------------------------------
-// GET  /authorize renders a consent page (never a code).
-// POST /authorize checks the pre shared approval key, then redirects back
-//      to the allowlisted callback with the code.
-// An authorization code exchanges for a full admin token over every
-// client's data, so knowing the client id must not be enough.
-//
-// Closing the door does not retire the keys already cut: set
-// OAUTH_TOKEN_EPOCH at deploy time to refuse every token minted before the
-// fix (see isRevokedByEpoch above).
 
 type AuthorizeParams = {
   clientId: string
@@ -3713,16 +3924,6 @@ type AuthorizeParams = {
 type AuthorizeCheck =
   | { ok: true; value: AuthorizeParams }
   | { ok: false; response: Response }
-
-/**
- * The key a Tahi admin types on the consent screen. Set OAUTH_APPROVAL_KEY
- * to a long random value: the fallback to OAUTH_CLIENT_SECRET only exists so
- * the connector keeps working before the dedicated secret is set, and it
- * cannot be rotated without invalidating every issued token.
- */
-function approvalKey(env: Env): string {
-  return (env.OAUTH_APPROVAL_KEY?.trim() || env.OAUTH_CLIENT_SECRET || '').trim()
-}
 
 function htmlResponse(body: string, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(body, {
@@ -3737,10 +3938,27 @@ function htmlResponse(body: string, status = 200, extraHeaders?: Record<string, 
   })
 }
 
-// Failed approval attempts, keyed by source address. Isolate local rather
-// than KV, so it is a speed bump against one host grinding the key, not a
-// distributed lock. Every rejection is also logged, which is the part an
-// operator can actually act on.
+function redirectResponse(location: string, extraHeaders?: Record<string, string>): Response {
+  return new Response(null, {
+    status: 302,
+    headers: { Location: location, 'Cache-Control': 'no-store', ...CORS_HEADERS, ...extraHeaders },
+  })
+}
+
+function readCookie(request: Request, name: string): string | null {
+  const header = request.headers.get('Cookie') ?? ''
+  for (const part of header.split(';')) {
+    const [key, ...rest] = part.trim().split('=')
+    if (key === name) return rest.join('=')
+  }
+  return null
+}
+
+const CLEAR_CONSENT_COOKIE = `${CONSENT_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`
+
+// Failed consent callbacks, keyed by source address. Isolate local rather
+// than KV, so it is a speed bump, not a lock. The assertions are HMAC signed,
+// so this mostly makes probing visible in the logs.
 const approvalAttempts: ApprovalAttempts = new Map()
 
 /** Source address for throttling. Cloudflare sets CF-Connecting-IP itself. */
@@ -3748,7 +3966,7 @@ function attemptKey(request: Request): string {
   return request.headers.get('CF-Connecting-IP')?.trim() || 'unknown'
 }
 
-/** Shared validation for both halves of the authorize flow. */
+/** Validation for the OAuth parameters Claude sends to /authorize. */
 function checkAuthorizeParams(source: URLSearchParams, env: Env): AuthorizeCheck {
   const clientId = source.get('client_id')
   const redirectUri = source.get('redirect_uri')
@@ -3791,85 +4009,107 @@ function checkAuthorizeParams(source: URLSearchParams, env: Env): AuthorizeCheck
   return { ok: true, value: { clientId, redirectUri, state, codeChallenge, codeChallengeMethod } }
 }
 
-/** GET /authorize - render the consent page. Never mints a code. */
-function handleAuthorizeGet(request: Request, env: Env): Response {
+function identitySecretMissing(): Response {
+  return corsResponse(
+    { error: 'server_error', error_description: 'Consent is not configured. Set the MCP_IDENTITY_SECRET worker secret.' },
+    503,
+  )
+}
+
+/** GET /authorize - sign the request and send the browser to the dashboard consent page. */
+async function handleAuthorizeGet(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   const check = checkAuthorizeParams(url.searchParams, env)
   if (!check.ok) return check.response
+  if (!isUsableIdentitySecret(env.MCP_IDENTITY_SECRET) || !signingKey(env)) return identitySecretMissing()
 
-  if (!approvalKey(env)) {
-    return corsResponse(
-      { error: 'server_error', error_description: 'Approval is not configured. Set the OAUTH_APPROVAL_KEY worker secret.' },
-      503,
-    )
+  const now = nowSeconds()
+  const claims: ConsentRequestClaims = {
+    typ: 'mcp_consent_request',
+    cid: check.value.clientId,
+    ruri: check.value.redirectUri,
+    st: check.value.state,
+    cc: check.value.codeChallenge,
+    cb: `${url.origin}/authorize/callback`,
+    nonce: randomNonce(),
+    iat: now,
+    exp: now + CONSENT_REQUEST_TTL_SECONDS,
   }
-
-  return htmlResponse(renderApprovalPage(check.value))
+  const consentUrl = new URL(`${DASHBOARD_URL}/mcp/authorize`)
+  consentUrl.searchParams.set('req', await signIdentityEnvelope(claims, env.MCP_IDENTITY_SECRET))
+  // The callback only honours the browser that started this flow (security
+  // review M2): an approval of somebody else's /mcp/authorize link comes
+  // back without this cookie and mints nothing.
+  return redirectResponse(consentUrl.toString(), {
+    'Set-Cookie': `${CONSENT_COOKIE}=${claims.nonce}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${CONSENT_REQUEST_TTL_SECONDS}`,
+  })
 }
 
-/** POST /authorize - approval submitted; mint the code and redirect back. */
-async function handleAuthorizePost(request: Request, env: Env): Promise<Response> {
-  const contentType = request.headers.get('Content-Type') ?? ''
-  if (!contentType.includes('application/x-www-form-urlencoded')) {
-    return corsResponse({ error: 'unsupported_content_type' }, 400)
-  }
+function consentFailedPage(message: string, status: number): Response {
+  return htmlResponse(renderConsentErrorPage(message), status)
+}
 
-  const form = new URLSearchParams(await request.text())
-  const check = checkAuthorizeParams(form, env)
-  if (!check.ok) return check.response
-
-  const expected = approvalKey(env)
-  if (!expected) {
-    return corsResponse(
-      { error: 'server_error', error_description: 'Approval is not configured. Set the OAUTH_APPROVAL_KEY worker secret.' },
-      503,
-    )
-  }
-
+/**
+ * GET /authorize/callback - the dashboard hands back the signed request plus
+ * either the person's consent assertion or error=access_denied.
+ */
+async function handleAuthorizeCallback(request: Request, env: Env): Promise<Response> {
+  const key = signingKey(env)
+  if (!isUsableIdentitySecret(env.MCP_IDENTITY_SECRET) || !key) return identitySecretMissing()
+  const url = new URL(request.url)
   const now = Date.now()
   const source = attemptKey(request)
   pruneApprovalAttempts(approvalAttempts, now)
 
   if (failedApprovalCount(approvalAttempts, source, now) >= APPROVAL_ATTEMPT_LIMIT) {
-    console.warn(`[authorize] throttled: ${APPROVAL_ATTEMPT_LIMIT} failed approvals from ${source}`)
+    console.warn(`[authorize] throttled: ${APPROVAL_ATTEMPT_LIMIT} failed consent callbacks from ${source}`)
     return htmlResponse(
-      renderApprovalPage({
-        ...check.value,
-        error: 'Too many failed approvals from this address. Wait ten minutes and try again.',
-      }),
+      renderConsentErrorPage('Too many failed attempts from this address. Wait ten minutes and start again from Claude.'),
       429,
       { 'Retry-After': String(Math.ceil(APPROVAL_ATTEMPT_WINDOW_MS / 1000)) },
     )
   }
 
-  if (!timingSafeEquals(form.get('approval_key') ?? '', expected)) {
+  const fail = (reason: string, message: string, status = 400): Response => {
     const count = recordFailedApproval(approvalAttempts, source, now)
-    console.warn(`[authorize] rejected approval key from ${source} (${count} in window)`)
-    return htmlResponse(
-      renderApprovalPage({ ...check.value, error: 'That approval key was not recognised.' }),
-      401,
-    )
+    console.warn(`[authorize] consent callback rejected (${reason}) from ${source} (${count} in window)`)
+    return consentFailedPage(message, status)
   }
 
-  // A correct key clears the window: an admin who fat-fingered it twice
-  // should not be carrying those failures into the next hour.
+  const requestClaims = await verifyIdentityEnvelope(url.searchParams.get('req'), env.MCP_IDENTITY_SECRET, 'mcp_consent_request')
+  if (!requestClaims) return fail('request', 'This connection attempt has expired. Start connecting again from Claude.')
+
+  // Defence in depth: the worker signed these itself, but re-check them
+  // against today's config before any code goes anywhere.
+  if (!timingSafeEquals(requestClaims.cid, env.OAUTH_CLIENT_ID ?? '')) return fail('client', 'This connection attempt is not valid.')
+  if (!isAllowedRedirectUri(requestClaims.ruri, parseAllowedRedirectHosts(env.OAUTH_REDIRECT_HOSTS))) {
+    return fail('redirect', 'This connection attempt is not valid.')
+  }
+
+  const cookieNonce = readCookie(request, CONSENT_COOKIE)
+  if (!cookieNonce || !timingSafeEquals(cookieNonce, requestClaims.nonce)) {
+    return fail('browser', 'This approval was not started in this browser. Start connecting again from Claude in this browser.')
+  }
+
+  const callback = new URL(requestClaims.ruri)
+  if (requestClaims.st) callback.searchParams.set('state', requestClaims.st)
+
+  if (url.searchParams.get('error') === 'access_denied') {
+    callback.searchParams.set('error', 'access_denied')
+    return redirectResponse(callback.toString(), { 'Set-Cookie': CLEAR_CONSENT_COOKIE })
+  }
+
+  const consent = await verifyIdentityEnvelope(url.searchParams.get('assertion'), env.MCP_IDENTITY_SECRET, 'mcp_consent')
+  if (!consent || !timingSafeEquals(consent.nonce, requestClaims.nonce)) {
+    return fail('assertion', 'The sign-in could not be confirmed. Start connecting again from Claude.')
+  }
+
   approvalAttempts.delete(source)
-
-  const { clientId, redirectUri, codeChallenge, codeChallengeMethod, state } = check.value
-  const code = await createAuthCode(clientId, codeChallenge, codeChallengeMethod, redirectUri, env.OAUTH_CLIENT_SECRET)
-
-  const redirectUrl = new URL(redirectUri)
-  redirectUrl.searchParams.set('code', code)
-  if (state) redirectUrl.searchParams.set('state', state)
-
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: redirectUrl.toString(),
-      'Cache-Control': 'no-store',
-      ...CORS_HEADERS,
-    },
-  })
+  const identity: McpIdentity = { tm: consent.tm, cu: consent.cu, p: consent.p, name: consent.name }
+  const code = await createAuthCode(requestClaims.cid, requestClaims.cc, requestClaims.ruri, identity, key)
+  console.warn(`[authorize] code minted for team member ${identity.tm} (${identity.p})`)
+  callback.searchParams.set('code', code)
+  return redirectResponse(callback.toString(), { 'Set-Cookie': CLEAR_CONSENT_COOKIE })
 }
 
 /** POST /oauth/token - Token exchange endpoint */
@@ -3884,10 +4124,16 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
     const body = await request.json() as Record<string, string>
     params = new URLSearchParams(body)
   } else {
+    console.warn(`[oauth/token] unsupported content type: ${contentType || 'none'}`)
     return corsResponse({ error: 'unsupported_content_type' }, 400)
   }
 
   const grantType = params.get('grant_type')
+  const key = signingKey(env)
+  if (!key) {
+    console.warn('[oauth/token] OAUTH_TOKEN_SIGNING_KEY is not configured')
+    return corsResponse({ error: 'temporarily_unavailable', error_description: 'Token signing is not configured' }, 503)
+  }
 
   // ── Authorization code exchange ───────────────────────────────────
   if (grantType === 'authorization_code') {
@@ -3904,30 +4150,27 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
       return corsResponse({ error: 'invalid_client' }, 401)
     }
 
-    // Validate the auth code
-    const codePayload = await validateSignedToken(code, env.OAUTH_CLIENT_SECRET)
-    if (!codePayload || codePayload.type !== 'auth_code' || codePayload.sub !== clientId) {
+    const codePayload = await validateSignedToken(code, key)
+    if (!codePayload || codePayload.type !== 'auth_code' || codePayload.sub !== clientId || isRevokedByEpoch(codePayload, env)) {
       return corsResponse({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }, 400)
     }
 
-    // A code minted before the epoch is dead even inside its ten minutes.
-    if (isRevokedByEpoch(codePayload, env)) {
+    const identity = readIdentity(codePayload)
+    if (!identity) {
       return corsResponse({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }, 400)
     }
 
-    // Validate redirect_uri matches
     if (redirectUri && codePayload.ruri !== redirectUri) {
       return corsResponse({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' }, 400)
     }
 
-    // Verify PKCE
     const pkceValid = await verifyPkce(codeVerifier, codePayload.cc as string, codePayload.ccm as string)
     if (!pkceValid) {
       return corsResponse({ error: 'invalid_grant', error_description: 'PKCE verification failed' }, 400)
     }
 
-    const { token: accessToken, expiresIn } = await createAccessToken(clientId, env.OAUTH_CLIENT_SECRET)
-    const { token: refreshToken } = await createRefreshToken(clientId, env.OAUTH_CLIENT_SECRET)
+    const { token: accessToken, expiresIn } = await createAccessToken(clientId, identity, key)
+    const { token: refreshToken } = await createRefreshToken(clientId, identity, key)
     return corsResponse({
       access_token: accessToken,
       token_type: 'bearer',
@@ -3938,31 +4181,48 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
   }
 
   // ── Refresh token exchange (Decision #049) ─────────────────────────
-  // Lets Claude silently mint a new access token without forcing the user
-  // through the consent screen every hour. RFC 6749 §6.
+  // Lets Claude silently mint a new access token. Every refresh re-checks
+  // the person with the dashboard, so revoking their profile takes effect
+  // at the next refresh without touching the epoch. Each rejection is
+  // logged with a reason code (never the token) so a forced re-consent can
+  // be diagnosed from worker logs.
   if (grantType === 'refresh_token') {
     const refreshToken = params.get('refresh_token')
     const clientId = params.get('client_id')
 
     if (!refreshToken) {
+      console.warn('[oauth/token] refresh rejected: missing refresh_token')
       return corsResponse({ error: 'invalid_request', error_description: 'refresh_token is required' }, 400)
     }
 
-    // client_id is optional in RFC 6749 §6 but we accept it for legacy
-    // clients. If supplied it must match.
+    // client_id is optional in RFC 6749 §6. If supplied it must match.
     if (clientId && clientId !== env.OAUTH_CLIENT_ID) {
+      console.warn('[oauth/token] refresh rejected: client_id mismatch')
       return corsResponse({ error: 'invalid_client' }, 401)
     }
 
-    const payload = await validateRefreshToken(refreshToken, env)
-    if (!payload) {
+    const checked = await validateRefreshToken(refreshToken, env)
+    if (!checked.ok) {
+      console.warn(`[oauth/token] refresh rejected: ${checked.reason}`)
       return corsResponse({ error: 'invalid_grant', error_description: 'Refresh token invalid or expired' }, 400)
     }
 
-    // Mint a fresh access token. Rotate the refresh token too (recommended
-    // by OAuth 2.1 security BCP) so a leaked one expires sooner.
-    const { token: newAccess, expiresIn } = await createAccessToken(env.OAUTH_CLIENT_ID, env.OAUTH_CLIENT_SECRET)
-    const { token: newRefresh } = await createRefreshToken(env.OAUTH_CLIENT_ID, env.OAUTH_CLIENT_SECRET)
+    const recheck = await recheckIdentity(checked.identity, env)
+    if (recheck === 'unavailable') {
+      console.warn(`[oauth/token] refresh deferred: identity check unavailable for ${checked.identity.tm}`)
+      return corsResponse({ error: 'temporarily_unavailable', error_description: 'Try again shortly' }, 503)
+    }
+    if (!recheck.ok) {
+      console.warn(`[oauth/token] refresh rejected: ${recheck.reason} for ${checked.identity.tm}`)
+      return corsResponse({ error: 'invalid_grant', error_description: 'Access for this person has changed. Connect again.' }, 400)
+    }
+
+    const identity: McpIdentity = { ...checked.identity, name: recheck.name }
+    // Rotate the refresh token too (OAuth 2.1 security BCP). The old one is
+    // not invalidated (no server side store); each refresh still re-checks
+    // the person, which is what revocation relies on (security review L3).
+    const { token: newAccess, expiresIn } = await createAccessToken(env.OAUTH_CLIENT_ID, identity, key)
+    const { token: newRefresh } = await createRefreshToken(env.OAUTH_CLIENT_ID, identity, key)
     return corsResponse({
       access_token: newAccess,
       token_type: 'bearer',
@@ -3972,32 +4232,13 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
     })
   }
 
-  // ── Client credentials (for direct API use) ──────────────────────
-  if (grantType === 'client_credentials') {
-    const clientId = params.get('client_id')
-    const clientSecret = params.get('client_secret')
-
-    if (!clientId || !clientSecret) {
-      return corsResponse({ error: 'invalid_request', error_description: 'client_id and client_secret required' }, 400)
-    }
-
-    if (clientId !== env.OAUTH_CLIENT_ID || clientSecret !== env.OAUTH_CLIENT_SECRET) {
-      return corsResponse({ error: 'invalid_client' }, 401)
-    }
-
-    const { token, expiresIn } = await createAccessToken(clientId, env.OAUTH_CLIENT_SECRET)
-    return corsResponse({
-      access_token: token,
-      token_type: 'bearer',
-      expires_in: expiresIn,
-    })
-  }
-
+  // client_credentials is gone (security review M3): it handed a full,
+  // nameless session to anyone holding the client secret.
   return corsResponse({ error: 'unsupported_grant_type' }, 400)
 }
 
-/** Extract and validate bearer token from request */
-async function authenticateRequest(request: Request, env: Env): Promise<Response | null> {
+/** Extract and validate the bearer token; the session it grants, or a 401. */
+async function authenticateRequest(request: Request, env: Env): Promise<McpSession | Response> {
   const origin = new URL(request.url).origin
   const resourceMetadataUrl = `${origin}/.well-known/oauth-protected-resource`
 
@@ -4013,9 +4254,8 @@ async function authenticateRequest(request: Request, env: Env): Promise<Response
     })
   }
 
-  const token = authHeader.slice(7)
-  const valid = await validateAccessToken(token, env)
-  if (!valid) {
+  const session = await validateAccessToken(authHeader.slice(7), env)
+  if (!session) {
     return new Response(JSON.stringify({ error: 'invalid_token', message: 'Token is invalid or expired' }), {
       status: 401,
       headers: {
@@ -4026,7 +4266,7 @@ async function authenticateRequest(request: Request, env: Env): Promise<Response
     })
   }
 
-  return null // Auth passed
+  return session
 }
 
 // ---------------------------------------------------------------------------
@@ -4050,7 +4290,7 @@ function handleAuthServerMetadata(origin: string): Response {
     token_endpoint: `${origin}/oauth/token`,
     // Decision #049: advertise refresh_token so Claude knows it can silently
     // mint a new access token instead of forcing reauth every hour.
-    grant_types_supported: ['authorization_code', 'refresh_token', 'client_credentials'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
     response_types_supported: ['code'],
     token_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
     code_challenge_methods_supported: ['S256'],
@@ -4089,9 +4329,16 @@ export default {
         return handleAuthServerMetadata(url.origin)
       }
 
-      // OAuth authorize endpoint: renders the consent page, mints nothing
+      // OAuth authorize endpoint: sends the browser to the dashboard's
+      // Clerk-protected consent page, mints nothing
       if (url.pathname === '/authorize') {
         return handleAuthorizeGet(request, env)
+      }
+
+      // The dashboard hands the browser back here with the person's signed
+      // consent; only now is a code minted
+      if (url.pathname === '/authorize/callback') {
+        return handleAuthorizeCallback(request, env)
       }
 
       // Server info
@@ -4100,7 +4347,7 @@ export default {
           name: 'Tahi Dashboard MCP Server',
           version: '2.3.0',
           description: 'Access Tahi Dashboard data and operations through the Model Context Protocol',
-          auth: 'OAuth 2.0 authorization_code with PKCE and an admin approval step',
+          auth: 'OAuth 2.0 authorization_code with PKCE; consent is a Clerk sign-in on the dashboard, one team member and profile per session',
           tokenEndpoint: `${url.origin}/oauth/token`,
           resourceMetadata: `${url.origin}/.well-known/oauth-protected-resource`,
           manyRequestsConfigured: !!mrConfigFromEnv(env).token,
@@ -4118,10 +4365,13 @@ export default {
     // ── POST endpoints ────────────────────────────────────────────────
 
     if (request.method === 'POST') {
-      // Consent form submit. Public by design: the approval key inside the
-      // form body is what authorises it, not a bearer token.
+      // The shared approval key form is retired (Decision #070). Say so
+      // instead of falling through to the bearer check.
       if (url.pathname === '/authorize') {
-        return handleAuthorizePost(request, env)
+        return corsResponse(
+          { error: 'invalid_request', error_description: 'The approval key flow was retired. Start connecting again from Claude and sign in with your Tahi account.' },
+          410,
+        )
       }
 
       // OAuth token endpoint (no bearer auth required, uses client credentials)
@@ -4130,15 +4380,16 @@ export default {
       }
 
       // MCP JSON-RPC endpoint (requires bearer auth)
-      const authError = await authenticateRequest(request, env)
-      if (authError) return authError
+      const session = await authenticateRequest(request, env)
+      if (session instanceof Response) return session
 
+      let body: JsonRpcRequest
       try {
-        const body = (await request.json()) as JsonRpcRequest
-        return handleJsonRpc(body, env)
+        body = (await request.json()) as JsonRpcRequest
       } catch {
         return jsonRpcError(undefined, -32700, 'Parse error', 400)
       }
+      return handleJsonRpc(body, env, session)
     }
 
     return corsResponse({ error: 'Method not allowed' }, 405)

@@ -3,7 +3,25 @@ import worker, { TOOLS } from '../../../workers/mcp-server/src/index'
 
 const env = {
   TAHI_API_TOKEN: 'qa-dashboard-token', OAUTH_CLIENT_ID: 'qa-connector',
-  OAUTH_CLIENT_SECRET: 'qa-only-oauth-secret',
+  OAUTH_TOKEN_SIGNING_KEY: 'qa-only-token-signing-key-0123456789',
+  MCP_IDENTITY_SECRET: 'qa-only-identity-secret-0123456789-abc',
+}
+
+/**
+ * A full-profile access token, signed the way the worker signs them. The
+ * client_credentials grant this spec used to call is gone (Decision #070):
+ * every session names a person.
+ */
+async function fullProfileToken(): Promise<string> {
+  const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const now = Math.floor(Date.now() / 1000)
+  const payload = b64url(new TextEncoder().encode(JSON.stringify({
+    sub: env.OAUTH_CLIENT_ID, iat: now, exp: now + 3600, type: 'access_token',
+    tm: 'tm-liam', cu: 'user_liam', p: 'full', name: 'Liam',
+  })))
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.OAUTH_TOKEN_SIGNING_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)))
+  return `${payload}.${b64url(sig)}`
 }
 const fetchMock = vi.fn<typeof fetch>()
 let accessToken: string
@@ -23,13 +41,7 @@ beforeEach(async () => {
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: 'invoice-qa', number: 'INV-QA' }), {
     headers: { 'Content-Type': 'application/json' },
   }))
-  const tokenResponse = await worker.fetch(new Request('https://mcp.example.test/oauth/token', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ grant_type: 'client_credentials', client_id: env.OAUTH_CLIENT_ID, client_secret: env.OAUTH_CLIENT_SECRET }),
-  }), env)
-  expect(tokenResponse.status).toBe(200)
-  const token = await tokenResponse.json() as { access_token: string }
-  accessToken = token.access_token
+  accessToken = await fullProfileToken()
 })
 
 afterEach(() => vi.unstubAllGlobals())

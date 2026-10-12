@@ -5,12 +5,15 @@
   //
   //   TAHI_API_TOKEN         bearer token the worker uses against the dashboard API
   //   OAUTH_CLIENT_ID        client id the Claude connector is configured with
-  //   OAUTH_CLIENT_SECRET    signing key for auth codes and access tokens
-  //   OAUTH_APPROVAL_KEY     key a Tahi admin types on the /authorize consent
-  //                          screen (optional: falls back to OAUTH_CLIENT_SECRET)
+  //   OAUTH_CLIENT_SECRET    connector setting only; signs nothing (Decision #070)
+  //   OAUTH_TOKEN_SIGNING_KEY signs codes, access and refresh tokens (32+ chars)
+  //   MCP_IDENTITY_SECRET    shared with the dashboard (same value, 32+ chars):
+  //                          signs the Clerk consent hand-off and the per-call
+  //                          actor header (Decision #070)
   //   OAUTH_REDIRECT_HOSTS   optional extra callback hosts, comma separated
   //   OAUTH_TOKEN_EPOCH      unix seconds; refuses every token minted before
-  //                          it. Bump on any suspected leak to revoke.
+  //                          it. Emergency lever only; revoke one person by
+  //                          clearing team_members.mcp_profile.
   //   MANYREQUESTS_API_TOKEN ManyRequests API bearer token
   //   MANYREQUESTS_BASE_URL  optional ManyRequests API base URL override
   //

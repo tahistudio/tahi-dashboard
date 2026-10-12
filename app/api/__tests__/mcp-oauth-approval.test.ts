@@ -4,8 +4,8 @@
  * The worker used to mint an authorization code for anyone who knew the
  * client id, and that code exchanges for a full admin token over every
  * client's data. These helpers are what stands in front of it now: a
- * callback allowlist, a length-safe key comparison, and an HTML consent
- * page that carries the request forward without letting a value out of
+ * callback allowlist, length-safe comparisons, throttling and the error
+ * page the consent callback shows, which never lets a value out of
  * the query string into markup unescaped.
  *
  * The worker lives outside the app's Vitest roots (workers/** is excluded
@@ -24,8 +24,8 @@ import {
   parseTokenEpoch,
   pruneApprovalAttempts,
   recordFailedApproval,
-  redirectHost,
-  renderApprovalPage,
+
+  renderConsentErrorPage,
   timingSafeEquals,
   type ApprovalAttempts,
 } from '../../../workers/mcp-server/src/oauth-approval'
@@ -183,68 +183,18 @@ describe('escapeHtml', () => {
   })
 })
 
-describe('redirectHost', () => {
-  it('shows the host the code would be sent to', () => {
-    expect(redirectHost('https://claude.ai/api/mcp/auth_callback')).toBe('claude.ai')
-  })
-  it('falls back to the raw value when it will not parse', () => {
-    expect(redirectHost('not a url')).toBe('not a url')
-  })
-})
-
-describe('renderApprovalPage', () => {
-  const params = {
-    clientId: 'client-123',
-    redirectUri: 'https://claude.ai/api/mcp/auth_callback',
-    state: 'st4te',
-    codeChallenge: 'chall3nge',
-    codeChallengeMethod: 'S256',
-  }
-
-  it('posts the request back with every parameter preserved', () => {
-    const html = renderApprovalPage(params)
-    expect(html).toContain('method="POST" action="/authorize"')
-    expect(html).toContain('name="client_id" value="client-123"')
-    expect(html).toContain('name="state" value="st4te"')
-    expect(html).toContain('name="code_challenge" value="chall3nge"')
-    expect(html).toContain('name="code_challenge_method" value="S256"')
-    expect(html).toContain('name="approval_key"')
+describe('renderConsentErrorPage', () => {
+  it('shows the reason as an alert and never carries a form or a code', () => {
+    const html = renderConsentErrorPage('This connection attempt has expired.')
+    expect(html).toContain('This connection attempt has expired.')
+    expect(html).toContain('role="alert"')
+    expect(html).not.toContain('<form')
+    expect(html).not.toContain('approval_key')
   })
 
-  it('omits state entirely when the client sent none', () => {
-    const html = renderApprovalPage({ ...params, state: null })
-    expect(html).not.toContain('name="state"')
-  })
-
-  it('never mints or shows a code', () => {
-    expect(renderApprovalPage(params)).not.toContain('name="code"')
-  })
-
-  it('shows the whole callback, not just the host', () => {
-    // https://claude.ai/<anything-else> renders identically to the real
-    // callback when only the host is printed, so the human check the page
-    // asks for is impossible without the path.
-    const html = renderApprovalPage(params)
-    expect(html).toContain('https://claude.ai/api/mcp/auth_callback')
-    const forged = renderApprovalPage({ ...params, redirectUri: 'https://claude.ai/not-the-real-callback' })
-    expect(forged).toContain('https://claude.ai/not-the-real-callback')
-    expect(forged).not.toBe(html)
-  })
-
-  it('escapes the callback rather than reflecting markup from it', () => {
-    const html = renderApprovalPage({ ...params, redirectUri: 'https://claude.ai/"><script>alert(1)</script>' })
-    expect(html).not.toContain('<script>alert(1)</script>')
-  })
-
-  it('escapes hostile parameters instead of reflecting them', () => {
-    const html = renderApprovalPage({ ...params, state: '"><script>alert(1)</script>' })
+  it('escapes the message rather than reflecting markup', () => {
+    const html = renderConsentErrorPage('<script>alert(1)</script>')
     expect(html).not.toContain('<script>alert(1)</script>')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
-  })
-
-  it('shows the rejection when a key did not match', () => {
-    const html = renderApprovalPage({ ...params, error: 'That approval key was not recognised.' })
-    expect(html).toContain('That approval key was not recognised.')
-    expect(html).toContain('role="alert"')
   })
 })
