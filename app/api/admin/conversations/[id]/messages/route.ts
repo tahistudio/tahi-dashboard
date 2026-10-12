@@ -1,3 +1,4 @@
+import { attributedTeamMemberId } from '@/lib/mcp-actor'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -154,7 +155,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { orgId, userId } = await getRequestAuth(req)
+    const auth = await getRequestAuth(req)
+    const { orgId, userId } = auth
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
@@ -235,7 +237,9 @@ export async function POST(
       conversationId,
       requestId: conv.requestId ?? null,
       orgId: msgOrgId,
-      authorId: participantId,
+      // A worker MCP call is authored by the person behind it, not the
+      // service participant; access above still ran as `userId`.
+      authorId: attributedTeamMemberId(auth) ?? participantId,
       authorType: 'team_member',
       body: content,
       isInternal: body.isInternal ?? false,
@@ -300,6 +304,9 @@ export async function POST(
           body: content.slice(0, 200),
           entityType: 'message',
           entityId: conversationId,
+          // An internal note never reaches a client contact, mention or not
+          // (security re-review L-C; the request thread route already did this).
+          allowContacts: !body.isInternal,
         })
       }
     }

@@ -23,6 +23,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
 import { queueWorkSync, workSyncArmed, type WorkChange } from '@/lib/slack/work-sync'
 
@@ -39,7 +40,9 @@ function chunkIds<T>(ids: readonly T[]): T[][] {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
+  const actorUserId = attributedUserId(auth)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json().catch(() => null) as {
@@ -156,7 +159,7 @@ export async function POST(req: NextRequest) {
         participantId: p.participantId,
         participantType: p.participantType,
         role: p.role,
-        addedById: userId,
+        addedById: actorUserId,
         addedByType: 'team_member',
         addedAt: now,
         removedAt: null,
@@ -192,7 +195,7 @@ export async function POST(req: NextRequest) {
         .map(request => ({
           entityType: 'request' as const,
           entityId: request.id,
-          actor: { type: 'studio' as const, clerkUserId: userId ?? null },
+          actor: { type: 'studio' as const, clerkUserId: actorUserId ?? null },
           changes: [{ field: 'assignee' as const, from: request.assigneeId ?? null, to: owner.participantId }],
         }))
       if (batch.length > 0) await queueWorkSync(drizzle, batch)
@@ -206,7 +209,7 @@ export async function POST(req: NextRequest) {
     const [actor] = await drizzle
       .select({ id: schema.teamMembers.id })
       .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+      .where(eq(schema.teamMembers.clerkUserId, actorUserId ?? ''))
       .limit(1)
 
     for (const [memberId, items] of addedByMember) {

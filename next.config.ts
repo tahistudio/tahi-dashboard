@@ -81,6 +81,19 @@ const nextConfig: NextConfig = {
     ],
   },
 
+  // The Claude connector consent screen and its form target must never render
+  // inside a frame (clickjacking of the Approve button).
+  async headers() {
+    const noFraming = [
+      { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+      { key: 'X-Frame-Options', value: 'DENY' },
+    ]
+    return [
+      { source: '/mcp/:path*', headers: noFraming },
+      { source: '/api/mcp/consent', headers: noFraming },
+    ]
+  },
+
   // Permanent redirects for renamed routes. Old bookmarks land on the
   // new page without breaking. Add new entries here when renaming.
   async redirects() {

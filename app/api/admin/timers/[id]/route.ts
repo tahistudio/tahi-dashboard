@@ -18,12 +18,14 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq } from 'drizzle-orm'
 import { stopAndLogTimer } from '@/lib/timer-helpers'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const deniedFeature = await requireFeature({ userId, orgId }, 'time')
   if (deniedFeature) return deniedFeature
@@ -43,7 +45,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const [timer] = await drizzle
     .select()
     .from(schema.activeTimers)
-    .where(and(eq(schema.activeTimers.id, id), eq(schema.activeTimers.userId, userId)))
+    .where(and(eq(schema.activeTimers.id, id), eq(schema.activeTimers.userId, attributedUserId(auth) ?? userId)))
     .limit(1)
   if (!timer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -90,11 +92,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const deniedFeature = await requireFeature({ userId, orgId }, 'time')
   if (deniedFeature) return deniedFeature
   if (!userId) return NextResponse.json({ error: 'No user' }, { status: 400 })
+
+  // The owner is the person behind a worker MCP call (lib/mcp-actor.ts).
+  const timerOwnerId = attributedUserId(auth) ?? userId
 
   const { id } = await params
   const { searchParams } = new URL(req.url)
@@ -106,7 +112,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const [timer] = await drizzle
     .select()
     .from(schema.activeTimers)
-    .where(and(eq(schema.activeTimers.id, id), eq(schema.activeTimers.userId, userId)))
+    .where(and(eq(schema.activeTimers.id, id), eq(schema.activeTimers.userId, timerOwnerId)))
     .limit(1)
   if (!timer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -119,6 +125,6 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   // row, derives the client from the timer's own request or task row, and
   // returns { logged, reason, reasonMessage, hours, startedAt, endedAt }
   // so the UI can tell the user when the hours did not land.
-  const result = await stopAndLogTimer(drizzle, timer, userId)
+  const result = await stopAndLogTimer(drizzle, timer, timerOwnerId)
   return NextResponse.json({ ok: true, ...result })
 }

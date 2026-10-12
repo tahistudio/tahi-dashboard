@@ -9,6 +9,7 @@ import { TASK_STATUSES } from '@/lib/status-config'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { createNotification, createNotificationsForRecipient } from '@/lib/notifications'
 import { resolveTeamMember } from '@/lib/team-identity'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { diffWorkFields, queueWorkSync, workSyncArmed, type WorkChange, type WorkField } from '@/lib/slack/work-sync'
 
 /**
@@ -47,7 +48,8 @@ const BULK_ASSIGN_NAMED_LIMIT = 5
  * of rows this user actually changed rather than the number of ids they sent.
  */
 export async function PATCH(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -149,7 +151,7 @@ export async function PATCH(req: NextRequest) {
   // picker only. And never the caller: taking work on yourself is not news.
   const newAssigneeId = updates.assigneeId
   if (newAssigneeId) {
-    const me = await resolveTeamMember(drizzle, userId)
+    const me = await resolveTeamMember(drizzle, attributedUserId(auth))
     if (me?.id !== newAssigneeId) {
       const moved = reachable.filter(task => task.assigneeId !== newAssigneeId)
       if (moved.length > BULK_ASSIGN_NAMED_LIMIT) {
@@ -198,7 +200,7 @@ export async function PATCH(req: NextRequest) {
         priority: task.priority ?? null,
       }, after)
       if (changes.length > 0) {
-        batch.push({ entityType: 'task', entityId: task.id, actor: { type: 'studio', clerkUserId: userId ?? null }, changes })
+        batch.push({ entityType: 'task', entityId: task.id, actor: { type: 'studio', clerkUserId: attributedUserId(auth) ?? null }, changes })
       }
     }
     if (batch.length > 0) await queueWorkSync(drizzle, batch)

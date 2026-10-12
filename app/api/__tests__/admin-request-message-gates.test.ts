@@ -102,6 +102,8 @@ import { POST as postMessage } from '@/app/api/admin/requests/[id]/messages/rout
 import { NextRequest } from 'next/server'
 import * as dbModule from '@/lib/db'
 import { notifyMentionedPerson, notifyOrgContacts } from '@/lib/notifications'
+import { getRequestAuth } from '@/lib/server-auth'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 const dbMock = (dbModule as unknown as { __mock: DbMockHandles }).__mock
 
@@ -172,6 +174,36 @@ describe('POST /api/admin/requests/[id]/messages, the client gates', () => {
     seed({ ...clientVisibleRequest, isInternal: true })
     await postMessage(messageRequest({ body: '<p>Ordinary message.</p>' }), params)
     expect(notifyOrgContacts).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/admin/requests/[id]/messages, worker MCP actor', () => {
+  it('authors the message as the actor while the access gate keeps the service identity', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValueOnce({
+      orgId: 'org_tahi',
+      userId: 'api-service',
+      sessionId: null,
+      mcpActor: { teamMemberId: 'tm_staci', clerkUserId: 'user_staci', profile: 'full' },
+    })
+    seed(clientVisibleRequest)
+    const res = await postMessage(messageRequest({ body: '<p>On it.</p>' }), params)
+    expect(res.status).toBe(201)
+
+    // The author is the team member resolved from the ACTOR's Clerk id.
+    const database = await dbModule.db()
+    const inserted = vi.mocked(database.insert).mock.results[0].value as { values: ReturnType<typeof vi.fn> }
+    expect(inserted.values).toHaveBeenCalledWith(expect.objectContaining({ authorId: 'tm_1', authorType: 'team_member' }))
+    expect(requireAccessToOrg).toHaveBeenCalledWith(expect.anything(), 'api-service', 'org_client')
+  })
+
+  it('falls back to the api-service author when the actor has no roster row', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValueOnce({ orgId: 'org_tahi', userId: 'api-service', sessionId: null })
+    dbMock.state.queues = { requests: [[clientVisibleRequest]], team_members: [[]] }
+    const res = await postMessage(messageRequest({ body: '<p>On it.</p>' }), params)
+    expect(res.status).toBe(201)
+    const database = await dbModule.db()
+    const inserted = vi.mocked(database.insert).mock.results[0].value as { values: ReturnType<typeof vi.fn> }
+    expect(inserted.values).toHaveBeenCalledWith(expect.objectContaining({ authorId: 'api-service' }))
   })
 })
 

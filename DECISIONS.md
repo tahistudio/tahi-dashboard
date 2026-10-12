@@ -1397,3 +1397,84 @@ seats may queue permitted calls through rebuild with readNow:false. Verified
 scheduler secrets keep the automated path.
 
 ---
+
+## #070 - Claude Connector Sessions Belong to One Team Member With One Profile
+
+**Date:** 2026-10-12
+
+**Decision (Liam):** The worker MCP connector stops using one shared approval
+key. Consent is a Clerk sign-in on the dashboard (`/mcp/authorize`), for Liam
+and Staci alike. Every code, access token and refresh token names the team
+member and their MCP profile, stored server side in
+`team_members.mcp_profile` (migration 0112, kept out of db/schema.ts and read
+through raw SQL so a deploy before the migration cannot break team_members
+selects). Liam is `full` (exactly the old behaviour). Staci is `designer`:
+reads everything including finance; writes tasks (any task, checklist items,
+comments, blockers, dependencies, templates), timers and time (always as
+herself, never with a rate or billable flag), and request fields, people,
+read state and structure. Anything a client sees or receives needs
+`confirmed: true` after she said yes in chat: studio messages
+(post_request_message and post_message unless internal, send_message),
+hand_off_request, status changes other than archiving, request steps,
+flipping a request's isInternal, and deleting files. portal_send_message is
+blocked (it writes AS a client). Undeclared arguments are dropped.
+Everything else is blocked, by default deny, in BOTH tools/list and
+tools/call (workers/mcp-server/src/tool-profiles.ts), and the dashboard
+refuses any designer write outside lib/mcp-designer-routes.ts as a second
+layer (its id wildcard never matches static siblings such as requests/bulk).
+Date, priority, category and archive edits stay unconfirmed by Liam's call.
+
+**Mechanics:** Codes and tokens are signed with OAUTH_TOKEN_SIGNING_KEY, a
+value of its own (OAUTH_CLIENT_SECRET sits in connector settings, so it no
+longer signs anything); the client_credentials grant is gone, so every
+session names a person. Codes live two minutes. A __Host- cookie set at
+/authorize binds the consent round trip to the browser that started it, and
+the consent page refuses framing. Every id-named tool argument must look like
+an id and every dashboard path must survive URL normalisation unchanged, so
+arguments cannot steer a call to another route. One shared secret,
+MCP_IDENTITY_SECRET, on both workers, signs
+three typed envelopes (lib/mcp-identity.ts): the consent request the worker
+sends to the dashboard, the two minute consent assertion the dashboard sends
+back (nonce bound to the request), and a five minute per-call actor header.
+The dashboard trusts the actor header only together with a valid
+TAHI_API_TOKEN, and only for the RECORDED actor (lib/mcp-actor.ts); a
+header that is present but does not verify fails closed (unauthenticated),
+never the bare service identity:
+authorisation stays the service identity `api-service`, so every existing
+gate behaves as before. Each refresh asks the dashboard
+(GET /api/admin/mcp/identity, service bearer only) whether the member is
+still active with the same profile and Clerk login, and still in the Tahi
+Clerk org; only a definite "no" revokes, anything else is retryable.
+Clearing a person's
+`mcp_profile` revokes them at their next refresh without bumping
+OAUTH_TOKEN_EPOCH. An unanswered check returns 503 so Claude retries instead
+of forcing consent. Identity-less tokens from the shared-key era are refused
+outright, so deploying the worker ends every old session.
+
+**New tool:** `hand_off_to_developer` (both profiles) adds the developer
+(setting `mcp.developerTeamMemberId`, else the single `full` profile member)
+to a task or request without removing anyone, posts an internal note and
+notifies him in-app. It never emails and never reaches a client.
+
+**Rationale:** Staci needs her own identity and a server-enforced designer
+scope; a shared key gave whoever held it full admin over every client. The
+profile check lives in the worker because the worker is the only thing that
+knows which person a session is; the dashboard keeps one service
+authorisation so no route's access behaviour changes.
+
+**Implications:** New MCP tools are hidden from the designer until classified
+in tool-profiles.ts, and a new designer write also needs its route in
+lib/mcp-designer-routes.ts (a spec dispatches every tool to prove the two
+agree). Write libraries take an optional recordedActorId that is used only
+where the actor is recorded; access checks keep the service identity.
+portal_send_message keeps no studio attribution because it is not reachable
+by the designer. The per-call actor is not re-checked against D1 on every
+call and a rotated refresh token is not invalidated (no server side store),
+so revocation takes effect at the next refresh, within one access token
+lifetime (24 hours).
+
+**The 24 hour re-prompt Liam reported for Staci:** not reproduced. The old
+refresh grant worked for form, Basic and JSON token requests in a local probe,
+so no code cause was found. The worker now logs every refresh rejection with
+a reason code and answers 503 when the identity check cannot answer, so the
+next forced reconnect can be diagnosed from worker logs.

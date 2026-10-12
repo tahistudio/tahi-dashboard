@@ -25,6 +25,7 @@ import { schema } from '@/db/d1'
 import { db } from '@/lib/db'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { scopedOrgIds, type OrgScope } from '@/lib/access-scope'
 import { isOrgInScope } from '../_scoping/org-scope'
 import type { InboxViewer } from '@/lib/messages-store'
@@ -61,10 +62,15 @@ export async function gateAdminMessages(req: NextRequest): Promise<AdminMessages
   // Participants and message authors are stored by teamMembers.id, falling
   // back to the Clerk user id for a member with no row yet. Both ids are
   // carried so "my own message" is recognised either way.
+  //
+  // The viewer is who the reads and writes are RECORDED for (message author,
+  // read cursor, "my own message"), so a worker MCP call carries the person
+  // behind it. Scope and feature access above stay on `auth.userId`.
+  const viewerUserId = attributedUserId(auth) ?? auth.userId
   const [member] = await database
     .select({ id: schema.teamMembers.id })
     .from(schema.teamMembers)
-    .where(eq(schema.teamMembers.clerkUserId, auth.userId))
+    .where(eq(schema.teamMembers.clerkUserId, viewerUserId))
     .limit(1)
 
   return {
@@ -74,7 +80,7 @@ export async function gateAdminMessages(req: NextRequest): Promise<AdminMessages
       userId: auth.userId,
       scope,
       viewer: {
-        clerkUserId: auth.userId,
+        clerkUserId: viewerUserId,
         domainId: member?.id ?? null,
         userType: 'team_member',
       },

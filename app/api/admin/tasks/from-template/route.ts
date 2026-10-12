@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { createNotification } from '@/lib/notifications'
 import { resolveTeamMember } from '@/lib/team-identity'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 /** Task templates carry their own six-value priority enum (none, low,
  *  medium, standard, high, urgent) while a task takes three. Mapping here is
@@ -20,7 +21,8 @@ const TEMPLATE_PRIORITY_ALIASES: Record<string, string> = {
 // ── POST /api/admin/tasks/from-template ────────────────────────────────────
 // Create a new task (and its subtasks) from a template
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
     // matching column in migration 0087, so the template's number is the one
     // the detail's Estimate field and the My week total should start from.
     estimatedHours: template.estimatedHours ?? null,
-    createdById: userId,
+    createdById: attributedUserId(auth),
     tags: '[]',
     trackId: body.trackId ?? null,
     position: null,
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
     const statedActor = typeof body.actorTeamMemberId === 'string' && body.actorTeamMemberId.trim()
       ? body.actorTeamMemberId.trim()
       : null
-    const actorId = statedActor ?? (await resolveTeamMember(drizzle, userId))?.id ?? null
+    const actorId = statedActor ?? (await resolveTeamMember(drizzle, attributedUserId(auth)))?.id ?? null
     if (actorId !== body.assigneeId) {
       await createNotification(drizzle, {
         recipient: { teamMemberId: body.assigneeId },

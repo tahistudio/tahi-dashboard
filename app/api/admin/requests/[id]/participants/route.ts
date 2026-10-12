@@ -28,6 +28,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, isNull, desc, inArray as inList } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { notifyTeamMember, requestParticipantTitle } from '@/lib/notifications'
 import { ALL_PARTICIPANT_ROLES, type RequestParticipantRole } from '@/lib/request-participants'
 
@@ -99,7 +100,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
+  const actorUserId = attributedUserId(auth)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
@@ -176,7 +179,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     participantId: body.participantId,
     participantType: body.participantType,
     role: body.role,
-    addedById: userId,
+    addedById: actorUserId,
     addedByType: 'team_member',
     addedAt: new Date().toISOString(),
     removedAt: null,
@@ -198,7 +201,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const [actor] = await drizzle
       .select({ id: schema.teamMembers.id })
       .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+      .where(eq(schema.teamMembers.clerkUserId, actorUserId ?? ''))
       .limit(1)
 
     if (body.participantId !== actor?.id) {

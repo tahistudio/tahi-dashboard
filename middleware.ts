@@ -234,6 +234,25 @@ export default clerkMiddleware(async (auth, req) => {
     }
   }
 
+  // Claude connector consent screen. A signed-out visitor is sent to sign-in
+  // here because auth.protect() renders a 404 in the OpenNext setup; the full
+  // path and query ride along as redirect_url so the signed request survives
+  // the round trip. Signed-in visitors fall through to the normal checks.
+  if (req.nextUrl.pathname.startsWith('/mcp/authorize')) {
+    const { userId } = await auth()
+    if (!userId) {
+      const url = req.nextUrl.clone()
+      const target = req.nextUrl.pathname + (req.nextUrl.search || '')
+      url.search = ''
+      url.searchParams.set('redirect_url', target)
+      url.pathname = '/sign-in'
+      const redirect = NextResponse.redirect(url)
+      redirect.headers.set('Content-Security-Policy', "frame-ancestors 'none'")
+      redirect.headers.set('X-Frame-Options', 'DENY')
+      return redirect
+    }
+  }
+
   // Bare domain root: redirect to the right home at the edge. The page-level
   // RSC redirect renders Next's 404 in the OpenNext external-middleware setup,
   // so we resolve it here where NextResponse.redirect is reliable.

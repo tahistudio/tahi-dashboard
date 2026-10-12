@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and, or, isNull } from 'drizzle-orm'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 // Design vocabulary (none/low/medium/high/urgent) plus the legacy 'standard'
 // value still present in older rows.
@@ -59,7 +60,8 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/task-templates - create a new task template
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -105,7 +107,7 @@ export async function POST(req: NextRequest) {
     estimatedHours: estimatedHours ?? null,
     orgId: body.orgId ?? null,
     defaultAssignee: body.defaultAssignee?.trim() || null,
-    createdById: userId ?? '',
+    createdById: attributedUserId(auth) ?? '',
     createdAt: now,
     updatedAt: now,
   })

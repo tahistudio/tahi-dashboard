@@ -8,6 +8,7 @@ import { guardTask } from '@/lib/task-access'
 import { resolveTeamMember } from '@/lib/team-identity'
 import { listTaskComments, postTaskComment } from '@/lib/task-comments'
 import { TAHI_BOT } from '@/lib/tahi-bot'
+import { attributedTeamMemberId } from '@/lib/mcp-actor'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -103,7 +104,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -132,6 +134,8 @@ export async function POST(
   const author = body.asBot
     ? { authorType: 'bot' as const, authorId: null }
     : await (async () => {
+        const actorMemberId = attributedTeamMemberId(auth)
+        if (actorMemberId) return { authorType: 'team_member' as const, authorId: actorMemberId }
         const member = await resolveTeamMember(drizzle, userId)
         return { authorType: 'team_member' as const, authorId: member?.id ?? userId ?? 'unknown' }
       })()

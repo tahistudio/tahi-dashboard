@@ -42,6 +42,7 @@ import { schema } from '@/db/d1'
 import type { DB } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { logAudit } from '@/lib/audit'
 import { notifyRequestTeam } from '@/lib/notify-request-team'
 import {
@@ -89,7 +90,8 @@ async function loadRequest(drizzle: Drizzle, id: string) {
 // ── POST : hand off ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
@@ -107,6 +109,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const result = await handOffRequest(drizzle, id, body, {
     actorType: 'team_member',
     actorId: userId,
+    recordedActorId: attributedUserId(auth),
   })
   if (!result.ok) {
     return NextResponse.json({ error: result.failure.error }, { status: result.failure.status })
@@ -120,7 +123,9 @@ export async function POST(req: NextRequest, { params }: Params) {
 // ── DELETE : hand back ───────────────────────────────────────────────────────
 
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
+  const actorUserId = attributedUserId(auth)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
@@ -161,7 +166,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   await logAudit(drizzle as unknown as DB, {
     action: AUDIT_HANDED_BACK,
-    userId,
+    userId: actorUserId,
     userType: 'team_member',
     entityType: 'request',
     entityId: id,
@@ -200,7 +205,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     await queueWorkSync(drizzle, [{
       entityType: 'request',
       entityId: id,
-      actor: { type: 'studio', clerkUserId: userId ?? null },
+      actor: { type: 'studio', clerkUserId: actorUserId ?? null },
       changes: [{
         field: 'waitingOn',
         from: name,

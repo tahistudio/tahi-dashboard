@@ -21,14 +21,18 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, inArray } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   if (!userId) return NextResponse.json({ error: 'No user' }, { status: 400 })
+  // The read cursor belongs to the person behind a worker MCP call.
+  const readerId = attributedUserId(auth) ?? userId
 
   const { id } = await params
   const database = await db()
@@ -50,7 +54,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     .from(schema.requestReads)
     .where(and(
       eq(schema.requestReads.requestId, id),
-      eq(schema.requestReads.userId, userId),
+      eq(schema.requestReads.userId, readerId),
       eq(schema.requestReads.userType, 'team_member'),
     ))
     .limit(1)
@@ -64,7 +68,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await drizzle.insert(schema.requestReads).values({
       id: crypto.randomUUID(),
       requestId: id,
-      userId,
+      userId: readerId,
       userType: 'team_member',
       lastReadAt: now,
     })

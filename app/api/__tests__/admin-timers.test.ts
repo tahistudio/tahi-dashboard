@@ -86,6 +86,8 @@ vi.mock('@/lib/db', () => {
 import { POST } from '@/app/api/admin/timers/route'
 import { DELETE } from '@/app/api/admin/timers/[id]/route'
 import { NextRequest } from 'next/server'
+import { getRequestAuth } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 
 function makePost(body: Record<string, unknown>, query = ''): NextRequest {
   return new NextRequest(`http://localhost:3000/api/admin/timers${query}`, {
@@ -259,5 +261,29 @@ describe('DELETE /api/admin/timers/[id]', () => {
     const body = await res.json() as { logged: boolean }
     expect(body.logged).toBe(false)
     expect(state.inserts.filter(i => i.table === 'timeEntries')).toHaveLength(0)
+  })
+})
+
+describe('POST /api/admin/timers, worker MCP actor', () => {
+  it('owns the timer as the actor while authorising as the service identity', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValueOnce({
+      orgId: 'org_tahi',
+      userId: 'api-service',
+      sessionId: null,
+      mcpActor: { teamMemberId: 'tm_staci', clerkUserId: 'user_staci', profile: 'designer' },
+    })
+    state.rows.tasks = [{ orgId: 'org_client_b', requestId: null }]
+    const res = await POST(makePost({ taskId: 'task1' }))
+    expect(res.status).toBe(201)
+    expect(startedTimer().userId).toBe('user_staci')
+    expect(requireFeature).toHaveBeenLastCalledWith({ userId: 'api-service', orgId: 'org_tahi' }, 'time')
+  })
+
+  it('keeps the shared api-service owner when no actor is present', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValueOnce({ orgId: 'org_tahi', userId: 'api-service', sessionId: null })
+    state.rows.tasks = [{ orgId: 'org_client_b', requestId: null }]
+    const res = await POST(makePost({ taskId: 'task1' }))
+    expect(res.status).toBe(201)
+    expect(startedTimer().userId).toBe('api-service')
   })
 })

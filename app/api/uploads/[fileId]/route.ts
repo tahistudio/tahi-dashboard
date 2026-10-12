@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { decideUploadDelete, decideUploadRead, resolveD1OrgId } from '@/lib/upload-access'
 import { logAudit } from '@/lib/audit'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RouteContext = { params: Promise<{ fileId: string }> }
@@ -109,7 +110,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
  * destructive admin write.
  */
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { userId, orgId: authOrgId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { userId, orgId: authOrgId } = auth
   if (!userId) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
   const { fileId } = await ctx.params
@@ -144,7 +146,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
   const isAdmin = isTahiAdmin(authOrgId)
   await logAudit(drizzle as unknown as DB, {
     action: 'file.deleted',
-    userId,
+    userId: attributedUserId(auth) ?? userId,
     userType: isAdmin ? 'team_member' : 'contact',
     entityType: 'file',
     entityId: fileId,

@@ -2455,6 +2455,15 @@ const MIGRATIONS: Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_digests_week_user ON slack_digests(week_key, slack_user_id)`,
     ],
   },
+  {
+    name: '0112',
+    description: `team_members.mcp_profile: which Claude connector profile a studio member gets when they sign in to connect Claude ('full', 'designer' or NULL). NULL means no connector access at all, so the default is deny. Seeded for Liam ('full', business@tahi.studio) and Staci ('designer', staci@tahi.studio); the seed UPDATEs only touch rows that are still NULL, so a profile changed by hand is never overwritten by a re-run. The column is deliberately NOT in db/schema.ts (like hourly_cost_rate): lib/mcp-profile-server.ts reads it through raw SQL and treats a missing column as no profile, so this migration is safe to apply AFTER the deploy. The ALTER is re-run safe through the runner's duplicate-column catch.`,
+    statements: [
+      `ALTER TABLE team_members ADD COLUMN mcp_profile text`,
+      `UPDATE team_members SET mcp_profile = 'full' WHERE lower(email) = 'business@tahi.studio' AND mcp_profile IS NULL`,
+      `UPDATE team_members SET mcp_profile = 'designer' WHERE lower(email) = 'staci@tahi.studio' AND mcp_profile IS NULL`,
+    ],
+  },
 ]
 
 export async function POST(req: NextRequest) {

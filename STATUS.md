@@ -1,7 +1,41 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-11** by Codex (both batches deployed; Lingorama recovered; scoped live QA complete). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-12** by Claude Code (per-person MCP connector with a designer profile, committed locally, NOT deployed). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+
+## Work in progress, 2026-10-12: per-person MCP connector (Decision #070)
+
+Built and committed locally. The worker MCP consent is a Clerk sign-in at
+/mcp/authorize instead of the shared approval key; every token names one team
+member and their profile (team_members.mcp_profile, migration 0112). Liam is
+full (unchanged behaviour), Staci is designer (reads everything, writes tasks,
+time and requests, anything a client sees or receives only with her
+confirmation in chat, everything else blocked by default deny in
+workers/mcp-server/src/tool-profiles.ts and again on the dashboard in
+lib/mcp-designer-routes.ts). MCP writes record the real person through a
+signed actor header; authorisation is still the service token. New tool
+hand_off_to_developer.
+
+Cutover order (each step verified before the next): push the dashboard
+commit alone and wait for Deploy dashboard green; apply 0112 and check the
+profile rows; list any active_timers rows whose user_id is api-service (they
+become unreachable once timers are owned per person) and stop only those more
+than 24 hours old, reporting the rest; set
+OAUTH_TOKEN_SIGNING_KEY (its own value, 32+ chars) on the worker and
+MCP_IDENTITY_SECRET (one value) on both the worker and the dashboard; only
+then push the worker commit; bump OAUTH_TOKEN_EPOCH and delete
+OAUTH_APPROVAL_KEY; Liam reconnects, then Staci. Deploying the worker ends
+every existing connector session.
+
+Staci's roughly 24 hour re-prompt: cause unknown. The old refresh path was
+proven to work for form, Basic and JSON token requests, so it was not a code
+bug that could be found locally. Every refresh rejection now logs a reason
+code and an unanswerable identity check returns a retryable 503; diagnose any
+further forced reconnect with `npx wrangler tail` on tahi-mcp-server.
+
+Open for Liam: designer time logged through log_request_time is billable at
+the client's default rate (the profile only stops her setting billable or a
+rate herself).
 
 ## Work in progress, 2026-10-11
 

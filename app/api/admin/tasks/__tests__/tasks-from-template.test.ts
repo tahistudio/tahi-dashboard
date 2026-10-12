@@ -25,8 +25,10 @@ let callerTeamMemberId: string | null = null
 // Denial wiring is exercised with the real guard in permission-write-guards.test.ts.
 vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
 
+let authResult: Record<string, unknown> = { orgId: 'tahi-org', userId: 'user_1' }
+
 vi.mock('@/lib/server-auth', () => ({
-  getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
+  getRequestAuth: async () => authResult,
   isTahiAdmin: () => true,
 }))
 
@@ -93,6 +95,31 @@ describe('POST /api/admin/tasks/from-template', () => {
       defaultPriority: 'medium',
       estimatedHours: 2,
       subtasks: '["Crawl","Report"]',
+    }
+  })
+
+  it('records the MCP actor as the creator while authorising as the service identity', async () => {
+    authResult = {
+      orgId: 'tahi-org',
+      userId: 'api-service',
+      mcpActor: { teamMemberId: 'tm_staci', clerkUserId: 'user_staci', profile: 'designer' },
+    }
+    try {
+      const res = await POST(post({ templateId: 'tpl1' }) as never)
+      expect(res.status).toBe(201)
+      expect(inserted[0].values.createdById).toBe('user_staci')
+    } finally {
+      authResult = { orgId: 'tahi-org', userId: 'user_1' }
+    }
+  })
+
+  it('records api-service when the service call carries no actor', async () => {
+    authResult = { orgId: 'tahi-org', userId: 'api-service' }
+    try {
+      await POST(post({ templateId: 'tpl1' }) as never)
+      expect(inserted[0].values.createdById).toBe('api-service')
+    } finally {
+      authResult = { orgId: 'tahi-org', userId: 'user_1' }
     }
   })
 

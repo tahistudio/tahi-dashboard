@@ -372,6 +372,8 @@ export async function addBlocker(
   userId: string | null,
   blocked: BlockerSubject,
   blocker: BlockerSubject,
+  /** Recorded creator when it differs from the caller (lib/mcp-actor.ts). Never an access input. */
+  actorUserId?: string | null,
 ): Promise<NextResponse> {
   if (rejectObviousPair(blocked, blocker) === 'self') {
     return NextResponse.json({ error: 'Something cannot wait on itself' }, { status: 400 })
@@ -448,7 +450,7 @@ export async function addBlocker(
     blockedId: blocked.id,
     blockerType: blocker.type,
     blockerId: blocker.id,
-    createdById: userId ?? null,
+    createdById: actorUserId ?? userId ?? null,
     createdAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
   })
 

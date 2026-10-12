@@ -57,6 +57,18 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export interface TaskWriteActor {
   actorType: 'team_member' | 'system'
   actorId: string | null
+  /**
+   * Who to RECORD as having done it (createdById, audit, Slack, "me"), when
+   * that differs from `actorId`: a worker MCP call is authorised as the
+   * service identity but recorded as the person behind it (lib/mcp-actor.ts).
+   * Never an access input: requireAccessToOrg keeps reading `actorId`.
+   */
+  recordedActorId?: string | null
+}
+
+/** The id recorded for a write: the person behind it, else the caller. */
+function recordedId(actor: TaskWriteActor): string | null {
+  return actor.recordedActorId ?? actor.actorId
 }
 
 export interface TaskCreateInput {
@@ -270,7 +282,7 @@ export async function createTaskRecord(
     ? input.actorTeamMemberId.trim()
     : null
   const me = assigneeType === 'team_member' && !statedActor && actor.actorType === 'team_member'
-    ? await resolveTeamMember(drizzle, actor.actorId)
+    ? await resolveTeamMember(drizzle, recordedId(actor))
     : null
   const actorTeamMemberId = statedActor ?? me?.id ?? null
 
@@ -297,7 +309,7 @@ export async function createTaskRecord(
 
   await drizzle.insert(schema.tasks).values({
     ...row,
-    createdById: actor.actorId,
+    createdById: recordedId(actor),
     tags: '[]',
     trackId: input.trackId ?? null,
     position: input.position ?? null,
@@ -324,7 +336,7 @@ export async function createTaskRecord(
 
   await logAudit(drizzle as unknown as DB, {
     action: 'task.created',
-    userId: actor.actorId,
+    userId: recordedId(actor),
     userType: auditActorType(actor),
     entityType: 'task',
     entityId: id,
@@ -476,7 +488,7 @@ export async function updateTaskRecord(
   // Notify the assignee when a task is handed to them. Two doors, one rule:
   // the create door answers exactly the same way.
   if (patch.assigneeId && updates.assigneeType !== 'contact') {
-    const me = actor.actorType === 'team_member' ? await resolveTeamMember(drizzle, actor.actorId) : null
+    const me = actor.actorType === 'team_member' ? await resolveTeamMember(drizzle, recordedId(actor)) : null
     await notifyAssignee(drizzle, {
       taskId,
       title: task.title ?? 'Untitled',
@@ -487,7 +499,7 @@ export async function updateTaskRecord(
 
   await logAudit(drizzle as unknown as DB, {
     action: 'task.updated',
-    userId: actor.actorId,
+    userId: recordedId(actor),
     userType: auditActorType(actor),
     entityType: 'task',
     entityId: taskId,
@@ -500,7 +512,7 @@ export async function updateTaskRecord(
       await queueWorkSync(drizzle, [{
         entityType: 'task',
         entityId: taskId,
-        actor: { type: 'studio', clerkUserId: actor.actorId },
+        actor: { type: 'studio', clerkUserId: recordedId(actor) },
         changes,
       }])
     }

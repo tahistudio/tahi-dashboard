@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { eq, desc, and, gte, lte, sql } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedTeamMemberId } from '@/lib/mcp-actor'
 import {
   createTimeEntry,
   timeEntryFailureResponse,
@@ -148,7 +149,8 @@ export async function GET(req: NextRequest) {
 // /api/admin/time-entries uses, so a rate typed on either surface is stored,
 // and an omitted one falls back to the client's default_hourly_rate.
 export async function POST(req: NextRequest) {
-  const { orgId: authOrgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId: authOrgId, userId } = auth
   if (!isTahiAdmin(authOrgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -167,7 +169,8 @@ export async function POST(req: NextRequest) {
 
   const draft: TimeEntryDraft = {
     orgId: body.orgId,
-    teamMemberId: body.teamMemberId,
+    // A worker MCP call that names no member logs for the person behind it.
+    teamMemberId: body.teamMemberId || (attributedTeamMemberId(auth) ?? undefined),
     requestId: body.requestId ?? null,
     hours: body.hours,
     date: body.date,

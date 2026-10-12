@@ -7,6 +7,7 @@ import { notifyMentionedPerson, notifyOrgContacts, notifyTeamMember } from '@/li
 import { messageSummary, threadReplyEmailPlan, toPlainText, truncate } from '@/lib/notification-email'
 import { parseMentions } from '@/lib/parse-mentions'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { chunkThreadIds, pickThreadConversationId } from '@/lib/request-thread'
 
 type Params = { params: Promise<{ id: string }> }
@@ -125,7 +126,10 @@ export async function GET(req: NextRequest, { params }: Params) {
 // ── POST /api/admin/requests/[id]/messages ───────────────────────────────────
 export async function POST(req: NextRequest, { params }: Params) {
   try {
-    const { orgId, userId } = await getRequestAuth(req)
+    const auth = await getRequestAuth(req)
+    const { orgId, userId } = auth
+    // Recorded author only; the access check below keeps using `userId`.
+    const actorUserId = attributedUserId(auth)
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
@@ -191,7 +195,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const [member] = await drizzle
       .select({ id: schema.teamMembers.id, name: schema.teamMembers.name })
       .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+      .where(eq(schema.teamMembers.clerkUserId, actorUserId ?? ''))
       .limit(1)
 
     const msgId = crypto.randomUUID()
@@ -200,7 +204,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       requestId: id,
       conversationId: body.conversationId ?? null,
       orgId: request.orgId,
-      authorId: member?.id ?? userId ?? 'unknown',
+      authorId: member?.id ?? actorUserId ?? 'unknown',
       authorType: 'team_member',
       body: (body.body ?? '').trim(),
       isInternal: body.isInternal ?? false,
@@ -251,7 +255,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         entityId: msgId,
         mentionedId: m.id,
         mentionedType: m.type,
-        mentionedById: member?.id ?? userId ?? 'unknown',
+        mentionedById: member?.id ?? actorUserId ?? 'unknown',
         createdAt: msgNow,
       }))
       try {
@@ -260,7 +264,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         // Mention insert failures should not block message sending
       }
 
-      const authorId = member?.id ?? userId ?? 'unknown'
+      const authorId = member?.id ?? actorUserId ?? 'unknown'
       for (const m of mentionedPeople) {
         await notifyMentionedPerson(drizzle, {
           mentionedId: m.id,
@@ -316,7 +320,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     // Notify request assignee about the new message (if sender is not the assignee)
-    if (request.assigneeId && request.assigneeId !== (member?.id ?? userId)) {
+    if (request.assigneeId && request.assigneeId !== (member?.id ?? actorUserId)) {
       await notifyTeamMember(drizzle, request.assigneeId, {
         type: 'new_message',
         title: `New message on "${request.title}"`,

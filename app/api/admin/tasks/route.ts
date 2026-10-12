@@ -1,4 +1,5 @@
 import { requireFeature } from '@/lib/require-feature'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -10,7 +11,8 @@ import { createTaskRecord, type TaskCreateInput } from '@/lib/task-writes'
 
 // ── GET /api/admin/tasks ───────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -37,7 +39,7 @@ export async function GET(req: NextRequest) {
       const [me] = await drizzle
         .select({ id: schema.teamMembers.id })
         .from(schema.teamMembers)
-        .where(eq(schema.teamMembers.clerkUserId, userId ?? ''))
+        .where(eq(schema.teamMembers.clerkUserId, attributedUserId(auth) ?? ''))
         .limit(1)
       if (!me) return NextResponse.json({ tasks: [] })
       assigneeId = me.id
@@ -177,7 +179,8 @@ export async function GET(req: NextRequest) {
 // so the dashboard and the automation write a task the same way rather than
 // nearly the same way.
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -189,7 +192,12 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  const result = await createTaskRecord(drizzle, body, { actorType: 'team_member', actorId: userId })
+  // Recorded creator only: a worker MCP call carries the person behind it.
+  const result = await createTaskRecord(drizzle, body, {
+    actorType: 'team_member',
+    actorId: userId,
+    recordedActorId: attributedUserId(auth),
+  })
   if (!result.ok) {
     return NextResponse.json({ error: result.failure.error }, { status: result.failure.status })
   }

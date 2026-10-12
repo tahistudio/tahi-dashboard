@@ -1,5 +1,6 @@
 import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isBlockerSubjectType } from '@/lib/blockers'
@@ -28,7 +29,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
 // ── POST /api/admin/tasks/[id]/blockers ────────────────────────────────────
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const featureDenied = await requireFeature({ userId, orgId }, 'tasks')
   if (featureDenied) return featureDenied
@@ -51,5 +53,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     userId,
     { type: 'task', id },
     { type: body.blockerType, id: body.blockerId },
+    attributedUserId(auth),
   )
 }

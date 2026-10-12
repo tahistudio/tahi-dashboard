@@ -8,6 +8,7 @@ import { guardTask } from '@/lib/task-access'
 import { sweepBlockers } from '@/lib/blockers-server'
 import { updateTaskRecord, type TaskPatchInput } from '@/lib/task-writes'
 import { queueWorkSync, workSyncArmed } from '@/lib/slack/work-sync'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -78,7 +79,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -95,7 +97,11 @@ export async function PATCH(
   const denied = await guardTask(drizzle, userId, id)
   if (denied) return denied
 
-  const result = await updateTaskRecord(drizzle, id, body, { actorType: 'team_member', actorId: userId })
+  const result = await updateTaskRecord(drizzle, id, body, {
+    actorType: 'team_member',
+    actorId: userId,
+    recordedActorId: attributedUserId(auth),
+  })
   if (!result.ok) {
     return NextResponse.json({ error: result.failure.error }, { status: result.failure.status })
   }
@@ -109,7 +115,8 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -141,7 +148,7 @@ export async function DELETE(
     await queueWorkSync(drizzle, [{
       entityType: 'task',
       entityId: id,
-      actor: { type: 'studio', clerkUserId: userId ?? null },
+      actor: { type: 'studio', clerkUserId: attributedUserId(auth) ?? null },
       changes: [{ field: 'deleted', to: null }],
     }])
   }

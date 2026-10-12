@@ -20,6 +20,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedUserId } from '@/lib/mcp-actor'
 import {
   createTimeEntry,
   resolveLoggingTeamMemberId,
@@ -82,7 +83,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 // POST /api/admin/requests/[id]/time-entries
 // Body: { hours, description?, billable?, teamMemberId?, hourlyRate? }
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -120,7 +122,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // A body teamMemberId wins (the MCP tool and the service token have no
   // Clerk identity of their own); otherwise the caller's own row.
   const logger = await resolveLoggingTeamMemberId(drizzle, {
-    userId,
+    userId: attributedUserId(auth),
     supplied: body.teamMemberId,
   })
   if (!logger.ok) return timeEntryFailureResponse(logger.failure)

@@ -26,11 +26,13 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { elapsedSeconds, secondsToHours, stopAndLogTimer, GENERAL_KINDS, generalTimerNotes, isGeneralTimer, TAHI_INTERNAL_TASK_TYPE, type GeneralKind } from '@/lib/timer-helpers'
 import { ensureInternalOrg } from '@/lib/internal-org'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function GET(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const deniedFeature = await requireFeature({ userId, orgId }, 'time')
   if (deniedFeature) return deniedFeature
@@ -42,7 +44,7 @@ export async function GET(req: NextRequest) {
   const [timer] = await drizzle
     .select()
     .from(schema.activeTimers)
-    .where(eq(schema.activeTimers.userId, userId))
+    .where(eq(schema.activeTimers.userId, attributedUserId(auth) ?? userId))
     .limit(1)
   if (!timer) return NextResponse.json({ timer: null })
 
@@ -92,11 +94,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const deniedFeature = await requireFeature({ userId, orgId }, 'time')
   if (deniedFeature) return deniedFeature
   if (!userId) return NextResponse.json({ error: 'No user' }, { status: 400 })
+  // The timer's owner is the person behind a worker MCP call, never the shared
+  // service identity. Authorisation above still used `userId`.
+  const timerOwnerId = attributedUserId(auth) ?? userId
 
   const body = await req.json().catch(() => null) as {
     requestId?: string | null
@@ -177,7 +183,7 @@ export async function POST(req: NextRequest) {
   const [existing] = await drizzle
     .select()
     .from(schema.activeTimers)
-    .where(eq(schema.activeTimers.userId, userId))
+    .where(eq(schema.activeTimers.userId, timerOwnerId))
     .limit(1)
 
   if (existing && !confirmed) {
@@ -192,7 +198,7 @@ export async function POST(req: NextRequest) {
   // hours against client B every time you switched timers.
   let stopped: Awaited<ReturnType<typeof stopAndLogTimer>> | null = null
   if (existing && confirmed) {
-    stopped = await stopAndLogTimer(drizzle, existing, userId)
+    stopped = await stopAndLogTimer(drizzle, existing, timerOwnerId)
   }
 
   const now = new Date().toISOString()
@@ -200,7 +206,7 @@ export async function POST(req: NextRequest) {
   try {
     await drizzle.insert(schema.activeTimers).values({
       id: newId,
-      userId,
+      userId: timerOwnerId,
       requestId: body.requestId ?? null,
       taskId: body.taskId ?? null,
       // Always carry the client, whatever the target kind was. Task and

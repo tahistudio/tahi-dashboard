@@ -1,4 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -210,7 +211,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 // the validation, the assignment ping and the client fan-out happen once
 // wherever the change came from.
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -224,6 +226,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const result = await updateRequestRecord(drizzle, id, body, {
     actorType: 'team_member',
     actorId: userId ?? null,
+    recordedActorId: attributedUserId(auth),
   })
   if (!result.ok) {
     return NextResponse.json({ error: result.failure.error }, { status: result.failure.status })
@@ -234,7 +237,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // ── DELETE /api/admin/requests/[id] ──────────────────────────────────────────
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -266,7 +270,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       await queueWorkSync(drizzle, [{
         entityType: 'request',
         entityId: id,
-        actor: { type: 'studio', clerkUserId: userId ?? null },
+        actor: { type: 'studio', clerkUserId: attributedUserId(auth) ?? null },
         changes,
       }])
     }

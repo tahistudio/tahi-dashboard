@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, asc } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { attributedUserId } from '@/lib/mcp-actor'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -56,7 +57,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id: requestId } = await params
@@ -84,7 +86,7 @@ export async function POST(
       title: body.title.trim(),
       description: body.description ?? null,
       orderIndex: body.orderIndex ?? 0,
-      createdById: userId ?? undefined,
+      createdById: attributedUserId(auth) ?? undefined,
       createdByType: 'team_member',
     })
     .returning()

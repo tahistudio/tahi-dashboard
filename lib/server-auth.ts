@@ -43,11 +43,35 @@ import {
 import { resolveActEligibility } from '@/lib/acting-eligibility'
 import { resolvePreviewContactId } from '@/lib/portal-identity'
 import { resolvePermissions } from '@/lib/permissions'
+import { MCP_ACTOR_HEADER, verifyIdentityEnvelope, type McpProfile } from '@/lib/mcp-identity'
+import { isDesignerRequestAllowed } from '@/lib/mcp-designer-routes'
+
+/** Length-blind comparison, no early exit on the first differing character. */
+function bearerMatches(a: string, b: string): boolean {
+  const length = Math.max(a.length, b.length)
+  let diff = a.length ^ b.length
+  for (let i = 0; i < length; i++) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0)
+  }
+  return diff === 0
+}
+
+/**
+ * The real person behind a worker MCP call, from a verified `mcp_actor`
+ * envelope. Recorded-actor data only: authorisation keeps using `userId`.
+ */
+export interface McpActor {
+  teamMemberId: string
+  clerkUserId: string
+  profile: McpProfile
+}
 
 export interface RequestAuthResult {
   userId: string | null
   orgId: string | null
   sessionId: string | null
+  /** Set only on a TAHI_API_TOKEN call carrying a valid actor envelope. */
+  mcpActor?: McpActor
 }
 
 /**
@@ -193,12 +217,36 @@ export async function getRequestAuth(req: NextRequest): Promise<RequestAuthResul
   const authHeader = req.headers.get('authorization')
   if (authHeader?.startsWith('Bearer ') && process.env.TAHI_API_TOKEN) {
     const token = authHeader.slice(7)
-    if (token === process.env.TAHI_API_TOKEN) {
-      return {
+    if (bearerMatches(token, process.env.TAHI_API_TOKEN)) {
+      const base: RequestAuthResult = {
         userId: 'api-service',
         orgId: process.env.NEXT_PUBLIC_TAHI_ORG_ID ?? null,
         sessionId: null,
       }
+      // The actor header is honoured on this path only, and only changes the
+      // recorded actor. No header: the plain service identity, exactly as
+      // before (crons, Codex). A header that is present but does not verify
+      // (expired, tampered, or MCP_IDENTITY_SECRET out of step between the two
+      // workers) fails CLOSED: the call is unauthenticated, never quietly the
+      // full service identity with the designer route list skipped (security
+      // re-review L-A).
+      const actorHeader = req.headers.get(MCP_ACTOR_HEADER)
+      if (!actorHeader) return base
+      const claims = await verifyIdentityEnvelope(
+        actorHeader,
+        process.env.MCP_IDENTITY_SECRET,
+        'mcp_actor',
+      ).catch(() => null)
+      if (claims) {
+        // Second, independent layer on the designer profile (the worker gate
+        // is the first): a write outside the designer route list is answered
+        // as unauthenticated, so no route ever runs it with the service token.
+        if (claims.p === 'designer' && !isDesignerRequestAllowed(req.method, req.nextUrl.pathname)) {
+          return { userId: null, orgId: null, sessionId: null }
+        }
+        return { ...base, mcpActor: { teamMemberId: claims.tm, clerkUserId: claims.cu, profile: claims.p } }
+      }
+      return { userId: null, orgId: null, sessionId: null }
     }
   }
 

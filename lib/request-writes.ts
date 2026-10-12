@@ -79,6 +79,18 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export interface RequestWriteActor {
   actorType: 'team_member' | 'system'
   actorId: string | null
+  /**
+   * Who to RECORD as having done it (createdById, audit, Slack, "me"), when
+   * that differs from `actorId`: a worker MCP call is authorised as the
+   * service identity but recorded as the person behind it (lib/mcp-actor.ts).
+   * Never an access input: requireAccessToOrg keeps reading `actorId`.
+   */
+  recordedActorId?: string | null
+}
+
+/** The id recorded for a write: the person behind it, else the caller. */
+function recordedId(actor: RequestWriteActor): string | null {
+  return actor.recordedActorId ?? actor.actorId
 }
 
 /** The body POST /api/admin/requests reads, field for field. */
@@ -314,7 +326,7 @@ export async function createRequestRecord(
       ${dueDate ?? null},
       ${estimatedHours ?? null},
       ${input.assigneeId ?? null},
-      ${actor.actorId ?? null},
+      ${recordedId(actor) ?? null},
       ${input.isInternal ? 1 : 0},
       0,
       3,
@@ -425,7 +437,7 @@ export async function updateRequestRecord(
     const [actorMember] = await drizzle
       .select({ id: schema.teamMembers.id })
       .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, actor.actorId ?? ''))
+      .where(eq(schema.teamMembers.clerkUserId, recordedId(actor) ?? ''))
       .limit(1)
 
     if (body.assigneeId !== actorMember?.id) {
@@ -494,7 +506,7 @@ export async function updateRequestRecord(
       await queueWorkSync(drizzle, [{
         entityType: 'request',
         entityId: requestId,
-        actor: { type: 'studio', clerkUserId: actor.actorId },
+        actor: { type: 'studio', clerkUserId: recordedId(actor) },
         changes,
       }])
     }
@@ -679,7 +691,7 @@ export async function handOffRequest(
       participantId: contact.id,
       participantType: 'contact',
       role,
-      addedById: actor.actorId,
+      addedById: recordedId(actor),
       addedByType: 'team_member',
       addedAt: nowIso,
       removedAt: null,
@@ -703,7 +715,7 @@ export async function handOffRequest(
 
   await logAudit(drizzle as unknown as DB, {
     action: AUDIT_HANDED_OFF,
-    userId: actor.actorId,
+    userId: recordedId(actor),
     userType: 'team_member',
     entityType: 'request',
     entityId: requestId,
@@ -731,7 +743,7 @@ export async function handOffRequest(
         orgId: request.orgId,
         contactEmail: contact.email,
         contactName: contact.name ?? contact.email,
-        createdById: actor.actorId,
+        createdById: recordedId(actor),
       })
       actionUrl = invite.link
     } catch (err) {
@@ -739,7 +751,7 @@ export async function handOffRequest(
     }
   }
 
-  const from = await actorName(drizzle, actor.actorId)
+  const from = await actorName(drizzle, recordedId(actor))
   const reasonLabel = HANDOFF_REASON_SENTENCE[reason]
 
   // Bell and inbox off one call, the way every other wired event does it.
@@ -780,7 +792,7 @@ export async function handOffRequest(
     await queueWorkSync(drizzle, [{
       entityType: 'request',
       entityId: requestId,
-      actor: { type: 'studio', clerkUserId: actor.actorId },
+      actor: { type: 'studio', clerkUserId: recordedId(actor) },
       changes: [{
         field: 'waitingOn',
         to: name,
