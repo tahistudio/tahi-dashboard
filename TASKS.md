@@ -42,6 +42,8 @@ Next-20 item 3: M2 guards all named handlers and their secondary links. Audit re
 
 Next-20 item 4: Schedule child writes are parent-fenced. Invoice deletion atomically requires draft status and uses the existing FK cascade. Recovery returns 409 on client drift, pins importer writes to the chosen org, and prevents duplicate customer-link races. Import conflicts retry once, then skip.
 
+Next-20 item 5: Adds caller/state-bound signed previews, refreshed live Stripe GET checks, conditional apply, conflict refusal and real-actor audit recording. MCP tool validates ids and explicitly blocks designers. The existing api-service is admin rather than super_admin, so MCP retains its 403; apply requires a super-admin browser session. No actor is promoted for authorization.
+
 ## Execution update, 2026-10-11
 
 Liam approved the eight grouped priorities. Both batches are deployed at

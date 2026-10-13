@@ -1789,6 +1789,12 @@ export const TOOLS: ToolDef[] = [
   }, ['before']),
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
   tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),
+  tool('link_stripe_customer', 'Link an existing live Stripe customer to an existing client without importing an invoice, sending email or changing Stripe. Dry run by default: review the client, contacts and customer before applying with the signed previewKey, valid for ten minutes. Refuses a customer already linked elsewhere and never replaces a different client customer. Requires a human super_admin session; the MCP service identity is admin and returns 403 by design. Use POST /api/admin/integrations/stripe/link-customer in a signed-in super-admin browser session.', {
+    orgId: prop('string', 'Existing client organisation id'),
+    stripeCustomerId: prop('string', 'Existing live Stripe customer id beginning cus_'),
+    dryRun: prop('boolean', 'Defaults to true, preview first'),
+    previewKey: prop('string', 'Signed approval returned by preview, required for apply'),
+  }, ['orgId', 'stripeCustomerId']),
   tool('recover_paid_stripe_invoice', 'Recover a known paid live Stripe invoice into an existing client after contact identity and duplicate checks. Dry run by default. Apply requires the previewKey returned by a fresh preview. Sends no email and makes no Stripe changes. Requires a human super_admin session; this MCP service identity is admin and returns 403 by design. Run from Invoices > Recover paid Stripe invoice as Liam or Staci.', {
     orgId: prop('string', 'Existing client organisation id'),
     stripeInvoiceId: prop('string', 'Paid live Stripe invoice id beginning in_'),
@@ -3169,6 +3175,12 @@ export async function executeTool(
       return json(await apiGet('/api/admin/integrations/xero/match-contacts', token))
     case 'import_stripe_invoices':
       return json(await apiWrite('/api/admin/integrations/stripe/import-invoices', token, 'POST'))
+    case 'link_stripe_customer':
+      assertSafeIdArgs({ orgId: need('orgId'), stripeCustomerId: need('stripeCustomerId') })
+      return json(await apiWrite('/api/admin/integrations/stripe/link-customer', token, 'POST', {
+        orgId: s('orgId'), stripeCustomerId: s('stripeCustomerId'), dryRun: args.dryRun !== false,
+        ...(args.previewKey === undefined ? {} : { previewKey: args.previewKey }),
+      }))
     case 'recover_paid_stripe_invoice':
       return json(await apiWrite('/api/admin/integrations/stripe/recover-invoice', token, 'POST', { ...args, dryRun: args.dryRun !== false }))
     case 'import_stripe_payments':

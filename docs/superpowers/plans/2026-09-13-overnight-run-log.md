@@ -805,3 +805,12 @@ Schedule child writes are parent-fenced. Invoice deletion atomically requires dr
 Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
 
 Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+
+## 2026-10-13, next-20 item 5 prepared on the local branch
+
+Adds caller/state-bound signed previews, refreshed live Stripe GET checks, conditional apply, conflict refusal and real-actor audit recording. MCP tool validates ids and explicitly blocks designers. The existing api-service is admin rather than super_admin, so MCP retains its 403; apply requires a super-admin browser session. No actor is promoted for authorization.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
