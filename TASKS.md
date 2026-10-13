@@ -1199,7 +1199,17 @@ scheduled; each needs a scope before building.
   Reuse feedback-ball lessons; do not mix client-site QA with beta feedback.
   No delivery mechanism, guest policy or schema selected. Webflow comment
   intake remains an interim idea, not a built connector.
-- [ ] REC.0 - [Scope] Calendar-aware meeting audio and transcription beyond
+- [ ] REC.0 - [BE/FE] Manual browser call recorder, phase 1 (Liam,
+  2026-10-13, Decision #071). Windows Chromium mic plus system audio,
+  independent 30-second tracks, durable chunk uploads/retries, Workers AI
+  transcription and explicit client/call linking into the human approval
+  inbox. Source is prepared locally in this worktree; migration 0113 is written
+  but not applied. Branch creation and commit are blocked by sandbox access
+  to the parent repository's shared .git. No push or deployment authorised.
+  Real Windows capture, background recording, accuracy, 375/768 and dark
+  browser proof remain outstanding. Phase 1 excludes calendar detection,
+  a desktop app and a joining bot. Earlier scope retained below as future work:
+  Calendar-aware meeting audio and transcription beyond
   Gemini (Liam clarified 2026-10-10, Decision #068): detect meetings in Liam's
   calendar, capture PC system audio plus microphone so both sides are heard,
   and produce highly accurate transcripts at very low cost across Google Meet,

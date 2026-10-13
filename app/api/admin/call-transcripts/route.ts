@@ -21,10 +21,12 @@ import { transcriptPreview } from '@/lib/gemini-transcript-parser'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { desc } from 'drizzle-orm'
+import { desc, inArray } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { columnInIds, isOrgInScope } from '../_scoping/org-scope'
 import { listUnlinked, type CallTranscriptRow } from '@/lib/call-transcripts'
+import { requireFeature } from '@/lib/require-feature'
+import { IMPERSONATE_ORG_COOKIE, resolvePreviewOrgId } from '@/lib/preview-cookie'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -69,7 +71,20 @@ export async function GET(req: NextRequest) {
   // read another client's conversation through this list. Two bounded
   // queries, not one per row.
   let visible = rows
+  if (rows.some(row => row.source === 'manual' && row.externalId.startsWith('recording:'))) {
+    const recorderDenied = resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)
+      || await requireFeature({ userId, orgId }, 'calls')
+    if (recorderDenied) visible = visible.filter(row => row.source !== 'manual' || !row.externalId.startsWith('recording:'))
+  }
   if (scope.kind === 'some') {
+    const recorderIds = rows.filter(row => row.source === 'manual' && row.externalId.startsWith('recording:'))
+      .map(row => row.externalId.slice('recording:'.length))
+    const recorderOrgs = new Map<string, string | null>()
+    if (recorderIds.length) {
+      const recorderRows = await database.select({ id: schema.meetingRecordings.id, orgId: schema.meetingRecordings.orgId })
+        .from(schema.meetingRecordings).where(inArray(schema.meetingRecordings.id, recorderIds))
+      for (const recording of recorderRows) recorderOrgs.set(recording.id, recording.orgId)
+    }
     const discoveryIds = [...new Set(rows.filter(r => r.callKind === 'discovery' && r.callId).map(r => r.callId as string))]
     const scheduledIds = [...new Set(rows.filter(r => r.callKind === 'scheduled' && r.callId).map(r => r.callId as string))]
 
@@ -89,7 +104,12 @@ export async function GET(req: NextRequest) {
       for (const c of found) orgByCall.set(`scheduled:${c.id}`, c.orgId)
     }
 
-    visible = rows.filter(r => {
+    visible = visible.filter(r => {
+      if (r.source === 'manual' && r.externalId.startsWith('recording:')) {
+        const recordingId = r.externalId.slice('recording:'.length)
+        if (!recorderOrgs.has(recordingId)
+          || !isOrgInScope(scope, recorderOrgs.get(recordingId) ?? null, 'allow-if-any-scope')) return false
+      }
       if (!r.callId) return true  // unplaced: allow-if-any-scope, already true here
       return isOrgInScope(scope, orgByCall.get(`${r.callKind}:${r.callId}`) ?? null, 'allow-if-any-scope')
     })

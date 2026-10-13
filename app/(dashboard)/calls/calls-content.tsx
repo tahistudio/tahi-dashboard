@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Calendar, Check, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle, Phone, GraduationCap, CircleDashed } from 'lucide-react'
+import { Calendar, Check, FileText, ExternalLink, RefreshCw, UserPlus, TrendingUp, Building2, AlertTriangle, Phone, GraduationCap, CircleDashed, Mic } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
 import { Card } from '@/components/tahi/card'
@@ -456,6 +456,14 @@ export function CallsContent() {
         title="Calls"
         subtitle="Every discovery, client check-in, and partnership meeting from your Google Calendar."
       >
+        <TahiButton
+          size="sm"
+          style={{ minHeight: '2.75rem' }}
+          onClick={() => router.push('/calls/record')}
+          iconLeft={<Mic className="w-3.5 h-3.5" />}
+        >
+          Record call
+        </TahiButton>
         <TahiButton
           variant="secondary"
           size="sm"

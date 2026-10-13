@@ -52,6 +52,16 @@ rate herself).
 
 ## Work in progress, 2026-10-11
 
+REC.0 phase 1 source is prepared locally on 2026-10-13: manual Windows
+Chromium mic/system recorder at /calls/record, durable chunk uploads,
+Whisper turbo transcription, explicit transcript linking and read/link MCP
+parity. This is not live. Additive migration 0113 is written and registered
+but has not been applied. No push, deploy or secrets change is authorised.
+The sandbox blocks branch/commit writes to the parent repository's shared
+.git and the standard test/build runners hit subprocess spawn EPERM.
+Local checks and browser-proof gaps are recorded in
+docs/superpowers/audits/2026-10-13-rec0-phase1-report.md. REC.0 stays open.
+
 Repair source 2f81243f and integration a14d0dea deployed at release
 511c7d5f; the final invoice action repair is live at 58433694. Dashboard
 38099534777, MCP 38098768463 and cron worker 38098768460

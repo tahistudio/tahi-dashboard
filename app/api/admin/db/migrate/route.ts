@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { requireMigrationAccess } from '@/lib/require-migration-access'
+import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -2463,6 +2464,11 @@ const MIGRATIONS: Migration[] = [
       `UPDATE team_members SET mcp_profile = 'full' WHERE lower(email) = 'business@tahi.studio' AND mcp_profile IS NULL`,
       `UPDATE team_members SET mcp_profile = 'designer' WHERE lower(email) = 'staci@tahi.studio' AND mcp_profile IS NULL`,
     ],
+  },
+  {
+    name: '0113',
+    description: 'REC.0 private manual recording metadata, unique chunk claims and retry leases. Apply before enabling the recorder. No existing data is changed.',
+    statements: [...MEETING_RECORDING_MIGRATION],
   },
 ]
 

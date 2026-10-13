@@ -58,6 +58,7 @@ vi.mock('@/db/d1', () => ({
     kanbanColumns: fakeTable('kanban_columns'),
     contracts: fakeTable('contracts'),
     discoveryCalls: fakeTable('discovery_calls'),
+    meetingRecordings: fakeTable('meeting_recordings'),
     scheduledCalls: fakeTable('scheduled_calls'),
     deals: fakeTable('deals'),
     activities: fakeTable('activities'),
@@ -176,6 +177,15 @@ describe('POST cleanup: hard delete refusals', () => {
     tableRows.organisations = [{ id: acmeId, name: 'Acme Corp', status: 'archived', xeroContactId: null, stripeCustomerId: null, manyrequestsId: '3' }]
     const plan = await runCleanup(fakeDb(), { dryRun: false, archive: [], hardDelete: [acmeId], wipeDemo: false })
     expect(plan.refused[0].reason).toContain('ManyRequests id')
+    expect(recorded.deletes).toEqual([])
+  })
+
+  it('preserves a recording and its transcript scope when an organisation is proposed for cleanup', async () => {
+    tableRows.organisations = [{ id: acmeId, name: 'Acme Corp', status: 'archived', xeroContactId: null, stripeCustomerId: null, manyrequestsId: null }]
+    tableRows.meeting_recordings = [{ id: 'rec-1' }]
+    const plan = await runCleanup(fakeDb(), { dryRun: false, archive: [], hardDelete: [acmeId], wipeDemo: false })
+    expect(plan.hardDelete).toHaveLength(0)
+    expect(plan.refused[0].reason).toContain('meeting_recordings')
     expect(recorded.deletes).toEqual([])
   })
 

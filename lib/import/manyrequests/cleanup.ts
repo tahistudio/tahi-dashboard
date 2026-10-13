@@ -160,6 +160,8 @@ export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
   { schemaKey: 'kanbanColumns', table: 'kanban_columns', policy: 'delete' },
   { schemaKey: 'contracts', table: 'contracts', policy: 'refuse' },
   { schemaKey: 'discoveryCalls', table: 'discovery_calls', policy: 'refuse' },
+  // Retained audio and transcript scope must survive organisation cleanup.
+  { schemaKey: 'meetingRecordings', table: 'meeting_recordings', policy: 'refuse' },
   { schemaKey: 'scheduledCalls', table: 'scheduled_calls', policy: 'delete' },
   { schemaKey: 'deals', table: 'deals', policy: 'refuse' },
   { schemaKey: 'activities', table: 'activities', policy: 'refuse' },

@@ -131,7 +131,7 @@ beforeEach(() => {
   fixture = permissionSqlite([
     schema.teamMembers, schema.roles, schema.teamMemberRoles, schema.permissions, schema.rolePermissions,
     schema.featureVisibility, schema.teamMemberAccess, schema.teamMemberAccessOrgs, schema.organisations,
-    schema.callTranscripts, schema.scheduledCalls, schema.taskSuggestions, schema.cronRuns,
+    schema.callTranscripts, schema.meetingRecordings, schema.scheduledCalls, schema.taskSuggestions, schema.cronRuns,
     schema.tasks, schema.requests, schema.contacts,
   ])
   vi.mocked(db).mockResolvedValue(fixture.database as never)

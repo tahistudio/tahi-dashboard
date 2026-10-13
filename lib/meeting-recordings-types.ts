@@ -1,0 +1,67 @@
+/** Browser and API contract for the manual call recorder. */
+export type RecordingTrack = 'mic' | 'system'
+export type RecordingState = 'recording' | 'uploading' | 'transcribing' | 'ready' | 'failed'
+export type RecordingChunkState = 'reserved' | 'uploading' | 'uploaded' | 'transcribing' | 'ready' | 'failed'
+
+export interface RecordingSegment {
+  start: number
+  end: number
+  text: string
+}
+
+export interface MeetingRecording {
+  id: string
+  title: string
+  orgId: string | null
+  callKind: 'discovery' | 'scheduled' | null
+  callId: string | null
+  createdById: string
+  tracks: RecordingTrack[]
+  state: RecordingState
+  startedAt: string
+  stoppedAt: string | null
+  durationMs: number
+  expectedChunks: { mic: number; system: number } | null
+  transcriptId: string | null
+  error: string | null
+  deletedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MeetingRecordingChunk {
+  id: string
+  recordingId: string
+  track: RecordingTrack
+  sequence: number
+  startMs: number
+  durationMs: number
+  mimeType: string
+  size: number
+  state: RecordingChunkState
+  text: string | null
+  segments: RecordingSegment[]
+  error: string | null
+  attempts: number
+}
+
+export interface RecordingTranscript {
+  id: string | null
+  text: string
+}
+
+export interface MeetingRecordingDetail {
+  recording: MeetingRecording
+  chunks: MeetingRecordingChunk[]
+  transcript: RecordingTranscript
+  pending?: boolean
+}
+
+export interface ReserveRecordingChunk {
+  track: RecordingTrack
+  sequence: number
+  startMs: number
+  durationMs: number
+  mimeType: string
+  size: number
+}
