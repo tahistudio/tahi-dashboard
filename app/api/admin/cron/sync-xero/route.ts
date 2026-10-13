@@ -35,6 +35,7 @@ interface StepResult {
   ok: boolean
   error?: string
   count?: number
+  unlinked?: string[]
 }
 
 /**
@@ -45,7 +46,14 @@ interface StepResult {
  */
 function toStep(name: string, outcome: SyncOutcome): StepResult {
   const ok = outcome.ok && !outcome.warning
-  return { name, ok, error: ok ? undefined : (outcome.error ?? outcome.warning), count: outcome.count }
+  const results = (outcome.body as { results?: Array<{ status?: string; orgMatch?: string }> } | null)?.results
+  const lines = Array.isArray(results)
+    ? results.filter(result => result.status === 'no_client_linked' && result.orgMatch).map(result => String(result.orgMatch))
+    : []
+  return {
+    name, ok, error: ok ? undefined : (outcome.error ?? outcome.warning), count: outcome.count,
+    ...(lines.length > 0 ? { unlinked: Array.from(new Set(lines)).slice(0, 50) } : {}),
+  }
 }
 
 export async function POST(req: NextRequest) {

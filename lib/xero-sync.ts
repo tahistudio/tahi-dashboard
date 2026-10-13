@@ -934,62 +934,19 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
         continue
       }
 
-      let matchedOrgId: string | null = null
-      const xeroContactName = inv.Contact?.Name?.toLowerCase() ?? ''
-
-      const exactMatch = allOrgs.find(o => o.xeroContactId === inv.Contact?.ContactID)
-      if (exactMatch) {
-        matchedOrgId = exactMatch.id
-      } else {
-        const nameMatch = allOrgs.find(o =>
-          o.name.toLowerCase() === xeroContactName ||
-          xeroContactName.includes(o.name.toLowerCase()) ||
-          o.name.toLowerCase().includes(xeroContactName)
-        )
-        if (nameMatch) {
-          matchedOrgId = nameMatch.id
-          try {
-            await database.update(schema.organisations).set({
-              xeroContactId: inv.Contact.ContactID,
-              updatedAt: now,
-            }).where(eq(schema.organisations.id, nameMatch.id))
-          } catch { /* column may not exist yet */ }
-        }
-      }
-
-      if (!matchedOrgId && inv.Contact?.Name) {
-        const newOrgId = crypto.randomUUID()
-        try {
-          await database.insert(schema.organisations).values({
-            id: newOrgId,
-            name: inv.Contact.Name,
-            status: 'active',
-            healthStatus: 'green',
-            onboardingState: '{}',
-            brands: '[]',
-            customFields: '{}',
-            preferredCurrency: inv.CurrencyCode ?? 'NZD',
-            createdAt: now,
-            updatedAt: now,
-          })
-          matchedOrgId = newOrgId
-          allOrgs.push({ id: newOrgId, name: inv.Contact.Name, xeroContactId: inv.Contact.ContactID })
-          try {
-            await database.update(schema.organisations).set({
-              xeroContactId: inv.Contact.ContactID,
-              updatedAt: now,
-            }).where(eq(schema.organisations.id, newOrgId))
-          } catch { /* column may not exist */ }
-        } catch {
-          results.push({ invoiceNumber: inv.InvoiceNumber, status: 'error', orgMatch: 'Failed to create org' })
-          continue
-        }
-      }
-
-      if (!matchedOrgId) {
-        results.push({ invoiceNumber: inv.InvoiceNumber, status: 'error', orgMatch: 'No Xero contact name' })
+      // Only an explicitly linked Xero identity can select a billing client.
+      const contactId = inv.Contact?.ContactID
+      const exactMatch = contactId ? allOrgs.find(o => o.xeroContactId === contactId) : undefined
+      if (!exactMatch) {
+        skipped++
+        results.push({
+          invoiceNumber: inv.InvoiceNumber,
+          status: 'no_client_linked',
+          orgMatch: `Xero contact ${contactId || '(missing id)'} (${inv.Contact?.Name || 'unnamed'}), invoice ${inv.InvoiceNumber}`,
+        })
         continue
       }
+      const matchedOrgId = exactMatch.id
 
       const invoiceId = crypto.randomUUID()
 

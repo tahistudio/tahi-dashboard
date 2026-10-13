@@ -151,6 +151,21 @@ describe('POST /api/admin/cron/sync-xero', () => {
     return json.steps
   }
 
+  it('logs unlinked Xero contacts in the cron result for operator follow-up', async () => {
+    vi.mocked(importXeroInvoices).mockResolvedValue({
+      ok: true, status: 200, count: 0, body: {
+        imported: 0, skipped: 1, results: [{ status: 'no_client_linked', orgMatch: 'Xero contact contact-unlinked (Kowhai), invoice XERO-001' }],
+      },
+    })
+    const steps = await runCron()
+    expect(steps.find(step => step.name === 'import-invoices')).toMatchObject({
+      ok: true, count: 0, unlinked: ['Xero contact contact-unlinked (Kowhai), invoice XERO-001'],
+    })
+    expect(vi.mocked(logCronRun).mock.calls[0][4]).toMatchObject({ steps: expect.arrayContaining([
+      expect.objectContaining({ name: 'import-invoices', unlinked: ['Xero contact contact-unlinked (Kowhai), invoice XERO-001'] }),
+    ]) })
+  })
+
   it('reports every step ok on a clean run', async () => {
     const steps = await runCron()
 

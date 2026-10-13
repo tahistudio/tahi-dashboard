@@ -44,6 +44,8 @@ Next-20 item 4: Schedule child writes are parent-fenced. Invoice deletion atomic
 
 Next-20 item 5: Adds caller/state-bound signed previews, refreshed live Stripe GET checks, conditional apply, conflict refusal and real-actor audit recording. MCP tool validates ids and explicitly blocks designers. The existing api-service is admin rather than super_admin, so MCP retains its 403; apply requires a super-admin browser session. No actor is promoted for authorization.
 
+Next-20 item 6: Xero imports use exact nonempty contact ids only. Unlinked contacts are skipped and recorded in cron output, with no name-based assignment or automatic organisation creation. Real SQLite tests cover exact, substring, missing-id and repeat-run cases.
+
 ## Execution update, 2026-10-11
 
 Liam approved the eight grouped priorities. Both batches are deployed at
