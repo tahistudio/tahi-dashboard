@@ -76,7 +76,8 @@ function setup() {
         async all() { return execute() },
         async run() { return write(query, params, execute) },
         async raw() {
-          const rows = execute().results.map(row => Object.values(row))
+          const result = /^update /i.test(query) ? await write(query, params, execute) : execute()
+          const rows = result.results.map(row => Object.values(row))
           if (readsReady && racedReads.length < 2 && /^select .* from "invoices"/i.test(query)) {
             racedReads.push(rows)
             if (racedReads.length === 2) releaseReads?.()
@@ -126,6 +127,41 @@ function invoice(overrides: Partial<StripeInvoiceLike> = {}): StripeInvoiceLike 
 }
 
 describe('importStripeInvoice with real SQLite behind the D1 driver', () => {
+  it('refuses an existing invoice at a different expected client before status or payment metadata writes', async () => {
+    const db = setup()
+    await importStripeInvoice(db.database, invoice({ status: 'open', status_transitions: null }))
+    const before = { invoices: db.invoices(), items: db.items() }
+    db.write.mockClear()
+    const result = await importStripeInvoice(db.database, invoice(), { autoCreateOrg: false, expectedOrgId: 'org-other' })
+    expect(result).toEqual({ skipped: true, reason: 'This invoice is attached to another client. Preview the recovery again.' })
+    expect({ invoices: db.invoices(), items: db.items() }).toEqual(before)
+    expect(db.write).not.toHaveBeenCalled()
+  })
+
+  it('refuses an invoice insert when its customer maps to a different expected client', async () => {
+    const db = setup()
+    const result = await importStripeInvoice(db.database, invoice(), { autoCreateOrg: false, expectedOrgId: 'org-other' })
+    expect(result).toEqual({ skipped: true, reason: 'The Stripe customer is no longer linked to the chosen client. Preview the recovery again.' })
+    expect(db.batch).not.toHaveBeenCalled()
+    expect(db.invoices()).toEqual([])
+    expect(db.items()).toEqual([])
+  })
+
+  it('checks expected client in the update SQL when an invoice moves after its read', async () => {
+    const db = setup()
+    await importStripeInvoice(db.database, invoice({ status: 'open', status_transitions: null }))
+    db.sqlite.prepare('INSERT INTO organisations (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .run('org-other', 'Other client', '2026-10-13', '2026-10-13')
+    db.write.mockImplementation(async (_query, _params, execute) => {
+      db.sqlite.prepare('UPDATE invoices SET org_id = ?').run('org-other')
+      return execute()
+    })
+    const result = await importStripeInvoice(db.database, invoice(), { autoCreateOrg: false, expectedOrgId: 'org-a' })
+    expect(result).toEqual({ skipped: true, reason: 'This invoice changed client during import. Preview the recovery again.' })
+    expect(db.invoices()).toEqual([expect.objectContaining({ org_id: 'org-other', status: 'sent', paid_at: null })])
+    expect(db.items()).toHaveLength(2)
+  })
+
   it('stores the paid invoice and every item together with currency, source and payment metadata', async () => {
     const db = setup()
     const result = await importStripeInvoice(db.database, invoice(), { autoCreateOrg: false })
@@ -186,6 +222,17 @@ describe('importStripeInvoice with real SQLite behind the D1 driver', () => {
     expect(await importStripeInvoice(db.database, invoice())).toMatchObject({ created: true })
     expect(db.invoices()).toHaveLength(1)
     expect(db.items()).toHaveLength(2)
+  })
+
+  it('skips after one retry when repeated insert conflicts leave no matching Stripe row', async () => {
+    const db = setup()
+    db.sqlite.exec(`CREATE TRIGGER skip_invoice BEFORE INSERT ON invoices
+      BEGIN SELECT RAISE(IGNORE); END`)
+    const result = await importStripeInvoice(db.database, invoice({ lines: { data: [] } }))
+    expect(result).toEqual({ skipped: true, reason: 'Stripe invoice changed during import. Retry on the next sync.' })
+    expect(db.batch).toHaveBeenCalledTimes(2)
+    expect(db.invoices()).toEqual([])
+    expect(db.items()).toEqual([])
   })
 
   it.each([

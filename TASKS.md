@@ -40,6 +40,8 @@ Nothing in this batch is pushed or deployed.
 
 Next-20 item 3: M2 guards all named handlers and their secondary links. Audit requires permission-management access; activities and engagements filter before aggregate reads. Includes constant-time cron secret checks, literal LIKE ESCAPE and archived-deal exclusion. The SQLite harness now preserves duplicate joined columns and exposes its database for race injection.
 
+Next-20 item 4: Schedule child writes are parent-fenced. Invoice deletion atomically requires draft status and uses the existing FK cascade. Recovery returns 409 on client drift, pins importer writes to the chosen org, and prevents duplicate customer-link races. Import conflicts retry once, then skip.
+
 ## Execution update, 2026-10-11
 
 Liam approved the eight grouped priorities. Both batches are deployed at

@@ -9,7 +9,7 @@
  */
 
 import { schema } from '@/db/d1'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { importedInvoiceNumber } from '@/lib/invoice-number'
 import { mapStripeStatus, decideStripeStatus } from '@/lib/stripe-status'
 
@@ -46,6 +46,9 @@ export interface ImportResult {
   orgId: string
 }
 
+type SkippedImport = { skipped: true; reason: string }
+type ImportOptions = { autoCreateOrg?: boolean; expectedOrgId?: string }
+
 /**
  * Import one Stripe invoice into the local DB.
  *
@@ -61,8 +64,22 @@ export interface ImportResult {
 export async function importStripeInvoice(
   database: D1,
   inv: StripeInvoiceLike,
-  opts: { autoCreateOrg?: boolean } = {},
-): Promise<ImportResult | { skipped: true; reason: string }> {
+  opts: ImportOptions = {},
+): Promise<ImportResult | SkippedImport> {
+  // An insert conflict can race a delete, leaving no row for reconciliation.
+  // Permit one fresh attempt, then defer to a later sync instead of recursing.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await importStripeInvoiceAttempt(database, inv, opts)
+    if (!('retry' in result)) return result
+  }
+  return { skipped: true, reason: 'Stripe invoice changed during import. Retry on the next sync.' }
+}
+
+async function importStripeInvoiceAttempt(
+  database: D1,
+  inv: StripeInvoiceLike,
+  opts: ImportOptions,
+): Promise<ImportResult | SkippedImport | { retry: true }> {
   const now = new Date().toISOString()
 
   if (!inv.id) return { skipped: true, reason: 'No Stripe invoice id' }
@@ -75,6 +92,9 @@ export async function importStripeInvoice(
     .limit(1)
 
   if (existing.length > 0) {
+    if (opts.expectedOrgId && existing[0].orgId !== opts.expectedOrgId) {
+      return { skipped: true, reason: 'This invoice is attached to another client. Preview the recovery again.' }
+    }
     // A local 'written_off' or 'paid' row is never demoted by this read: see
     // lib/stripe-status.ts. Null means "leave invoices.status alone", which
     // still lets the paid date and the pay link below refresh on the same row.
@@ -82,7 +102,7 @@ export async function importStripeInvoice(
     const paidAt = inv.status === 'paid' && inv.status_transitions?.paid_at
       ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
       : undefined
-    await database
+    const update = database
       .update(schema.invoices)
       .set({
         ...(nextStatus ? { status: nextStatus === 'paid' ? nextStatus : sql`CASE
@@ -95,7 +115,18 @@ export async function importStripeInvoice(
         ...(inv.hosted_invoice_url ? { stripeHostedInvoiceUrl: inv.hosted_invoice_url } : {}),
         updatedAt: now,
       })
-      .where(eq(schema.invoices.id, existing[0].id))
+      .where(and(
+        eq(schema.invoices.id, existing[0].id),
+        ...(opts.expectedOrgId ? [eq(schema.invoices.orgId, opts.expectedOrgId)] : []),
+      ))
+    if (opts.expectedOrgId) {
+      const updated = await update.returning({ id: schema.invoices.id })
+      if (!updated.length) {
+        return { skipped: true, reason: 'This invoice changed client during import. Preview the recovery again.' }
+      }
+    } else {
+      await update
+    }
     return { localInvoiceId: existing[0].id, created: false, orgId: existing[0].orgId }
   }
 
@@ -108,6 +139,10 @@ export async function importStripeInvoice(
       .where(eq(schema.organisations.stripeCustomerId, inv.customer))
       .limit(1)
     if (orgs[0]) matchedOrgId = orgs[0].id
+  }
+
+  if (opts.expectedOrgId && matchedOrgId !== opts.expectedOrgId) {
+    return { skipped: true, reason: 'The Stripe customer is no longer linked to the chosen client. Preview the recovery again.' }
   }
 
   // 3. No match — optionally auto-create. Webhook callers pass autoCreateOrg=false
@@ -194,7 +229,7 @@ export async function importStripeInvoice(
   if (!results[0].length) {
     // Another import won the insert. Reconcile this payload against that
     // row, so a concurrent paid event cannot be lost behind an older open one.
-    return importStripeInvoice(database, inv, opts)
+    return { retry: true }
   }
 
   return { localInvoiceId: invoiceId, created: results[0].length > 0, orgId: matchedOrgId }

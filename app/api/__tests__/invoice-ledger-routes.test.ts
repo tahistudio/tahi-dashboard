@@ -52,6 +52,11 @@ beforeEach(() => {
   fixture = permissionSqlite([
     schema.invoices, schema.invoiceItems, schema.organisations, schema.teamMembers,
     schema.roles, schema.teamMemberRoles, schema.teamMemberAccess, schema.teamMemberAccessOrgs,
+  ], [
+    // permissionSqlite omits foreign keys; model the production ON DELETE
+    // CASCADE so item deletion is atomic with the parent DELETE statement.
+    `CREATE TRIGGER cascade_invoice_items AFTER DELETE ON invoices
+      BEGIN DELETE FROM invoice_items WHERE invoice_id = OLD.id; END`,
   ])
   vi.mocked(db).mockResolvedValue(fixture.database as never)
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'member', orgId: 'org_tahi', sessionId: 'session' })
@@ -153,6 +158,28 @@ describe('scoped invoice ledger and export', () => {
 })
 
 describe('draft-only invoice DELETE', () => {
+  it.each(['paid', 'sent', 'written_off'])('preserves the invoice, items and rails when draft becomes %s after the read', async status => {
+    const beforeItems = fixture.rows(schema.invoiceItems)
+    const deleteRecord = fixture.database.delete.bind(fixture.database)
+    const spy = vi.spyOn(fixture.database, 'delete').mockImplementationOnce(table => {
+      fixture.sqlite.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, 'a')
+      return deleteRecord(table)
+    })
+    try {
+      const response = await remove(request('invoices/a', 'DELETE'), context('a'))
+      expect(response.status).toBe(409)
+      expect(fixture.rows(schema.invoices).find(row => row.id === 'a')).toMatchObject({ status })
+      expect(fixture.rows(schema.invoiceItems)).toEqual(beforeItems)
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(callXeroAPI).not.toHaveBeenCalled()
+      expect(stripeSecretKey).not.toHaveBeenCalled()
+      expect(writes()).toHaveLength(1)
+      expect(fixture.errors).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it.each(['super-admin', 'service'])('still refuses paid invoices for %s without financial writes', async identity => {
     if (identity === 'service') vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi', sessionId: null })
     else {

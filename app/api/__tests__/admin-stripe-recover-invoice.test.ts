@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { schema } from '@/db/d1'
+import { permissionSqlite } from './helpers/permission-sqlite'
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), isAdmin: vi.fn(), permissions: vi.fn(), db: vi.fn(), key: vi.fn(),
@@ -306,7 +307,7 @@ describe('Stripe invoice recovery apply', () => {
       expect(options.method ?? 'GET').toBe('GET')
     }
     expect(database.update).toHaveBeenCalledTimes(1)
-    expect(mocks.importer).toHaveBeenCalledExactlyOnceWith(database, remote, { autoCreateOrg: false })
+    expect(mocks.importer).toHaveBeenCalledExactlyOnceWith(database, remote, { autoCreateOrg: false, expectedOrgId: 'org-a' })
     expect(mocks.audit).toHaveBeenCalledExactlyOnceWith(database, {
       action: 'stripe_invoice_recovered', userId: 'user_liam', entityType: 'invoice', entityId: 'invoice-local',
       metadata: { orgId: 'org-a', stripeInvoiceId: remote.id, stripeCustomerId: 'cus_qa', created: true },
@@ -338,12 +339,48 @@ describe('Stripe invoice recovery apply', () => {
     expect(mocks.audit).not.toHaveBeenCalled()
   })
 
+  it('does not create a duplicate customer link when another client claims it immediately before the real SQL update', async () => {
+    const fixture = permissionSqlite([schema.organisations, schema.contacts, schema.invoices])
+    try {
+      for (const id of ['org-a', 'org-other']) {
+        fixture.insert(schema.organisations, { id, name: id, status: 'active', stripe_customer_id: null })
+      }
+      fixture.insert(schema.contacts, { id: 'contact', org_id: 'org-a', name: 'Billing', email: 'billing@example.test' })
+      mocks.db.mockResolvedValue(fixture.database)
+      const key = await previewKey()
+      const update = fixture.database.update.bind(fixture.database)
+      vi.spyOn(fixture.database, 'update').mockImplementationOnce(table => {
+        fixture.sqlite.prepare('UPDATE organisations SET stripe_customer_id = ? WHERE id = ?').run(remote.customer, 'org-other')
+        return update(table)
+      })
+      const response = await apply(key)
+      expect(response.status).toBe(409)
+      expect(fixture.rows(schema.organisations).find(row => row.id === 'org-a')).toMatchObject({ stripe_customer_id: null })
+      expect(fixture.rows(schema.organisations).find(row => row.id === 'org-other')).toMatchObject({ stripe_customer_id: remote.customer })
+      expect(mocks.importer).not.toHaveBeenCalled()
+      expect(mocks.audit).not.toHaveBeenCalled()
+      expect(fixture.errors).toEqual([])
+    } finally {
+      fixture.close()
+    }
+  })
+
   it('returns a conflict without auditing success if the importer skips recovery', async () => {
     const key = await previewKey()
     mocks.importer.mockResolvedValue({ skipped: true, reason: 'No matching org' })
     const response = await apply(key)
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({ error: 'No matching org' })
+    expect(mocks.audit).not.toHaveBeenCalled()
+  })
+
+  it('returns 409 instead of reporting success when the importer resolves a different client', async () => {
+    const key = await previewKey()
+    mocks.importer.mockResolvedValue({ ...imported, orgId: 'org-other' })
+    const response = await apply(key)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: 'This invoice is attached to another client. Preview the recovery again.' })
+    expect(mocks.importer).toHaveBeenCalledOnce()
     expect(mocks.audit).not.toHaveBeenCalled()
   })
 })

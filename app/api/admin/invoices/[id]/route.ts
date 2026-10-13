@@ -4,7 +4,7 @@ import { stripeSecretKey } from '@/lib/stripe-key'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema, type DB } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { dispatchDomainEvent } from '@/lib/events'
@@ -625,6 +625,18 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Only draft invoices can be deleted' }, { status: 409 })
   }
 
+  // A payment or sync may have changed the status since the read. Claim the
+  // deletion in SQL before removing items or voiding anything on either rail.
+  // The invoice_items foreign key cascades atomically with this deletion.
+  const deleted = await drizzle.delete(schema.invoices).where(and(
+    eq(schema.invoices.id, id),
+    eq(schema.invoices.orgId, invoice.orgId),
+    eq(schema.invoices.status, 'draft'),
+  )).returning({ id: schema.invoices.id })
+  if (!deleted.length) {
+    return NextResponse.json({ error: 'Only draft invoices can be deleted' }, { status: 409 })
+  }
+
   // Void in Stripe if linked (draft = delete, finalized = void)
   const stripeKey = stripeSecretKey()
   if (invoice.stripeInvoiceId && stripeKey) {
@@ -653,9 +665,6 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       })
     } catch { /* Xero cleanup failed silently */ }
   }
-
-  await drizzle.delete(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id))
-  await drizzle.delete(schema.invoices).where(eq(schema.invoices.id, id))
 
   return NextResponse.json({ success: true })
 }

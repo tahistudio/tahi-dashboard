@@ -83,10 +83,13 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
   const denied = await requireScheduleAccess(database, { userId, orgId }, scheduleId)
   if (denied) return denied
 
-  // Manual cascade — delete child rows first, then the section.
+  // Both the section and its children must belong to the authorised schedule.
   await database
     .delete(schema.scheduleRows)
-    .where(eq(schema.scheduleRows.sectionId, sectionId))
+    .where(and(
+      eq(schema.scheduleRows.sectionId, sectionId),
+      eq(schema.scheduleRows.scheduleId, scheduleId),
+    ))
   await database
     .delete(schema.scheduleSections)
     .where(and(
