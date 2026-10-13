@@ -93,13 +93,34 @@ export const SWEEP_BUDGET_MS = 75_000
 export const READ_ESTIMATE_MS = 30_000
 
 export const MODEL_READ_TIMEOUT_MS = 30_000
+const MAX_DEFERRED_FAILURES = 5
 const WRITE_RESERVE_MS = 5_000
 
 export class SuggesterTimeoutError extends Error {
-  constructor() {
+  constructor(readonly timeoutMs = MODEL_READ_TIMEOUT_MS) {
     super('Model read timed out. The transcript remains available for retry.')
     this.name = 'SuggesterTimeoutError'
   }
+}
+
+function modelErrorStatus(error: unknown): number {
+  const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : NaN
+  if (Number.isFinite(status) && status > 0) return status
+  const matched = error instanceof Error ? /^(?:error[:\s]*)?(429|5\d{2})\b/i.exec(error.message) : null
+  return matched ? Number(matched[1]) : NaN
+}
+
+function transientModelError(error: unknown): boolean {
+  const status = modelErrorStatus(error)
+  if (status === 429 || (status >= 500 && status <= 599)) return true
+  return !Number.isFinite(status) && error instanceof Error
+    && (/APIConnection(?:Timeout)?Error/i.test(error.name)
+      || /connection error|connection (?:reset|refused|closed)|network error|fetch failed|failed to fetch|socket hang up|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(error.message))
+}
+
+function modelReadTimedOut(error: unknown): boolean {
+  return error instanceof SuggesterTimeoutError || error instanceof Error
+    && (/TimeoutError|AbortError/i.test(error.name) || /timeout|timed out|aborted/i.test(error.message))
 }
 
 async function boundedRead<T>(read: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
@@ -110,7 +131,7 @@ async function boundedRead<T>(read: (signal: AbortSignal) => Promise<T>, timeout
       read(controller.signal),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          reject(new SuggesterTimeoutError())
+          reject(new SuggesterTimeoutError(timeoutMs))
           controller.abort()
         }, timeoutMs)
       }),
@@ -1407,10 +1428,11 @@ export function mergeSecondRead(
  * One pass: read the oldest unread transcripts, gate them, suggest, stamp.
  *
  * The stamp is the load bearing part. It goes on every transcript the sweep
- * LOOKED at, including the ones the gate rejected and the ones the model threw
- * on, because `suggested_at IS NULL` has to keep meaning "never looked at". A
- * failure that leaves the column null is a transcript this job re-reads, and
- * re-pays for, every thirty minutes until somebody notices the bill.
+ * LOOKED at, including gate rejections and permanent model failures. Transient
+ * failures stay unread until a later run succeeds or five counted failures
+ * exhaust that transcript's durable retry allowance in the settings table.
+ * Rate limits never count. Connection and server errors count only when
+ * another model read succeeded in the same run, rather than during outages.
  *
  * The converse holds as strictly: a transcript the sweep did NOT take on is
  * never stamped. The run has a time budget (SWEEP_BUDGET_MS) because its
@@ -1462,10 +1484,26 @@ export async function runSuggestionSweep(
   const readsPerCall = secondPass.enabled ? 2 : 1
   const fits = (reads: number): boolean => clock() - startedAt + reads * slowestRead <= budgetMs
   const readTimeout = (): number => Math.min(MODEL_READ_TIMEOUT_MS, budgetMs - (clock() - startedAt) - WRITE_RESERVE_MS)
+  let modelReadSucceeded = false
   const read = (input: SuggestFromTranscriptInput): Promise<SuggestResult> => {
     const timeoutMs = readTimeout()
-    if (timeoutMs <= 0) throw new SuggesterTimeoutError()
-    return timed(() => boundedRead(signal => suggest({ ...input, signal, timeoutMs }), timeoutMs))
+    if (timeoutMs <= 0) throw new SuggesterTimeoutError(timeoutMs)
+    return timed(async () => {
+      const began = clock()
+      try {
+        const result = await boundedRead(signal => suggest({ ...input, signal, timeoutMs }), timeoutMs)
+        modelReadSucceeded = true
+        return result
+      } catch (error) {
+        // An SDK timeout that reaches a shortened deadline is budget-limited
+        // too. An earlier connection failure still belongs to the transcript.
+        if (!(error instanceof SuggesterTimeoutError) && timeoutMs < MODEL_READ_TIMEOUT_MS
+          && clock() - began >= timeoutMs && !Number.isFinite(modelErrorStatus(error)) && modelReadTimedOut(error)) {
+          throw new SuggesterTimeoutError(timeoutMs)
+        }
+        throw error
+      }
+    })
   }
   let started = 0
 
@@ -1484,6 +1522,29 @@ export async function runSuggestionSweep(
     repaired: 0,
     dropReasons: {},
     secondPass,
+  }
+
+  const defer = (ids: string[]): void => {
+    summary.deferredIds = [...new Set([...(summary.deferredIds ?? []), ...ids])]
+    summary.deferred = summary.deferredIds.length
+  }
+
+  const providerFailures: Array<{ transcriptId: string; message: string }> = []
+  const deferredFailure = async (transcriptId: string, message: string, stampOnExhaustion = true): Promise<boolean> => {
+    const failures = await incrementDeferredFailures(database, transcriptId, nowIso)
+    if (failures < MAX_DEFERRED_FAILURES) return false
+    const skipped = {
+      transcriptId,
+      reason: `suggester_retry_limit: skipped after ${failures} deferred failures. Last failure: ${message}`,
+    }
+    const existing = summary.skipped.findIndex(item => item.transcriptId === transcriptId)
+    if (existing >= 0) summary.skipped[existing] = skipped
+    else summary.skipped.push(skipped)
+    if (stampOnExhaustion) {
+      await stamp(database, transcriptId, nowIso)
+      await clearDeferredFailures(database, transcriptId)
+    }
+    return true
   }
 
   if (targeted && targeted.length === 0) {
@@ -1522,8 +1583,7 @@ export async function runSuggestionSweep(
     // unstamped, and first in line for the next run, which also reads
     // oldest first.
     if (readTimeout() <= 0 || (started > 0 && !fits(readsPerCall))) {
-      summary.deferredIds = transcripts.slice(index).map(t => t.id)
-      summary.deferred = summary.deferredIds.length
+      defer(transcripts.slice(index).map(t => t.id))
       break
     }
 
@@ -1535,6 +1595,7 @@ export async function runSuggestionSweep(
     if (!gate.eligible) {
       summary.skipped.push({ transcriptId: transcript.id, reason: gate.reason })
       await stamp(database, transcript.id, nowIso)
+      await clearDeferredFailures(database, transcript.id)
       continue
     }
 
@@ -1563,15 +1624,32 @@ export async function runSuggestionSweep(
     } catch (err) {
       // The summary has one slot for "this transcript produced nothing and
       // why", so a failure is reported there rather than in a field the
-      // contract does not have. The stamp still goes on.
+      // contract does not have. Transient failures remain unread for retry.
       const message = err instanceof Error ? err.message : String(err)
       summary.skipped.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
-      if (err instanceof SuggesterTimeoutError || (err instanceof Error && /timeout|timed out|aborted/i.test(err.message))) {
-        summary.deferredIds = transcripts.slice(index).map(t => t.id)
-        summary.deferred = summary.deferredIds.length
+      if (err instanceof SuggesterTimeoutError && err.timeoutMs < MODEL_READ_TIMEOUT_MS) {
+        // The sweep ran out of usable time. This is not a transcript failure.
+        defer(transcripts.slice(index).map(t => t.id))
         break
       }
+      if (transientModelError(err) || modelReadTimedOut(err)) {
+        if ([429, 529].includes(modelErrorStatus(err))) {
+          defer(transcripts.slice(index).map(t => t.id))
+          break
+        }
+        // A later transcript may be the first successful read in this run.
+        // Wait for it before distinguishing an isolated failure from an outage.
+        if (transientModelError(err)) {
+          providerFailures.push({ transcriptId: transcript.id, message })
+          defer([transcript.id])
+          continue
+        }
+        const exhausted = await deferredFailure(transcript.id, message)
+        if (!exhausted) defer([transcript.id])
+        continue
+      }
       await stamp(database, transcript.id, nowIso)
+      await clearDeferredFailures(database, transcript.id)
       continue
     }
 
@@ -1587,9 +1665,9 @@ export async function runSuggestionSweep(
     // and one question, "anything missed?". Its new items join the first
     // read's before the writer sees either, so both go through exactly one
     // dedupe. Skipped when the first read already filled the ceiling, since a
-    // second read could add nothing, and when it would risk the budget. A
-    // failure here costs the second read only: the first is already in hand
-    // and is written regardless.
+    // second read could add nothing, and when it would risk the budget.
+    // Permanent failures and sweep-budget deadlines keep the first read.
+    // Transient provider failures and full read deadlines leave it unread.
     let drafts = result.suggestions
     const room = MAX_SUGGESTIONS - drafts.length
     if (secondPass.enabled) {
@@ -1612,6 +1690,20 @@ export async function runSuggestionSweep(
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           secondPass.failed.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
+          const budgetDeadline = err instanceof SuggesterTimeoutError && err.timeoutMs < MODEL_READ_TIMEOUT_MS
+          if (!budgetDeadline && (transientModelError(err) || modelReadTimedOut(err))) {
+            if ([429, 529].includes(modelErrorStatus(err))) {
+              defer(transcripts.slice(index).map(t => t.id))
+              break
+            }
+            // The first read succeeded, so this is an isolated failure. At
+            // the cap, keep its drafts and stamp only after they are written.
+            const exhausted = await deferredFailure(transcript.id, message, false)
+            if (!exhausted) {
+              defer([transcript.id])
+              continue
+            }
+          }
         }
       }
     }
@@ -1654,6 +1746,16 @@ export async function runSuggestionSweep(
     }
 
     await stamp(database, transcript.id, nowIso)
+    await clearDeferredFailures(database, transcript.id)
+  }
+
+  if (modelReadSucceeded) {
+    for (const failure of providerFailures) {
+      if (await deferredFailure(failure.transcriptId, failure.message)) {
+        summary.deferredIds = summary.deferredIds?.filter(id => id !== failure.transcriptId)
+        summary.deferred = summary.deferredIds?.length ?? 0
+      }
+    }
   }
 
   summary.resurfaced = await resurfaceSnoozed(database, new Date(nowIso))
@@ -1881,4 +1983,25 @@ async function stamp(database: Drizzle, transcriptId: string, at: string): Promi
     .update(schema.callTranscripts)
     .set({ suggestedAt: at })
     .where(eq(schema.callTranscripts.id, transcriptId))
+}
+
+async function incrementDeferredFailures(database: Drizzle, transcriptId: string, at: string): Promise<number> {
+  const [counter] = await database
+    .insert(schema.settings)
+    .values({ key: `suggester.failures.${transcriptId}`, value: '1', updatedAt: at })
+    .onConflictDoUpdate({
+      target: schema.settings.key,
+      set: {
+        value: sql`CAST(MAX(CAST(COALESCE(${schema.settings.value}, '0') AS INTEGER), 0) + 1 AS TEXT)`,
+        updatedAt: at,
+      },
+    })
+    .returning({ value: schema.settings.value })
+  const failures = Number(counter?.value)
+  if (!Number.isInteger(failures) || failures < 1) throw new Error('Transcript failure counter did not increment')
+  return failures
+}
+
+async function clearDeferredFailures(database: Drizzle, transcriptId: string): Promise<void> {
+  await database.delete(schema.settings).where(eq(schema.settings.key, `suggester.failures.${transcriptId}`))
 }

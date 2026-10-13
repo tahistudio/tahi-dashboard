@@ -59,6 +59,11 @@ vi.mock('@/lib/db', () => {
   return { db: vi.fn().mockResolvedValue({ select: vi.fn(() => chain) }) }
 })
 
+// Permission decisions are covered with real SQLite in nested-client-scope-sqlite.
+vi.mock('@/lib/require-permission', () => ({
+  requireManagePermissions: vi.fn(async () => ({ denied: null })),
+}))
+
 import { GET } from '@/app/api/admin/audit/route'
 import { AUDIT_LIKE_ESCAPE, escapeAuditLikePrefix } from '@/lib/audit'
 import { NextRequest } from 'next/server'

@@ -1,5 +1,6 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
+import { activityListWhere, requireActivityLinks } from '@/lib/activity-access'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, and } from 'drizzle-orm'
@@ -8,7 +9,7 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // GET /api/admin/activities
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -18,10 +19,16 @@ export async function GET(req: NextRequest) {
   const actOrgId = url.searchParams.get('orgId')
   const contactId = url.searchParams.get('contactId')
   const type = url.searchParams.get('type')
+  const leadId = url.searchParams.get('leadId')
 
   const database = await db() as unknown as D1
-  const conditions = []
+  if (dealId || actOrgId || contactId || leadId) {
+    const denied = await requireActivityLinks(database, { userId, orgId }, { dealId, orgId: actOrgId, contactId, leadId })
+    if (denied) return denied
+  }
+  const conditions = [await activityListWhere(database, { userId, orgId })]
 
+  if (leadId) conditions.push(eq(schema.activities.leadId, leadId))
   if (dealId) conditions.push(eq(schema.activities.dealId, dealId))
   if (actOrgId) conditions.push(eq(schema.activities.orgId, actOrgId))
   if (contactId) conditions.push(eq(schema.activities.contactId, contactId))
@@ -81,6 +88,9 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
+
+  const denied = await requireActivityLinks(database, { userId, orgId }, body)
+  if (denied) return denied
 
   // Resolve createdById: find team member ID for this Clerk user
   const [teamMember] = await database

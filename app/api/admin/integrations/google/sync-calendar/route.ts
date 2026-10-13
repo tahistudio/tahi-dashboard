@@ -25,7 +25,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, inArray, sql } from 'drizzle-orm'
 import { getGoogleAccessToken, listCalendarEvents, GoogleNotConnectedError } from '@/lib/google'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { normalizeCallInstant } from '@/lib/call-time'
 import type { MeetingType } from '@/lib/calls'
 
@@ -34,10 +34,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
   // Two auth paths: admin session OR cron secret (matches /api/admin/cron/*).
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   let userId = 'system'
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)

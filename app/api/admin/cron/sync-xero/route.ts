@@ -22,7 +22,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getValidXeroToken } from '@/lib/xero'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { syncXeroBalances, syncXeroPayments, syncXeroPnl, importXeroInvoices } from '@/lib/xero-sync'
 import type { SyncOutcome } from '@/lib/xero-sync'
 
@@ -35,6 +35,7 @@ interface StepResult {
   ok: boolean
   error?: string
   count?: number
+  unlinked?: string[]
 }
 
 /**
@@ -45,17 +46,21 @@ interface StepResult {
  */
 function toStep(name: string, outcome: SyncOutcome): StepResult {
   const ok = outcome.ok && !outcome.warning
-  return { name, ok, error: ok ? undefined : (outcome.error ?? outcome.warning), count: outcome.count }
+  const results = (outcome.body as { results?: Array<{ status?: string; orgMatch?: string }> } | null)?.results
+  const lines = Array.isArray(results)
+    ? results.filter(result => result.status === 'no_client_linked' && result.orgMatch).map(result => String(result.orgMatch))
+    : []
+  return {
+    name, ok, error: ok ? undefined : (outcome.error ?? outcome.warning), count: outcome.count,
+    ...(lines.length > 0 ? { unlinked: Array.from(new Set(lines)).slice(0, 50) } : {}),
+  }
 }
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
 
   // Auth: admin session OR cron secret (GH Action sends x-cron-secret).
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)
     if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

@@ -1,5 +1,6 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -20,6 +21,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { id: clientOrgId } = await params
   const database = await db()
+  const denied = await requireAccessToOrg(database, userId, clientOrgId)
+  if (denied) return denied
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   // Find active subscription for this org
@@ -40,11 +43,14 @@ export async function GET(req: NextRequest, { params }: Params) {
       id: schema.tracks.id,
       type: schema.tracks.type,
       isPriorityTrack: schema.tracks.isPriorityTrack,
-      currentRequestId: schema.tracks.currentRequestId,
+      currentRequestId: schema.requests.id,
       currentRequestTitle: schema.requests.title,
     })
     .from(schema.tracks)
-    .leftJoin(schema.requests, eq(schema.tracks.currentRequestId, schema.requests.id))
+    .leftJoin(schema.requests, and(
+      eq(schema.tracks.currentRequestId, schema.requests.id),
+      eq(schema.requests.orgId, clientOrgId),
+    ))
     .where(eq(schema.tracks.subscriptionId, sub.id))
 
   // Get queued (non-delivered, non-archived) requests for this org
@@ -92,7 +98,17 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const database = await db()
+  const denied = await requireAccessToOrg(database, userId, clientOrgId)
+  if (denied) return denied
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const [subscription] = await drizzle.select({ id: schema.subscriptions.id })
+    .from(schema.subscriptions)
+    .where(and(eq(schema.subscriptions.id, body.subscriptionId), eq(schema.subscriptions.orgId, clientOrgId)))
+    .limit(1)
+  if (!subscription) {
+    return NextResponse.json({ error: 'Subscription not found for this client' }, { status: 404 })
+  }
 
   // Determine track allocation based on plan
   // maintain: 1 small | scale: 1 small + 1 large
@@ -123,6 +139,5 @@ export async function POST(req: NextRequest, { params }: Params) {
     )
   )
 
-  void (clientOrgId) // suppress unused warning
   return NextResponse.json({ created: inserted.length }, { status: 201 })
 }

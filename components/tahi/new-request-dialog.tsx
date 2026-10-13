@@ -110,6 +110,8 @@ interface NewRequestDialogProps {
    *  together with onSubmitOverride: set alone it just prefills, the way
    *  aiDraft does. */
   initialDraft?: RequestInitialDraft | null
+  /** The suggestion row owns its client; Tweak changes only the request. */
+  clientReadOnly?: boolean
   /** Replaces the dialog's own POST when set: save calls this with the
    *  current form values instead and closes on success. An error it throws
    *  lands in the same inline banner a failed POST would. The Suggestions
@@ -389,7 +391,7 @@ type DialogView = 'form' | 'ai' | 'done'
 
 function AlignedRequestDialog({
   open, onClose, isAdmin, canUseLargeTrack = true, defaultOrgId,
-  parentRequestId, forceOrgId, onCreated, aiDraft, initialDraft, onSubmitOverride,
+  parentRequestId, forceOrgId, onCreated, aiDraft, initialDraft, onSubmitOverride, clientReadOnly = false,
 }: NewRequestDialogProps) {
   const isSubRequest = !!parentRequestId
   const isClient = !isAdmin
@@ -924,6 +926,7 @@ function AlignedRequestDialog({
                     <SearchableSelect
                       options={clients.map(c => ({ value: c.id, label: c.name }))}
                       value={clientOrgId || null}
+                      disabled={clientReadOnly}
                       onChange={(v) => setClientOrgId(v ?? '')}
                       placeholder="Select a client..."
                       searchPlaceholder="Search clients..."

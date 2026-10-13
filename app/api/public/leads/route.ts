@@ -23,6 +23,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { lookupOrCreatePerson } from '@/lib/people'
+import { constantTimeEqual } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
     }, { status: 500 })
   }
   const authHeader = req.headers.get('authorization')
-  if (authHeader !== `Bearer ${expected}`) {
+  if (!constantTimeEqual(authHeader ?? '', `Bearer ${expected}`)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

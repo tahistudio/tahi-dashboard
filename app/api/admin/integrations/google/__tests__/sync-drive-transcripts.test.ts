@@ -22,7 +22,10 @@ vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 
-vi.mock('@/lib/cron-runs', () => ({ logCronRun: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/lib/cron-runs', async (importOriginal) => ({
+  hasCronSecretAuth: (await importOriginal<typeof import('@/lib/cron-runs')>()).hasCronSecretAuth,
+  logCronRun: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('@/lib/google', () => ({
   getGoogleAccessToken: vi.fn().mockResolvedValue({ accessToken: 'tok' }),

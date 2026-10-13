@@ -59,13 +59,29 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ error: 'Schedule has no gantt section to attach a row to' }, { status: 400 })
   }
 
+  const [section] = await database
+    .select({ id: schema.scheduleSections.id })
+    .from(schema.scheduleSections)
+    .where(and(
+      eq(schema.scheduleSections.id, sectionId),
+      eq(schema.scheduleSections.scheduleId, scheduleId),
+      eq(schema.scheduleSections.type, 'gantt'),
+    ))
+    .limit(1)
+  if (!section) {
+    return NextResponse.json({ error: 'Choose a gantt section from this schedule' }, { status: 400 })
+  }
+
   // If no position supplied, append within the section.
   let position = body.position
   if (position == null) {
     const [maxRow] = await database
       .select({ maxPos: sql<number>`COALESCE(MAX(${schema.scheduleRows.position}), -1)` })
       .from(schema.scheduleRows)
-      .where(eq(schema.scheduleRows.sectionId, sectionId))
+      .where(and(
+        eq(schema.scheduleRows.sectionId, sectionId),
+        eq(schema.scheduleRows.scheduleId, scheduleId),
+      ))
     position = (maxRow?.maxPos ?? -1) + 1
   }
 

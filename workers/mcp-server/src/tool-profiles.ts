@@ -119,6 +119,9 @@ export const DESIGNER_CONFIRM_TOOLS: ReadonlySet<string> = new Set([
  */
 export const CONDITIONAL_CONFIRM_TOOLS: ReadonlySet<string> = new Set(['update_request_fields'])
 
+/** Explicit money classifications, in addition to default deny for all unlisted tools. */
+export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set(['link_stripe_customer', 'confirm_xero_contact'])
+
 const INTERNAL_WHEN_FLAGGED: ReadonlySet<string> = new Set(['post_request_message', 'post_message', 'send_message'])
 
 /** Time tools: always logged as the person, never with a rate or billable flag. */
@@ -130,6 +133,7 @@ export const CONFIRM_ARG = 'confirmed'
 
 export function classifyTool(name: string, profile: McpProfile): ToolAccess {
   if (profile === 'full') return 'write'
+  if (DESIGNER_BLOCKED_TOOLS.has(name)) return 'blocked'
   if (DESIGNER_READ_TOOLS.has(name)) return 'read'
   if (DESIGNER_WRITE_TOOLS.has(name)) return 'write'
   if (DESIGNER_CONFIRM_TOOLS.has(name)) return 'confirm'

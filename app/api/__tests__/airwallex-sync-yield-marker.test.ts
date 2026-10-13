@@ -26,7 +26,9 @@ vi.mock('@/lib/server-auth', () => ({
 }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
-vi.mock('@/lib/cron-runs', () => ({ logCronRun: vi.fn() }))
+vi.mock('@/lib/cron-runs', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/cron-runs')>()), logCronRun: vi.fn(),
+}))
 vi.mock('@/lib/airwallex', () => ({
   AirwallexNotConfiguredError: class extends Error {},
   getAirwallexToken: vi.fn().mockResolvedValue('token'),

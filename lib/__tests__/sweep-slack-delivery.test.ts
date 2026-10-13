@@ -97,6 +97,7 @@ function makeDb(queued: unknown[]) {
     select: () => chain(queue.length ? queue.shift() : []),
     insert: () => ({ values: async () => ({ success: true }) }),
     update: () => ({ set: () => ({ where: async () => ({ success: true }) }) }),
+    delete: () => ({ where: async () => ({ success: true }) }),
   }
   return handle as unknown as Parameters<typeof runSuggestionSweep>[0]
 }

@@ -23,7 +23,9 @@ vi.mock('@/lib/server-auth', () => ({
 
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 vi.mock('@/lib/db', () => ({ db: vi.fn().mockResolvedValue({}) }))
-vi.mock('@/lib/cron-runs', () => ({ logCronRun: vi.fn() }))
+vi.mock('@/lib/cron-runs', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/cron-runs')>()), logCronRun: vi.fn(),
+}))
 
 // The real SnapshotFillRefusal class, so the route's instanceof check is the
 // one production runs; only the three writers are stubbed.

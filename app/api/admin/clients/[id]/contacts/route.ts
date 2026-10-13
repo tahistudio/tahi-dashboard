@@ -1,5 +1,6 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -19,6 +20,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { id } = await params
   const database = await db()
+  const denied = await requireAccessToOrg(database, userId, id)
+  if (denied) return denied
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   const contacts = await drizzle
@@ -58,6 +61,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // Verify org exists
   const database = await db()
+  const denied = await requireAccessToOrg(database, userId, id)
+  if (denied) return denied
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   const [org] = await drizzle

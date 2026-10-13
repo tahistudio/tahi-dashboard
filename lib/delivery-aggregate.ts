@@ -1,5 +1,5 @@
 /**
- * lib/delivery-aggregate.ts — Delivery spine (#148) cross-schedule aggregation.
+ * lib/delivery-aggregate.ts, Delivery spine (#148) cross-schedule aggregation.
  *
  * The pure engine in lib/delivery-status.ts computes status for ONE schedule's
  * rows. A deal or client engagement can span several schedules, so this helper
@@ -7,11 +7,12 @@
  * engagement status. Used by the deal/client engagement-health card (Slice 4)
  * and the overview off-track widget (Slice 5).
  *
- * DB-aware (takes a Drizzle instance) — server-only, import from API routes.
+ * DB-aware (takes a Drizzle instance), server-only, import from API routes.
  */
 
 import { schema } from '@/db/d1'
-import { inArray, ne } from 'drizzle-orm'
+import { inArray, ne, and, sql, or, isNull } from 'drizzle-orm'
+import type { OrgScope } from '@/lib/access-scope'
 import {
   computeRowStatus,
   computeEngagementStatus,
@@ -55,13 +56,21 @@ export async function aggregateDeliveryStatus(
   drizzle: D1,
   schedules: ScheduleRef[],
   nowISO: string,
+  scope: OrgScope = { kind: 'all' },
 ): Promise<AggregateResult> {
   const empty: AggregateResult = {
     engagement: { status: 'not_started', pctComplete: 0, rowsTotal: 0, rowsDone: 0, offTrackRowIds: [] },
     perSchedule: [],
     offTrackRows: [],
   }
-  if (schedules.length === 0) return empty
+  if (schedules.length === 0 || scope.kind === 'none') return empty
+
+  const requestOwned = scope.kind === 'some'
+    ? sql`${schema.requests.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))`
+    : undefined
+  const taskOwned = scope.kind === 'some'
+    ? or(isNull(schema.tasks.orgId), sql`${schema.tasks.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))`)
+    : undefined
 
   const schedById = new Map(schedules.map(s => [s.id, s]))
   const scheduleIds = schedules.map(s => s.id)
@@ -118,7 +127,7 @@ export async function aggregateDeliveryStatus(
           scopeFlagged: schema.requests.scopeFlagged,
         })
         .from(schema.requests)
-        .where(inArray(schema.requests.scheduleRowId, chunk)),
+        .where(and(inArray(schema.requests.scheduleRowId, chunk), requestOwned)),
       drizzle
         .select({
           id: schema.tasks.id,
@@ -127,7 +136,7 @@ export async function aggregateDeliveryStatus(
           dueDate: schema.tasks.dueDate,
         })
         .from(schema.tasks)
-        .where(inArray(schema.tasks.scheduleRowId, chunk)),
+        .where(and(inArray(schema.tasks.scheduleRowId, chunk), taskOwned)),
     ])
     for (const r of reqs) {
       push(r.scheduleRowId, {
@@ -209,7 +218,12 @@ export interface OffTrackEngagement {
 export async function listOffTrackEngagements(
   drizzle: D1,
   nowISO: string,
+  scope: OrgScope = { kind: 'all' },
 ): Promise<OffTrackEngagement[]> {
+  if (scope.kind === 'none') return []
+  const owned = scope.kind === 'some'
+    ? sql`(coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IS NULL OR coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)})))`
+    : undefined
   const schedules = await drizzle
     .select({
       id: schema.projectSchedules.id,
@@ -219,7 +233,7 @@ export async function listOffTrackEngagements(
       dealId: schema.projectSchedules.dealId,
     })
     .from(schema.projectSchedules)
-    .where(ne(schema.projectSchedules.status, 'archived'))
+    .where(and(ne(schema.projectSchedules.status, 'archived'), owned))
 
   if (schedules.length === 0) return []
 
@@ -259,7 +273,7 @@ export async function listOffTrackEngagements(
 
   const out: OffTrackEngagement[] = []
   for (const [org, scheds] of byOrg) {
-    const agg = await aggregateDeliveryStatus(drizzle, scheds, nowISO)
+    const agg = await aggregateDeliveryStatus(drizzle, scheds, nowISO, scope)
     if (agg.engagement.rowsTotal > 0 && OFF_TRACK_STATUSES.includes(agg.engagement.status)) {
       out.push({
         orgId: org,

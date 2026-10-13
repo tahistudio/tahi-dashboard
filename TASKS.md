@@ -29,6 +29,73 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
   counted twice.
 - An item only flips to `[x]` when the evidence names a commit AND a live
   observation. Merged with no live look stays `[~]` with the commit named.
+# TASKS.md, reorganised 2026-09-13 (the previous file is archived at docs/superpowers/plans/2026-09-13-TASKS-before-reorganisation.md)
+
+# Tahi Dashboard, reorganised task list
+
+Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
+`git log --oneline -80`, STATUS.md "Since the last update",
+`docs/superpowers/plans/2026-09-13-overnight-run-log.md`, and the merge commits of
+tonight (Batch B, Batch C, LW.1 to LW.20).
+
+## Open id count, historical 2026-09-13 snapshot
+
+- Open lines in TASKS.md before this pass: **112** (75 `[ ]`, 37 `[~]`).
+- Two of those lines repeat an id that is already written elsewhere in the open
+  set (GI.1 twice, GI.2 twice), so the distinct open id count before is **110**.
+- Resolved to Done in this pass on evidence: **13**.
+- Merged into another open id: **1** (CB5 into IC.8).
+- Distinct open ids after this pass: **96**.
+
+110 = 13 done + 1 merged + 96 still open. Nothing was dropped.
+
+## How to read this file
+
+- `[ ]` open, `[~]` merged but not yet proved live, `[x]` merged, deployed and
+  seen live.
+- An id has exactly ONE home in this file. Sections that schedule work
+  (the catalogue batches) reference ids rather than repeating them, so no id is
+  counted twice.
+- An item only flips to `[x]` when the evidence names a commit AND a live
+  observation. Merged with no live look stays `[~]` with the commit named.
+
+## Next-20 items 2 to 7 hardening, 2026-10-13
+
+Suggestion decisions keep the stored client immutable, permit same-client
+request links, and allow only supported task fields with team-member assignees.
+Task writes, including templates, validate track and schedule ownership;
+explicit client/request pairs must name the same client before insertion.
+Brand creation and request
+and time exports enforce the caller's client scope. Delivery rollups include
+pre-client deal schedules for seats with client access.
+
+Schedule child writes are parent-fenced. Invoice deletion atomically claims a
+normalised draft status. Stripe recovery pins the selected client and refuses
+duplicate links. Super admins can preview and confirm a customer link from the
+client Money tab. The MCP link_stripe_customer tool retains its 403 by design:
+Decision #070 authorises api-service, whose admin role is not super_admin.
+Recorded actors never upgrade that access.
+
+Xero pushes require an explicitly confirmed contact link. Failed pushes show
+the server reason and client Money link; an all-failed batch returns 422. The
+admin Money card compares Xero names/emails with client contact emails and
+confirms suggested or pasted ContactIDs. ContactIDs are trimmed, validated as
+UUIDs and stored lowercase; linking and imports compare ids without case.
+Changing an existing link requires explicit replacement confirmation in the
+card and replace: true through the PATCH or MCP confirm_xero_contact. The
+tool remains blocked for designers. Contact linking is unique across clients;
+imports exclude archived clients and skip ambiguous links. Cron and public
+lead secrets use the shared constant-time helper.
+Transcript server, connection and full read timeout failures defer only the
+affected call; 429, 529 and sweep deadlines retain batch deferral. Settings
+counters exclude 429/529 and provider-wide connection/server outages. A
+connection/server failure counts only when another model read in the same
+sweep succeeds. Counted failures exhaust after five attempts; second-read
+exhaustion keeps the first read's drafts before stamping. Counters clear on
+processing or exhaustion, with the reason in the run summary. No migration.
+
+Source regression coverage is recorded in the run log. Deployment and signed-in
+proof are still required before the existing task states can be completed.
 
 ## Execution update, 2026-10-11
 
@@ -836,6 +903,66 @@ fixed.
   handlers (205 new route tests). The local CN.3 integration additionally
   fences mixed suggestion reads/decisions/rebuild/counts, old Slack deliveries,
   scoped invoice export and migration access. Signed-in role proof is pending.
+
+- [ ] T1.7 (C4.3/C4.4) - [Ops/BE] Portal noindex + robots; WAF rate rules
+  (60/min `/api/portal/*`, 20/min `/api/uploads/*`) or KV limiter.
+- [~] T1.11 - [BE/QA] Worker MCP /authorize hardening is implemented in
+  17799931. GET renders consent without minting a code; POST requires the
+  admin approval key, with redirect/PKCE validation and throttling. The old
+  auto-approval description is obsolete. Verify the deployed consent/reject/
+  approve flow and token revocation configuration, then record live evidence.
+  No new credential changes authorised by this triage.
+
+- [ ] T1.12 - [Liam+BE] Rotate/revoke the historically committed ManyRequests
+  token at cutover (deprioritised by Liam 2026-08-18). 17799931 removed the
+  literal from source; the worker now reads MANYREQUESTS_API_TOKEN. That does
+  not prove the old exposed token was revoked. Confirm revocation/rotation
+  separately, without printing the value or copying it into a tracked file.
+
+- [~] T1.13 - [Ops/QA] Cron scheduling repair is live via eb89d21d (LW.43),
+  Cloudflare workers/cron-trigger, with middleware repair 33f61601. The old
+  retired-host/GitHub-schedule implementation brief is obsolete. Production
+  SELECTs on 2026-10-10 show calendar, transcript, suggestion and financial
+  sync runs succeeding. Remaining: review the UTC/local-hour windows and
+  intended coverage. delivery-watch and automation-sweep are unscheduled
+  deliberately pending the reminder policy; do not enable client mail here.
+
+- [~] T1.14 - LIVE c6c4870f (2026-09-07 03:45 NZST): one rule in
+  `lib/portal-access.ts` (portalRole admin, or the primary contact) on brands,
+  organisation, people, invites and the subscription change request; profile
+  returns isAdmin; last-admin count uses the same rule. 3345 tests, health
+  200/307. Stays `[~]` until a real client session (business+client@ in
+  incognito) confirms People and Organisation are editable for the primary
+  contact. [BE] Write-path portalRole gap: portal brands/organisation/people/
+  change-request use the same primary-contact-not-admin assumption; a fresh
+  owner cannot invite teammates or edit org settings until portalRole is set.
+  Fold into onboarding work.
+
+### Least-privilege for the first hire (ACTIVE 2026-08-18, hire imminent)
+
+Prod check before starting: Liam and Staci both hold super_admin role rows, so
+deny-by-default cannot lock them out. LANDMINE handled: Liam's own
+teamMemberAccess scope row is specific_clients (Giant Group only); he is
+unrestricted only because admin/super_admin role names bypass scope, and that
+bypass must survive. Note `isTahiAdmin()` gates 506 admin routes on CLERK ORG
+MEMBERSHIP, not role, so containment needs BOTH the default flip and per-route
+scoping.
+
+- [~] T1.15 - [BE/QA] Deny by default is implemented in 7e58adeb and
+  c3db922e. permissions.ts denies roleless seats after role seeding;
+  access-scoping.ts returns no orgs for an unknown member in a seeded DB.
+  Admin/super_admin and api-service bypasses remain; bootstrap fallback is
+  limited to an unseeded role system. Remaining: prove the deployed roleless,
+  revoked-role and scoped-seat behaviour without affecting Liam/Staci.
+
+- [~] T1.16 - [BE] Per-org scoping rollout: both the deliverable batch and
+  named batch-B index routes now have guards (deals, conversations, calls,
+  time, announcements). The old "only 30 of 362" tally is historical.
+  Review follow-ups (log only): P3-7, clients/[id]/pm PUT lets a seat with
+  clients access grant a project_manager rule without canManagePermissions.
+  The review also identifies 21 other admin routes accepting orgId without
+  a recognised scoping helper; attach the review route inventory before
+  the follow-up audit. Both findings remain open under T1.6.
 
 - [ ] T1.7 (C4.3/C4.4) - [Ops/BE] Portal noindex + robots; WAF rate rules
   (60/min `/api/portal/*`, 20/min `/api/uploads/*`) or KV limiter.

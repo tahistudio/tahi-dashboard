@@ -89,6 +89,8 @@ export interface NewTaskDialogProps {
    *  create_task suggestion. Applied on open the same way initialTemplateId
    *  is, and takes priority over a template when both are somehow set. */
   initialDraft?: TaskFields | null
+  /** Tweak keeps the suggestion's client while allowing same-client requests. */
+  clientReadOnly?: boolean
   clients: readonly { id: string; name: string }[]
   peopleList: readonly { id: string; name: string }[]
   requests: readonly { id: string; orgId: string | null; requestNumber: number | null; title: string }[]
@@ -265,6 +267,7 @@ export function NewTaskDialog({
   initialOrgId,
   initialTemplateId,
   initialDraft,
+  clientReadOnly = false,
   clients,
   peopleList,
   requests,
@@ -354,12 +357,12 @@ export function NewTaskDialog({
     setSubtasks(template.subtasks.slice())
     setLinks(current => {
       const level: TaskLevel = isTaskLevel(template.type) ? template.type : current.level
-      const orgId = template.orgId ?? current.orgId
+      const orgId = clientReadOnly ? current.orgId : template.orgId ?? current.orgId
       return coerceTaskLinks({ level, orgId, requestId: orgId === current.orgId ? current.requestId : null })
     })
     // A template beats a prediction on the two fields it actually writes.
     markWritten(['priority', 'estimatedHours'])
-  }, [markWritten])
+  }, [clientReadOnly, markWritten])
 
   // Opening resets the form to whatever the caller asked for. Closing leaves
   // it alone: a rejected create keeps the draft on screen.
@@ -409,7 +412,7 @@ export function NewTaskDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const linkableRequests = requests.filter(r => !links.orgId || r.orgId === links.orgId)
+  const linkableRequests = requests.filter(r => clientReadOnly ? r.orgId === links.orgId : !links.orgId || r.orgId === links.orgId)
   const clientRequired = links.level !== 'tahi_internal'
   const missingClient = clientRequired && !links.orgId
   const canSubmit = title.trim().length > 0 && !missingClient && !submitting
@@ -432,10 +435,11 @@ export function NewTaskDialog({
       : null
     // A request whose client disagrees with the named one is a contradiction,
     // not a link. The client wins and the request is left for the human.
-    const linkedRequest = picked && (!fields.orgId || picked.orgId === fields.orgId) ? picked : null
+    const draftOrgId = clientReadOnly ? links.orgId : fields.orgId
+    const linkedRequest = picked && (clientReadOnly ? picked.orgId === draftOrgId : !draftOrgId || picked.orgId === draftOrgId) ? picked : null
     setLinks(coerceTaskLinks({
       level: fields.type,
-      orgId: fields.orgId ?? linkedRequest?.orgId ?? null,
+      orgId: draftOrgId ?? (clientReadOnly ? null : linkedRequest?.orgId ?? null),
       requestId: linkedRequest?.id ?? null,
     }))
     setTitle(fields.title)
@@ -567,7 +571,10 @@ export function NewTaskDialog({
               ariaLabel="Level"
               options={TASK_LEVELS.map(l => {
                 const Glyph = LEVEL_ICON[l.value]
-                return { value: l.value, label: l.label, title: l.hint, icon: <Glyph size={12} aria-hidden /> }
+                return {
+                  value: l.value, label: l.label, title: l.hint, icon: <Glyph size={12} aria-hidden />,
+                  disabled: clientReadOnly && (links.orgId ? l.value === 'tahi_internal' : l.value !== 'tahi_internal'),
+                }
               })}
             />
           </FieldGroup>
@@ -576,15 +583,17 @@ export function NewTaskDialog({
             <FieldGroup
               label="Client"
               required={clientRequired}
-              hint={missingClient ? 'Pick a client, or set the level to Tahi.' : undefined}
+              hint={clientReadOnly ? 'The client is fixed for this suggestion.' : missingClient ? 'Pick a client, or set the level to Tahi.' : undefined}
             >
               <SearchableSelect
                 options={clients.map(c => ({ value: c.id, label: c.name }))}
                 value={links.orgId}
-                allowClear
+                disabled={clientReadOnly}
+                allowClear={!clientReadOnly}
                 placeholder="No client"
                 searchPlaceholder="Search clients..."
                 onChange={next => {
+                  if (clientReadOnly) return
                   const linkedRequestOrgId = links.requestId
                     ? requests.find(r => r.id === links.requestId)?.orgId ?? null
                     : null

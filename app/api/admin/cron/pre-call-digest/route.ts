@@ -33,7 +33,7 @@ import { PreCallDigestEmail, type PreCallDigestEmailProps } from '@/emails/pre-c
 import { publicUrl } from '@/lib/app-url'
 import { emailFromAddress } from '@/lib/email'
 import { deliverEmail } from '@/lib/email-delivery'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { filterInPreCallWindow } from '@/lib/pre-call-window'
 
 export const dynamic = 'force-dynamic'
@@ -54,10 +54,7 @@ export async function POST(req: NextRequest) {
   // (matches existing /api/admin/ai/briefing/cron pattern + GH Actions
   // workflow) and Authorization: Bearer for parity with other crons.
   // Reads TAHI_CRON_SECRET first (existing var), falls back to CRON_SECRET.
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
     const { orgId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) {

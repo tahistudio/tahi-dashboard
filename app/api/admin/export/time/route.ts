@@ -3,8 +3,10 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, gte, lte, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, desc, sql } from 'drizzle-orm'
 import { timeEntryLoggerJoin } from '@/lib/time-entries'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
 
 // -- GET /api/admin/export/time --
 // Returns time entries as CSV.
@@ -27,6 +29,9 @@ export async function GET(req: NextRequest) {
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   const conditions = []
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'some') conditions.push(orgColumnInScope(schema.timeEntries.orgId, scope.orgIds))
+  if (scope.kind === 'none') conditions.push(sql`0 = 1`)
   if (orgIdFilter) conditions.push(eq(schema.timeEntries.orgId, orgIdFilter))
   if (teamMemberIdFilter) conditions.push(eq(schema.timeEntries.teamMemberId, teamMemberIdFilter))
   if (dateFrom) conditions.push(gte(schema.timeEntries.date, dateFrom))

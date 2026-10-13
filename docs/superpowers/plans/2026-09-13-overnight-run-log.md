@@ -863,3 +863,177 @@ action remains available after a tombstone so an R2 failure can be retried.
 The main session reruns the full suite and build. REC.0 stays open: real
 Windows mic/system capture, call accuracy, background/device behaviour,
 375/768/dark layouts and the deployed signed-in round trip remain unverified.
+
+## 2026-10-13, next-20 item 2 prepared on the local branch
+
+M1 rejects edited proposal client/request changes at the route and shared decision library, binds new tasks to the stored client, and strips task-update reassignment fields. Real SQLite scoped-seat tests prove refusal and safe edits.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+
+## 2026-10-13, next-20 item 3 prepared on the local branch
+
+M2 guards all named handlers and their secondary links. Audit requires permission-management access; activities and engagements filter before aggregate reads. Includes constant-time cron secret checks, literal LIKE ESCAPE and archived-deal exclusion. The SQLite harness now preserves duplicate joined columns and exposes its database for race injection.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+
+## 2026-10-13, next-20 item 4 prepared on the local branch
+
+Schedule child writes are parent-fenced. Invoice deletion atomically requires draft status and uses the existing FK cascade. Recovery returns 409 on client drift, pins importer writes to the chosen org, and prevents duplicate customer-link races. Import conflicts retry once, then skip.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+
+## 2026-10-13, next-20 item 5 prepared on the local branch
+
+Adds caller/state-bound signed previews, refreshed live Stripe GET checks, conditional apply, conflict refusal and real-actor audit recording. MCP tool validates ids and explicitly blocks designers. The existing api-service is admin rather than super_admin, so MCP retains its 403; apply requires a super-admin browser session. No actor is promoted for authorization.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+
+## 2026-10-13, next-20 item 6 prepared on the local branch
+
+Xero imports use exact nonempty contact ids only. Unlinked contacts are skipped and recorded in cron output, with no name-based assignment or automatic organisation creation. Real SQLite tests cover exact, substring, missing-id and repeat-run cases.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+
+## 2026-10-13, next-20 item 7 prepared on the local branch
+
+Provider 429, 500 and 529 errors defer the current transcript and remaining batch without suggested_at stamping, for either read. Permanent errors and existing timeout handling keep their prior semantics. Tests cover SDK status properties and text fallback.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+## 2026-10-13, review fixes for next-20 items 2 to 7
+
+Reviewed branch fix/next20-items-2-7 at 73ddff69, clean before edits. Applied
+M1 brand feature/client scope checks and scoped request/time exports. Xero
+pushes now require confirmed contact links; match confirmations atomically
+refuse duplicate identities, and imports exclude archived clients and skip
+ambiguous links. Suggestions use a task field allowlist and team assignees,
+keep the row client fixed, permit same-client request links, and validate
+track/schedule ownership in shared task writes, including retained links on
+client moves. Client Money now has a super-admin Stripe preview/confirm action.
+Decision #070 keeps MCP customer linking refused for api-service; attribution
+never becomes an access input.
+
+All 17 remaining cron secret handlers use hasCronSecretAuth. Invoice DELETE
+claims lower(trim(status)) = 'draft'. Scoped delivery reads include pre-client
+deal schedules. TASKS.md and STATUS.md state the behavior without sandbox/Git
+mechanics. T1.6 records P3-7 permission granting and the review's 21 other
+orgId routes as open, log-only follow-ups.
+
+Provider 500/502/503/504 and statusless connection errors defer only the
+transcript and continue. 429/529 and local timeout/budget handling retain
+batch-wide deferral. The durable retry cap remains open: neither schema nor
+migrations has a suitable call_transcripts retry or metadata field. Content,
+linkage and completion fields were preserved; this batch authorises no
+migration.
+
+Gate: type-check, lint (existing warnings), worker tsc and 17 Vitest files /
+628 tests pass. CI=1 avoids the existing remote dev proxy during lint; the
+existing native-loader sandbox runner avoids esbuild spawn EPERM. Initial
+fixture typing and a timeout-priority edge were corrected before the final
+gate. Fresh QA and UIUX source reviews have no remaining findings.
+
+Local browser fixture: real Stripe action/preview components rendered at 375
+and 768 in light and dark, no horizontal overflow, long customer ids wrap;
+controls compute to 44 CSS pixels (43.996 at browser scaling). The entry/footer
+fixture uses shared primitives, not the mounted dialog interaction flow.
+Signed-in Tweak and Stripe dialog interaction, full suite, build, integration
+and live verification remain for the main session. Changes are left
+uncommitted as requested; existing task states remain unchanged.
+
+## 2026-10-13, round 2 fixes for next-20 items 2 to 7
+
+Started on fix/next20-items-2-7 at 4e1a7f00 with a clean tree. F1 now reports
+per-invoice errors and failed totals in both invoice callers, retains the
+created local draft for recovery, and returns 422 when every push fails. The
+client Money tab has an admin/integrations-gated Xero contact card using the
+existing suggestions GET and confirmation PATCH, with client and Xero emails,
+direct ContactID entry and explicit collision errors. Worker MCP
+confirm_xero_contact validates both ids, maps to the same PATCH and is
+explicitly blocked for designers. Authorisation remains userId/api-service;
+attribution never becomes an access input.
+
+L1 applies the shared track/schedule ownership guard before template inserts.
+L2 rejects mismatched explicit client/request pairs in createTaskRecord,
+including unchanged model proposals. Full transcript read deadlines now
+defer only that transcript; provider 429/529 and sweep deadlines retain batch
+stops. Atomic settings counters record each deferred failure, stamp/skip the
+fifth with a clear run-summary reason, and clear on processing or exhaustion.
+Public lead intake uses the shared constant-time secret comparison.
+
+User-requested gate passed: npm run type-check, CI=1 npm run lint (existing
+warnings), worker tsc, and 19 Vitest files / 493 tests. The existing native
+config-loader sandbox runner avoids npm test's esbuild spawn EPERM. Tests
+cover actual invoice action/form callbacks, contact confirmation/409, real
+SQLite ownership and five-timeout progression. Initial fixture expectations
+for the old Xero 200 response and an escaped JSX apostrophe were corrected
+before the final gate. TASKS.md and STATUS.md batch entries are updated;
+existing completion states remain unchanged.
+
+No schema, commit, push, deploy, production data or secret changes. Build,
+full suite and signed-in/deployed verification are outside this round's
+requested gate. Fresh source/test QA found no remaining findings. The local
+browser fixture exposed compressed Xero candidate rows; flexShrink: 0 keeps
+the identity and conflict text visible in the scrollable list. After that
+fix, type-check, lint, worker tsc and the 2 affected files / 17 tests passed
+again.
+
+Local static SSR fixtures rendered the final card, candidates, dialog,
+loading and read-error states at 375 and 768 in light and dark (16 cases).
+No horizontal document overflow; dialog bounds fit the viewport, candidate
+text no longer overlaps, and button/link/text-input targets measure 44 CSS
+pixels (about 43.996 in animated bounding rectangles). Dark billing links
+use the theme link token. Connected Chrome provided the check after native
+Playwright launch hit spawn EPERM. These fixtures mock SWR and do not prove
+hydration or signed-in/deployed interactions; Vitest covers confirmation
+callbacks. The final hover review also moved candidate background tokens out
+of inline styles into static Tailwind classes so hover feedback can render.
+Visual/source reviews have no remaining findings.
+
+## 2026-10-13, round 3 small fixes for next-20 items 2 to 7
+
+Started on fix/next20-items-2-7 at 78f49f57 with a clean tree. This round is
+limited to L-1, I-3, L-2 and L-3. Contact confirmation trims and lowercases
+the ContactID, validates its UUID shape, and checks uniqueness without case.
+Xero imports and contact choices compare ids without case. A different
+existing link requires literal replace: true, and an atomic current-link
+guard refuses a concurrent change. The Money card shows the current link
+and opens the shared confirmation dialog before approving replacement.
+MCP confirm_xero_contact forwards optional replace while retaining its
+designer denial and existing access checks.
+
+429/529 never spend a transcript's retry allowance. First-read connection
+and server failures wait until the sweep finishes to count only when another
+model read succeeded; provider-wide outages preserve existing counters and
+leave transcripts unprocessed. Second-read retry exhaustion preserves the
+first read's drafts, writes them through insertSuggestions, then stamps and
+clears the counter. An insertion failure leaves the transcript unprocessed.
+
+Requested local gate passed: npm run type-check, CI=1 npm run lint (existing
+warnings), worker tsc, and 9 Vitest files / 316 tests. The ignored native
+config-loader sandbox runner avoids standard Vitest's esbuild spawn EPERM.
+Raw output is .claude/round3-final-gates.log, ending ALL_ROUND3_GATES_PASSED.
+Real SQLite regressions cover repeated outages, preserved existing counters,
+successes before and after failures, second-read rate limits, exactly one
+draft after five second-read timeouts, and failed insertion before stamping.
+Xero tests cover invalid/uppercase ids, strict approval, collisions, concurrent
+link changes, UI confirmation/cancellation and MCP parity. Independent QA
+source/test review passed. Local visual review is in progress. TASKS.md and
+STATUS.md record the behavior; existing completion states remain unchanged.
+No schema, commit, push, deploy, production data or secret changes.

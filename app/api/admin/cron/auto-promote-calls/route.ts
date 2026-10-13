@@ -23,7 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,10 +39,8 @@ export async function POST(req: NextRequest) {
   const t0 = Date.now()
   // Auth: admin OR cron secret (x-cron-secret header or Bearer auth).
   // TAHI_CRON_SECRET first, falls back to CRON_SECRET for env-var parity.
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
   const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
     const { orgId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) {

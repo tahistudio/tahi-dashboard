@@ -3,6 +3,44 @@
 > One-page snapshot of where the platform actually is. Update weekly.
 > Last updated: **2026-10-13** by Codex (REC.0 review fixes prepared, not live; per-person MCP connector remains LIVE). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
+## Next-20 items 2 to 7 hardening, 2026-10-13
+
+Suggestion decisions keep the stored client immutable, permit same-client
+request links, and allow only supported task fields with team-member assignees.
+Task writes, including templates, validate track and schedule ownership;
+explicit client/request pairs must name the same client before insertion.
+Brand creation and request
+and time exports enforce the caller's client scope. Delivery rollups include
+pre-client deal schedules for seats with client access.
+
+Schedule child writes are parent-fenced. Invoice deletion atomically claims a
+normalised draft status. Stripe recovery pins the selected client and refuses
+duplicate links. Super admins can preview and confirm a customer link from the
+client Money tab. The MCP link_stripe_customer tool retains its 403 by design:
+Decision #070 authorises api-service, whose admin role is not super_admin.
+Recorded actors never upgrade that access.
+
+Xero pushes require an explicitly confirmed contact link. Failed pushes show
+the server reason and client Money link; an all-failed batch returns 422. The
+admin Money card compares Xero names/emails with client contact emails and
+confirms suggested or pasted ContactIDs. ContactIDs are trimmed, validated as
+UUIDs and stored lowercase; linking and imports compare ids without case.
+Changing an existing link requires explicit replacement confirmation in the
+card and replace: true through the PATCH or MCP confirm_xero_contact. The
+tool remains blocked for designers. Contact linking is unique across clients;
+imports exclude archived clients and skip ambiguous links. Cron and public
+lead secrets use the shared constant-time helper.
+Transcript server, connection and full read timeout failures defer only the
+affected call; 429, 529 and sweep deadlines retain batch deferral. Settings
+counters exclude 429/529 and provider-wide connection/server outages. A
+connection/server failure counts only when another model read in the same
+sweep succeeds. Counted failures exhaust after five attempts; second-read
+exhaustion keeps the first read's drafts before stamping. Counters clear on
+processing or exhaustion, with the reason in the run summary. No migration.
+
+Source regression coverage is recorded in the run log. Deployment and signed-in
+proof are still required before the existing task states can be completed.
+
 ## Live 2026-10-12: per-person MCP connector (Decision #070)
 
 LIVE on production 2026-10-12 (NZ): dashboard 0870fb71 (Deploy dashboard

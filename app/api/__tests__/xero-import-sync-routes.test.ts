@@ -33,7 +33,9 @@ vi.mock('@/lib/xero-sync', () => ({
 }))
 
 vi.mock('@/lib/xero', () => ({ getValidXeroToken: vi.fn() }))
-vi.mock('@/lib/cron-runs', () => ({ logCronRun: vi.fn() }))
+vi.mock('@/lib/cron-runs', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/cron-runs')>()), logCronRun: vi.fn(),
+}))
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/server-auth'
@@ -150,6 +152,21 @@ describe('POST /api/admin/cron/sync-xero', () => {
     const json = await res.json() as { steps: Step[] }
     return json.steps
   }
+
+  it('logs unlinked Xero contacts in the cron result for operator follow-up', async () => {
+    vi.mocked(importXeroInvoices).mockResolvedValue({
+      ok: true, status: 200, count: 0, body: {
+        imported: 0, skipped: 1, results: [{ status: 'no_client_linked', orgMatch: 'Xero contact contact-unlinked (Kowhai), invoice XERO-001' }],
+      },
+    })
+    const steps = await runCron()
+    expect(steps.find(step => step.name === 'import-invoices')).toMatchObject({
+      ok: true, count: 0, unlinked: ['Xero contact contact-unlinked (Kowhai), invoice XERO-001'],
+    })
+    expect(vi.mocked(logCronRun).mock.calls[0][4]).toMatchObject({ steps: expect.arrayContaining([
+      expect.objectContaining({ name: 'import-invoices', unlinked: ['Xero contact contact-unlinked (Kowhai), invoice XERO-001'] }),
+    ]) })
+  })
 
   it('reports every step ok on a clean run', async () => {
     const steps = await runCron()

@@ -106,6 +106,11 @@ export const UPDATABLE_REQUEST_FIELDS = [
   'status', 'priority', 'dueDate', 'startDate', 'estimatedHours', 'category', 'scopeFlagged',
 ] as const
 
+/** Task proposals may edit work details, never delivery links or ownership. */
+export const UPDATABLE_TASK_FIELDS = [
+  'title', 'description', 'status', 'priority', 'dueDate', 'estimatedHours', 'assigneeId',
+] as const
+
 export type DecisionVia = 'dashboard' | 'slack' | 'mcp'
 
 /**
@@ -1380,6 +1385,30 @@ function parseProposal(proposal: string): Record<string, unknown> {
   }
 }
 
+export const EDITED_REQUEST_CLIENT_ERROR = 'An edited proposal cannot link a request from another client'
+
+/** Tweak keeps the client immutable; request links are checked against that client. */
+export function proposalOverrideError(row: SuggestionRow, override: unknown): string | null {
+  if (!override || typeof override !== 'object' || Array.isArray(override)) {
+    return 'An edited proposal must be an object'
+  }
+  const edited = override as Record<string, unknown>
+  const original = parseProposal(row.proposal)
+  if (Object.hasOwn(edited, 'orgId') && edited.orgId !== row.orgId) {
+    return 'An edited proposal cannot change its client'
+  }
+  if ((edited.requestId ?? null) !== (original.requestId ?? null) && !text(edited.requestId)) {
+    return 'An edited proposal cannot change its request'
+  }
+  const fields = edited.fields && typeof edited.fields === 'object'
+    ? edited.fields as Record<string, unknown>
+    : {}
+  if (row.kind === 'update_task' && (Object.hasOwn(fields, 'trackId') || Object.hasOwn(fields, 'scheduleRowId'))) {
+    return 'An edited proposal cannot change its track or schedule row'
+  }
+  return null
+}
+
 /** "status to in_progress, due date to 2026-10-02", for the bot line. */
 function describeFields(fields: Record<string, unknown>): string {
   const labels: Record<string, string> = {
@@ -1605,7 +1634,7 @@ export async function applySuggestion(
       const created = await createTaskRecord(drizzle, {
         title: typeof proposal.title === 'string' ? proposal.title : '',
         type: typeof proposal.type === 'string' ? proposal.type : undefined,
-        orgId: (proposal.orgId as string | null | undefined) ?? row.orgId ?? null,
+        orgId: row.orgId,
         requestId: (proposal.requestId as string | null | undefined) ?? null,
         description: (proposal.description as string | null | undefined) ?? null,
         priority: typeof proposal.priority === 'string' ? proposal.priority : undefined,
@@ -1618,7 +1647,20 @@ export async function applySuggestion(
       taskId = created.task.id
       description = `New task created: ${created.task.title}`
     } else if (row.kind === 'update_task') {
-      const fields = (proposal.fields && typeof proposal.fields === 'object' ? proposal.fields : {}) as TaskPatchInput
+      const proposed = (proposal.fields && typeof proposal.fields === 'object' ? proposal.fields : {}) as Record<string, unknown>
+      const allowed: Record<string, unknown> = {}
+      for (const key of UPDATABLE_TASK_FIELDS) {
+        if (proposed[key] !== undefined) allowed[key] = proposed[key]
+      }
+      if (allowed.assigneeId !== undefined && allowed.assigneeId !== null) {
+        if (typeof allowed.assigneeId !== 'string') {
+          return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'Task assignees must be team members' }
+        }
+        const [assignee] = await drizzle.select({ id: schema.teamMembers.id })
+          .from(schema.teamMembers).where(eq(schema.teamMembers.id, allowed.assigneeId)).limit(1)
+        if (!assignee) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: 'Task assignees must be team members' }
+      }
+      const fields = allowed as TaskPatchInput
       const updated = await updateTaskRecord(drizzle, row.targetTaskId!, fields, actor)
       if (!updated.ok) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: updated.failure.error }
       const note = typeof proposal.note === 'string' && proposal.note.trim() ? ` ${proposal.note.trim()}` : ''
@@ -1804,6 +1846,21 @@ export async function decideSuggestion(
 ): Promise<DecisionResult | null> {
   const row = await loadSuggestion(drizzle, id)
   if (!row) return null
+
+  if (decision.action === 'approve' && decision.proposalOverride !== undefined) {
+    const error = proposalOverrideError(row, decision.proposalOverride)
+    if (error) return { suggestion: row, changed: false, error, appliedTaskId: null, appliedRequestId: null }
+    const edited = decision.proposalOverride as Record<string, unknown>
+    const original = parseProposal(row.proposal)
+    if ((edited.requestId ?? null) !== (original.requestId ?? null)) {
+      const requestId = text(edited.requestId)
+      const [request] = await drizzle.select({ orgId: schema.requests.orgId })
+        .from(schema.requests).where(eq(schema.requests.id, requestId!)).limit(1)
+      if (!request || request.orgId !== row.orgId) {
+        return { suggestion: row, changed: false, error: EDITED_REQUEST_CLIENT_ERROR, appliedTaskId: null, appliedRequestId: null }
+      }
+    }
+  }
 
   if (decision.action === 'reject' && row.status === 'rejected') {
     const reason = normaliseRejectReason(decision.reason)

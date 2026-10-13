@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, or, isNull } from 'drizzle-orm'
+import { and, eq, or, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -80,14 +80,19 @@ export async function POST(req: NextRequest) {
   if (conflicts.length) return NextResponse.json({ ...preview, error: 'Recovery blocked by the identity or duplicate checks.' }, { status: 409 })
   if (body.previewKey !== previewKey) return NextResponse.json({ error: 'The invoice or client changed, or no preview was supplied. Preview the recovery again.' }, { status: 409 })
 
-  // Conditional mapping protects against overwriting an intervening link.
+  // Check both sides in SQL so an intervening link cannot claim the same
+  // customer for two clients or overwrite the chosen client's mapping.
   const mapped = await database.update(schema.organisations).set({ stripeCustomerId: inv.customer, updatedAt: new Date().toISOString() }).where(and(
     eq(schema.organisations.id, org.id),
     org.stripeCustomerId ? eq(schema.organisations.stripeCustomerId, org.stripeCustomerId) : isNull(schema.organisations.stripeCustomerId),
+    sql`NOT EXISTS (SELECT 1 FROM organisations AS linked WHERE linked.stripe_customer_id = ${inv.customer} AND linked.id <> ${org.id})`,
   )).returning({ id: schema.organisations.id })
   if (!mapped.length) return NextResponse.json({ error: 'The client link changed. Preview the recovery again.' }, { status: 409 })
-  const result = await importStripeInvoice(database, inv, { autoCreateOrg: false })
+  const result = await importStripeInvoice(database, inv, { autoCreateOrg: false, expectedOrgId: org.id })
   if ('skipped' in result) return NextResponse.json({ error: result.reason }, { status: 409 })
+  if (result.orgId !== org.id) {
+    return NextResponse.json({ error: 'This invoice is attached to another client. Preview the recovery again.' }, { status: 409 })
+  }
   await logAudit(database, { action: 'stripe_invoice_recovered', userId: auth.userId, entityType: 'invoice', entityId: result.localInvoiceId, metadata: { orgId: org.id, stripeInvoiceId: inv.id, stripeCustomerId: inv.customer, created: result.created } })
   return NextResponse.json({ ...preview, dryRun: false, result })
 }

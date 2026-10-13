@@ -176,11 +176,11 @@ export function buildAttachRequest(target: { kind: 'request' | 'task'; id: strin
  *  prop takes. Status always opens on todo: a suggestion never proposes a
  *  starting status, and the operator reviewing it owns that choice the same
  *  way they would from a blank dialog. */
-export function createProposalToTaskFields(proposal: CreateTaskProposal): TaskFields {
+export function createProposalToTaskFields(proposal: CreateTaskProposal, suggestionOrgId?: string | null): TaskFields {
   return {
     title: proposal.title,
     type: proposal.type,
-    orgId: proposal.orgId,
+    orgId: suggestionOrgId === undefined ? proposal.orgId ?? null : suggestionOrgId,
     requestId: proposal.requestId ?? null,
     description: proposal.description ?? null,
     status: 'todo',

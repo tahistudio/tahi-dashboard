@@ -1,5 +1,6 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -19,6 +20,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { id } = await params
   const database = await db()
+  const denied = await requireAccessToOrg(database, userId, id)
+  if (denied) return denied
 
   // Find the PM for this org in a single JOIN: a project_manager access rule
   // whose org link points at this client, resolved to the team member.
@@ -67,6 +70,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { pmId } = body
 
   const database = await db()
+  const denied = await requireAccessToOrg(database, userId, clientOrgId)
+  if (denied) return denied
   const now = new Date().toISOString()
 
   // Remove any existing PM assignment for this org. Find the matching

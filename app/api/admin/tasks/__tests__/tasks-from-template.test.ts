@@ -20,6 +20,8 @@ const inserted: { table: string; values: Record<string, unknown> }[] = []
 const notified: Record<string, unknown>[] = []
 let template: Record<string, unknown> | null = null
 let callerTeamMemberId: string | null = null
+let trackOrgId: string | null = null
+let scheduleOrgId: string | null = null
 
 // Feature access is granted for these task behaviour fixtures.
 // Denial wiring is exercised with the real guard in permission-write-guards.test.ts.
@@ -37,10 +39,18 @@ vi.mock('@/db/d1', () => ({
     tasks: { __name: 'tasks' },
     taskSubtasks: { __name: 'task_subtasks' },
     taskTemplates: { __name: 'task_templates' },
+    tracks: { __name: 'tracks', id: 'tracks.id', subscriptionId: 'tracks.subscription_id' },
+    subscriptions: { id: 'subscriptions.id', orgId: 'subscriptions.org_id' },
+    scheduleRows: { __name: 'schedule_rows', id: 'schedule_rows.id', scheduleId: 'schedule_rows.schedule_id' },
+    projectSchedules: { id: 'project_schedules.id', orgId: 'project_schedules.org_id', dealId: 'project_schedules.deal_id' },
+    deals: { id: 'deals.id', orgId: 'deals.org_id' },
   },
 }))
 
-vi.mock('drizzle-orm', () => ({ eq: () => ({}) }))
+vi.mock('drizzle-orm', async () => ({
+  ...await vi.importActual<typeof import('drizzle-orm')>('drizzle-orm'),
+  eq: () => ({}),
+}))
 
 vi.mock('@/lib/require-access', () => ({
   requireAccessToOrg: async () => null,
@@ -61,9 +71,20 @@ vi.mock('@/lib/notifications', () => ({
 vi.mock('@/lib/db', () => ({
   db: async () => ({
     select: () => ({
-      from: () => ({
-        where: () => ({ limit: async () => (template ? [template] : []) }),
-      }),
+      from: (table: { __name: string }) => {
+        const row = table.__name === 'tracks'
+          ? (trackOrgId ? { orgId: trackOrgId } : null)
+          : table.__name === 'schedule_rows'
+            ? (scheduleOrgId ? { orgId: scheduleOrgId } : null)
+            : template
+        const query = {
+          innerJoin: () => query,
+          leftJoin: () => query,
+          where: () => query,
+          limit: async () => (row ? [row] : []),
+        }
+        return query
+      },
     }),
     insert: (table: { __name: string }) => ({
       values: async (values: Record<string, unknown>) => {
@@ -87,6 +108,8 @@ describe('POST /api/admin/tasks/from-template', () => {
     inserted.length = 0
     notified.length = 0
     callerTeamMemberId = 'tm_me'
+    trackOrgId = null
+    scheduleOrgId = null
     template = {
       id: 'tpl1',
       name: 'Monthly SEO sweep',
@@ -176,5 +199,55 @@ describe('POST /api/admin/tasks/from-template', () => {
     expect(res.status).toBe(404)
     expect(inserted).toHaveLength(0)
     expect(notified).toHaveLength(0)
+  })
+
+  it.each([
+    { field: 'trackId', message: 'Track must belong to the task client' },
+    { field: 'scheduleRowId', message: 'Schedule row must belong to the task client' },
+  ])('rejects a foreign $field before any task or checklist writes', async ({ field, message }) => {
+    template = { ...template, type: 'client_task' }
+    trackOrgId = 'o2'
+    scheduleOrgId = 'o2'
+    const res = await POST(post({ templateId: 'tpl1', orgId: 'o1', assigneeId: 'tm_staci', [field]: 'foreign-id' }) as never)
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({ error: message })
+    expect(inserted).toHaveLength(0)
+    expect(notified).toHaveLength(0)
+  })
+
+  it.each([
+    { field: 'trackId', message: 'Track must belong to the task client' },
+    { field: 'scheduleRowId', message: 'Schedule row must belong to the task client' },
+  ])('rejects a missing $field without writing anything', async ({ field, message }) => {
+    template = { ...template, type: 'client_task' }
+    const res = await POST(post({ templateId: 'tpl1', orgId: 'o1', [field]: 'missing-id' }) as never)
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({ error: message })
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('stores same-client delivery links and the existing template fields', async () => {
+    template = { ...template, type: 'client_task' }
+    trackOrgId = 'o1'
+    scheduleOrgId = 'o1'
+    const res = await POST(post({
+      templateId: 'tpl1', orgId: 'o1', trackId: 'track1', scheduleRowId: 'row1',
+    }) as never)
+
+    expect(res.status).toBe(201)
+    expect(inserted[0].values).toMatchObject({
+      orgId: 'o1', trackId: 'track1', scheduleRowId: 'row1', priority: 'standard', estimatedHours: 2,
+    })
+    expect(inserted.filter(row => row.table === 'task_subtasks').map(row => row.values.title)).toEqual(['Crawl', 'Report'])
+  })
+
+  it('does not attach a client track to an internal template that clears the client', async () => {
+    trackOrgId = 'o1'
+    const res = await POST(post({ templateId: 'tpl1', orgId: 'o1', trackId: 'track1' }) as never)
+
+    expect(res.status).toBe(400)
+    expect(inserted).toHaveLength(0)
   })
 })

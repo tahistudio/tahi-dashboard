@@ -21,7 +21,7 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { computeBrief, writeBriefCache, readBriefCache, BRIEF_CACHE_KEY, type D1 } from '@/lib/overview-brief'
 import { resolveBriefCacheKey } from '@/lib/brief-cache-key'
 
@@ -47,10 +47,7 @@ export async function POST(req: NextRequest) {
 
   // Auth: admin session OR cron secret. A live admin session also unlocks the
   // "always regenerate" path below (a scheduled cron fire self-gates instead).
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
 
   let sessionAuth: { userId: string | null; orgId: string | null } | null = null
   if (!hasCronAuth) {

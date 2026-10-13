@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, desc, like, and, inArray, sql } from 'drizzle-orm'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 // ── GET /api/admin/brands ──────────────────────────────────────────────────
 // Query params: ?search=acme&orgId=xxx&page=1
@@ -70,10 +72,13 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/admin/brands ─────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature(auth, 'clients')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     name?: string
@@ -93,6 +98,12 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  body.orgId = body.orgId.trim()
+  const [organisation] = await drizzle.select({ id: schema.organisations.id })
+    .from(schema.organisations).where(eq(schema.organisations.id, body.orgId)).limit(1)
+  if (!organisation) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
+  const denied = await requireAccessToOrg(drizzle, userId, body.orgId)
+  if (denied) return denied
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 

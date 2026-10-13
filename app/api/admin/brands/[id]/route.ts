@@ -1,17 +1,22 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 // ── GET /api/admin/brands/[id] ─────────────────────────────────────────────
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   if (!id) {
@@ -34,7 +39,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       createdAt: schema.brands.createdAt,
       updatedAt: schema.brands.updatedAt,
       orgName: schema.organisations.name,
-      requestCount: sql<number>`(SELECT COUNT(*) FROM requests WHERE requests.brand_id = ${schema.brands.id})`,
+      requestCount: sql<number>`(SELECT COUNT(*) FROM requests WHERE requests.brand_id = ${schema.brands.id} AND requests.org_id = ${schema.brands.orgId})`,
     })
     .from(schema.brands)
     .leftJoin(schema.organisations, eq(schema.brands.orgId, schema.organisations.id))
@@ -46,6 +51,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   }
 
   const brand = rows[0]
+  const denied = await requireAccessToOrg(drizzle, userId, brand.orgId)
+  if (denied) return denied
 
   // Fetch contacts linked to this brand
   const contacts = await drizzle
@@ -58,17 +65,20 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     })
     .from(schema.brandContacts)
     .innerJoin(schema.contacts, eq(schema.brandContacts.contactId, schema.contacts.id))
-    .where(eq(schema.brandContacts.brandId, id))
+    .where(and(eq(schema.brandContacts.brandId, id), eq(schema.contacts.orgId, brand.orgId)))
 
   return NextResponse.json({ ...brand, contacts })
 }
 
 // ── PATCH /api/admin/brands/[id] ───────────────────────────────────────────
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   if (!id) {
@@ -88,7 +98,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   // Verify brand exists
   const existing = await drizzle
-    .select({ id: schema.brands.id })
+    .select({ id: schema.brands.id, orgId: schema.brands.orgId })
     .from(schema.brands)
     .where(eq(schema.brands.id, id))
     .limit(1)
@@ -96,6 +106,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (existing.length === 0) {
     return NextResponse.json({ error: 'Brand not found' }, { status: 404 })
   }
+
+  const denied = await requireAccessToOrg(drizzle, userId, existing[0].orgId)
+  if (denied) return denied
 
   const updates: Record<string, unknown> = {
     updatedAt: new Date().toISOString(),
@@ -122,10 +135,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
 // ── DELETE /api/admin/brands/[id] ──────────────────────────────────────────
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   if (!id) {
@@ -137,7 +153,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
   // Verify brand exists
   const existing = await drizzle
-    .select({ id: schema.brands.id })
+    .select({ id: schema.brands.id, orgId: schema.brands.orgId })
     .from(schema.brands)
     .where(eq(schema.brands.id, id))
     .limit(1)
@@ -146,11 +162,14 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ error: 'Brand not found' }, { status: 404 })
   }
 
+  const denied = await requireAccessToOrg(drizzle, userId, existing[0].orgId)
+  if (denied) return denied
+
   // Clear brandId on requests that reference this brand
   await drizzle
     .update(schema.requests)
     .set({ brandId: null })
-    .where(eq(schema.requests.brandId, id))
+    .where(and(eq(schema.requests.brandId, id), eq(schema.requests.orgId, existing[0].orgId)))
 
   // brandContacts cascade-deletes via FK, but delete explicitly for safety on D1
   await drizzle
