@@ -23,11 +23,12 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import { SubBar } from '../_kit/chrome'
 import { StripeCustomerLink } from '../_kit/stripe-customer-link'
+import { XeroContactLink } from '../_kit/xero-contact-link'
 import { DealsTab } from './deals'
 import { ProfitabilityTab } from './profitability'
 import { RevenueTab } from './revenue'
 import { TimeTab } from './time'
-import type { Organisation } from '../_kit/types'
+import type { Contact, Organisation } from '../_kit/types'
 
 type MoneySection = 'revenue' | 'profitability' | 'time' | 'deals'
 
@@ -48,11 +49,13 @@ const BLURB: Record<MoneySection, string> = {
 export function MoneyTab({
   clientId,
   org,
+  contacts,
   canMoney,
   onUpdated,
 }: {
   clientId: string
   org: Organisation
+  contacts: Contact[]
   canMoney: boolean
   onUpdated: () => void
 }) {
@@ -72,6 +75,7 @@ export function MoneyTab({
   return (
     <div className="flex flex-col" style={{ gap: '0.75rem' }}>
       <StripeCustomerLink org={org} onUpdated={onUpdated} />
+      <XeroContactLink org={org} contacts={contacts} onUpdated={onUpdated} />
       <SubBar>
         <SegmentedControl
           role="tablist"

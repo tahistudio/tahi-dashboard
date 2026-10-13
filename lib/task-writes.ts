@@ -189,7 +189,7 @@ function auditActorType(actor: TaskWriteActor): 'team_member' | 'system' {
 }
 
 /** Delivery links must belong to the same client as the task. */
-async function guardDeliveryLinks(
+export async function guardDeliveryLinks(
   drizzle: Drizzle,
   orgId: string | null,
   trackId: string | null | undefined,
@@ -292,6 +292,14 @@ export async function createTaskRecord(
   if (links.orgId) {
     const denied = await guardTargetOrg(drizzle, actor, links.orgId)
     if (denied) return { ok: false, failure: denied }
+  }
+
+  if (input.orgId && input.requestId) {
+    const linkedOrgId = await requestOrgId(drizzle, input.requestId)
+    if (!linkedOrgId) return { ok: false, failure: { status: 404, error: 'Request not found' } }
+    if (linkedOrgId !== input.orgId) {
+      return { ok: false, failure: { status: 400, error: 'Request must belong to the task client' } }
+    }
   }
 
   const deliveryDenied = await guardDeliveryLinks(drizzle, links.orgId, input.trackId, input.scheduleRowId)

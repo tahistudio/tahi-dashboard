@@ -20,6 +20,7 @@ import { schema } from '@/db/d1'
 const accessChecked: Array<string | null | undefined> = []
 let deniedOrgIds: string[] = []
 const notified: Array<Record<string, unknown>> = []
+let requestOrgs: Record<string, string> = {}
 
 // The Slack thread line (CN.3): armed only when the token is set, exactly as
 // the real gate is, with the queue recorded rather than deferred.
@@ -55,7 +56,7 @@ vi.mock('@/lib/team-identity', () => ({
 
 vi.mock('@/lib/task-access', () => ({
   loadTaskLinks: async () => ({ type: 'tahi_internal', orgId: null, requestId: null }),
-  requestOrgId: async () => 'o1',
+  requestOrgId: async (_drizzle: unknown, requestId: string) => requestOrgs[requestId] ?? null,
   resolveAssigneeType: async (_drizzle: unknown, id: string) => (id.startsWith('tm') ? 'team_member' : null),
 }))
 
@@ -113,6 +114,7 @@ beforeEach(() => {
   accessChecked.length = 0
   deniedOrgIds = []
   notified.length = 0
+  requestOrgs = { r1: 'o1', r2: 'o2' }
   vi.mocked(queueWorkSync).mockClear()
 })
 
@@ -181,6 +183,49 @@ describe('createTaskRecord', () => {
     if (result.ok) return
     expect(result.failure).toEqual({ status: 400, error: 'Title is required' })
     expect(inserted).toHaveLength(0)
+  })
+
+  it.each([HUMAN, SYSTEM])('refuses a request belonging to another client for $actorType writes', async actor => {
+    const { database, inserted } = fakeDrizzle()
+    const result = await createTaskRecord(database, {
+      title: 'Follow up', orgId: 'o1', requestId: 'r2', subtasks: ['Check reply'],
+    }, actor)
+
+    expect(result).toEqual({
+      ok: false, failure: { status: 400, error: 'Request must belong to the task client' },
+    })
+    expect(inserted).toHaveLength(0)
+    expect(notified).toHaveLength(0)
+  })
+
+  it('checks a stated client/request pair before clearing links for a Tahi task', async () => {
+    const { database, inserted } = fakeDrizzle()
+    const result = await createTaskRecord(database, {
+      title: 'Follow up', type: 'tahi_internal', orgId: 'o1', requestId: 'r2',
+    }, HUMAN)
+
+    expect(result).toEqual({
+      ok: false, failure: { status: 400, error: 'Request must belong to the task client' },
+    })
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('keeps a matching client/request pair', async () => {
+    const { database, inserted } = fakeDrizzle()
+    const result = await createTaskRecord(database, { title: 'Follow up', orgId: 'o1', requestId: 'r1' }, HUMAN)
+
+    expect(result.ok).toBe(true)
+    expect(inserted[0].values).toMatchObject({ orgId: 'o1', requestId: 'r1' })
+  })
+
+  it('still clears a matching client/request pair for an explicit Tahi task', async () => {
+    const { database, inserted } = fakeDrizzle()
+    const result = await createTaskRecord(database, {
+      title: 'Studio follow up', type: 'tahi_internal', orgId: 'o1', requestId: 'r1',
+    }, HUMAN)
+
+    expect(result.ok).toBe(true)
+    expect(inserted[0].values).toMatchObject({ orgId: null, requestId: null, type: 'tahi_internal' })
   })
 })
 

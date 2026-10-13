@@ -40,6 +40,7 @@ import {
   Lock, Mail, RefreshCw, Send, Sparkles, X,
 } from 'lucide-react'
 import { SourceBadge } from '../source-badge'
+import { ClientBillingLink, xeroSyncError, type XeroSyncResult } from '../xero-sync-result'
 import {
   InvoiceStatusBadge,
   effectiveInvoiceStatus,
@@ -420,7 +421,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
   const [confirming, setConfirming] = useState<PendingConfirm>(null)
   // The last write's answer, kept on the page. The toast says it at a glance
   // and then goes; this is where the reason stays readable.
-  const [outcome, setOutcome] = useState<{ message: string; tone: ToastTone } | null>(null)
+  const [outcome, setOutcome] = useState<{ message: string; tone: ToastTone; billingOrgId?: string } | null>(null)
 
   /** Say it twice: once in the toast, once in the line that stays. */
   const report = useCallback((toast: string, tone: ToastTone, detail?: string | null) => {
@@ -498,19 +499,21 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoiceIds: [invoice.id] }),
       })
-      if (res.ok) {
+      const result = await res.json().catch(() => ({})) as XeroSyncResult
+      const error = xeroSyncError(result, res.ok)
+      if (!error) {
         await mutate()
         report('Synced to Xero.', 'success')
       } else {
-        const err = await res.json().catch(() => ({})) as { error?: string }
-        report('Xero sync failed.', 'error', err.error ?? 'Xero sync failed. Reconnect Xero in Settings.')
+        showToast(error, 'error')
+        setOutcome({ message: error, tone: 'error', billingOrgId: invoice.orgId })
       }
     } catch {
       report('Xero sync failed.', 'error', 'Xero sync failed. Check connection in Settings.')
     } finally {
       setBusy(null)
     }
-  }, [invoice, mutate, report])
+  }, [invoice, mutate, report, showToast])
 
   const createStripeLink = useCallback(async () => {
     if (!invoice) return
@@ -910,6 +913,7 @@ export function InvoiceDetail({ invoiceId, isAdmin: isAdminProp }: InvoiceDetail
         {isAdmin && outcome && (
           <div style={{ marginTop: '0.875rem' }}>
             <OutcomeLine tone={outcome.tone}>{outcome.message}</OutcomeLine>
+            {outcome.billingOrgId && <ClientBillingLink orgId={outcome.billingOrgId} />}
           </div>
         )}
       </Card>

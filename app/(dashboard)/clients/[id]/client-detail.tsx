@@ -434,7 +434,7 @@ export function ClientDetail({ clientId, initialTab }: { clientId: string; initi
           />
         )}
         {activeTab === 'money' && (
-          <MoneyTab clientId={clientId} org={org} canMoney={canMoney} onUpdated={load} />
+          <MoneyTab clientId={clientId} org={org} contacts={contacts} canMoney={canMoney} onUpdated={load} />
         )}
         {activeTab === 'settings' && (
           <SettingsTab

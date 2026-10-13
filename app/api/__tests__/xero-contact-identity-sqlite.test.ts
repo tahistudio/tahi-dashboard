@@ -46,9 +46,9 @@ describe('Xero invoice push requires a confirmed identity over SQLite', () => {
 
     const response = await pushInvoice(request('invoices/xero-sync', 'POST', { invoiceId: 'invoice-unlinked' }))
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(422)
     expect(await response.json()).toMatchObject({
-      synced: 0, updated: 0, failed: 1,
+      success: false, synced: 0, updated: 0, failed: 1,
       results: [{
         invoiceId: 'invoice-unlinked', status: 'error',
         error: 'Link this client to a Xero contact first',

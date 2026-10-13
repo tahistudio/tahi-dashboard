@@ -32,7 +32,9 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
 
 Suggestion decisions keep the stored client immutable, permit same-client
 request links, and allow only supported task fields with team-member assignees.
-Task writes validate track and schedule ownership. Brand creation and request
+Task writes, including templates, validate track and schedule ownership;
+explicit client/request pairs must name the same client before insertion.
+Brand creation and request
 and time exports enforce the caller's client scope. Delivery rollups include
 pre-client deal schedules for seats with client access.
 
@@ -43,13 +45,17 @@ client Money tab. The MCP link_stripe_customer tool retains its 403 by design:
 Decision #070 authorises api-service, whose admin role is not super_admin.
 Recorded actors never upgrade that access.
 
-Xero pushes require an explicitly confirmed contact link. Contact linking is
-unique across clients; imports use exact ids, exclude archived clients and
-skip ambiguous links. All cron secret checks use the shared constant-time
-helper. Transcript server and connection errors defer only the affected call;
-429 and 529 still defer the remaining batch. A durable retry cap remains open
-because call_transcripts has no suitable retry or metadata field and this
-batch permits no migration.
+Xero pushes require an explicitly confirmed contact link. Failed pushes show
+the server reason and client Money link; an all-failed batch returns 422. The
+admin Money card compares Xero names/emails with client contact emails and
+confirms suggested or pasted ContactIDs. MCP confirm_xero_contact exposes
+the same PATCH and is blocked for designers. Contact linking is unique across
+clients; imports use exact ids, exclude archived clients and skip ambiguous
+links. Cron and public lead secrets use the shared constant-time helper.
+Transcript server, connection and full read timeout failures defer only the
+affected call; 429, 529 and sweep deadlines retain batch deferral. Settings
+counters stamp and skip after five deferred failures, report the reason in
+the run summary, and clear after success or exhaustion. No migration.
 
 Source regression coverage is recorded in the run log. Deployment and signed-in
 proof are still required before the existing task states can be completed.

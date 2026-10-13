@@ -157,6 +157,15 @@ describe('POST /api/admin/tasks', () => {
     expect(inserted).toHaveLength(0)
   })
 
+  it('400s a mismatched client/request pair without writing anything', async () => {
+    const res = await POST(post({ title: 'Follow up', orgId: 'o2', requestId: 'r1' }) as never)
+
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({ error: 'Request must belong to the task client' })
+    expect(inserted).toHaveLength(0)
+    expect(notified).toHaveLength(0)
+  })
+
   it('checks the caller may reach the client it is filing under', async () => {
     await POST(post({ title: 'x', orgId: 'o1' }) as never)
     expect(accessChecked).toEqual(['o1'])

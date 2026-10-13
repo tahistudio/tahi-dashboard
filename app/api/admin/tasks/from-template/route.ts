@@ -8,6 +8,7 @@ import { requireAccessToOrg } from '@/lib/require-access'
 import { createNotification } from '@/lib/notifications'
 import { resolveTeamMember } from '@/lib/team-identity'
 import { attributedUserId } from '@/lib/mcp-actor'
+import { guardDeliveryLinks } from '@/lib/task-writes'
 
 /** Task templates carry their own six-value priority enum (none, low,
  *  medium, standard, high, urgent) while a task takes three. Mapping here is
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
     orgId?: string | null
     assigneeId?: string | null
     trackId?: string | null
+    scheduleRowId?: string | null
     /** The team member the caller is acting AS, when the login cannot say.
      *  See the notify block at the bottom of this handler. */
     actorTeamMemberId?: string | null
@@ -74,6 +76,12 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  const clientOrgId = template.type === 'tahi_internal' ? null : (body.orgId ?? null)
+  const deliveryDenied = await guardDeliveryLinks(drizzle, clientOrgId, body.trackId, body.scheduleRowId)
+  if (deliveryDenied) {
+    return NextResponse.json({ error: deliveryDenied.error }, { status: deliveryDenied.status })
+  }
+
   const taskId = crypto.randomUUID()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   const priority = TEMPLATE_PRIORITY_ALIASES[template.defaultPriority] ?? 'standard'
@@ -82,7 +90,7 @@ export async function POST(req: NextRequest) {
   await drizzle.insert(schema.tasks).values({
     id: taskId,
     type: template.type,
-    orgId: template.type === 'tahi_internal' ? null : (body.orgId ?? null),
+    orgId: clientOrgId,
     title: template.name,
     description: template.description ?? null,
     status: 'todo',
@@ -97,6 +105,7 @@ export async function POST(req: NextRequest) {
     createdById: attributedUserId(auth),
     tags: '[]',
     trackId: body.trackId ?? null,
+    scheduleRowId: body.scheduleRowId || null,
     position: null,
     requestId: null,
     createdAt: now,

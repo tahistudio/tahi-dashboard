@@ -4,6 +4,7 @@ import type * as React from 'react'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
+import { ClientBillingLink, xeroSyncError, type XeroSyncResult } from './xero-sync-result'
 import { useRouter } from 'next/navigation'
 import {
   Plus, FileText, RefreshCw, Download, X as XIcon, Lock, AlertTriangle,
@@ -239,7 +240,7 @@ interface ClientOption {
   preferredCurrency?: string | null
 }
 
-function CreateInvoiceSlideOver({
+export function CreateInvoiceSlideOver({
   open,
   onClose,
   onCreated,
@@ -289,6 +290,7 @@ function CreateInvoiceSlideOver({
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [savedXeroDraft, setSavedXeroDraft] = useState<{ id: string; orgId: string } | null>(null)
 
   // ── Defaults from the client ───────────────────────────────────────────────
   // Picking a client used to change nothing: the form stayed on Dashboard only,
@@ -381,11 +383,13 @@ function CreateInvoiceSlideOver({
     setNotes('')
     setSaving(false)
     setError('')
+    setSavedXeroDraft(null)
     defaultsAppliedFor.current = null
   }, [open])
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
+    if (savedXeroDraft) return
     const validItems = lineItems.filter(li => li.description.trim() && li.unitAmount)
     if (!orgId.trim() || validItems.length === 0) {
       setError('Client and at least one line item (description + amount) are required.')
@@ -426,14 +430,25 @@ function CreateInvoiceSlideOver({
       // Push to destination after local creation
       if (destination === 'xero' && json.id) {
         try {
-          await fetch(apiPath('/api/admin/invoices/xero-sync'), {
+          const xeroRes = await fetch(apiPath('/api/admin/invoices/xero-sync'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ invoiceIds: [json.id] }),
           })
+          const xeroResult = await xeroRes.json().catch(() => ({})) as XeroSyncResult
+          const detail = xeroSyncError(xeroResult, xeroRes.ok)
+          if (detail) {
+            setSavedXeroDraft({ id: json.id, orgId: orgId.trim() })
+            setError(`Invoice saved as draft, but Xero sync failed: ${detail}`)
+            showToast(detail, 'error')
+            return
+          }
           showToast('Invoice created as Xero draft')
         } catch {
-          showToast('Invoice created (Xero sync failed)')
+          setSavedXeroDraft({ id: json.id, orgId: orgId.trim() })
+          setError('Invoice saved as draft, but Xero sync failed. Check the connection and retry from the saved invoice.')
+          showToast('Xero sync failed.', 'error')
+          return
         }
       } else if (destination === 'stripe' && json.id) {
         try {
@@ -473,7 +488,7 @@ function CreateInvoiceSlideOver({
     } finally {
       setSaving(false)
     }
-  }, [orgId, lineItems, currency, dueDate, notes, destination, orgHasEmailContact, selectedOrgName, onCreated, showToast])
+  }, [orgId, lineItems, currency, dueDate, notes, destination, orgHasEmailContact, selectedOrgName, onCreated, showToast, savedXeroDraft])
 
   const filteredOrgOptions = orgOptions.filter(o => !orgSearch || o.name.toLowerCase().includes(orgSearch.toLowerCase()))
 
@@ -495,7 +510,7 @@ function CreateInvoiceSlideOver({
       <SlideOver.Body>
         {error && (
           <div
-            aria-live="polite"
+            role="alert"
             style={{
               background: 'var(--color-danger-bg)',
               border: '1px solid var(--color-danger)',
@@ -507,6 +522,7 @@ function CreateInvoiceSlideOver({
             }}
           >
             {error}
+            {savedXeroDraft && <div><ClientBillingLink orgId={savedXeroDraft.orgId} /></div>}
           </div>
         )}
         {/* Pre-flight warning: Stripe rejects customer creation without an email.
@@ -515,7 +531,7 @@ function CreateInvoiceSlideOver({
             unresolved for dark, and this warning can now render directly above
             the destination override one, so the two would have been a proper
             amber chip and a near-white tint side by side. */}
-        {destination === 'stripe' && orgId && orgHasEmailContact === false && (
+        {!savedXeroDraft && destination === 'stripe' && orgId && orgHasEmailContact === false && (
           <div
             aria-live="polite"
             style={{
@@ -531,7 +547,7 @@ function CreateInvoiceSlideOver({
             <strong data-private>{selectedOrgName}</strong> has no contact with an email. Stripe needs one to invoice them. Add a contact on the client&apos;s Contacts tab first.
           </div>
         )}
-        <form id="create-invoice-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {!savedXeroDraft && <form id="create-invoice-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {/* Destination toggle */}
           <div>
             {/* A span, not a label: the control below owns its own accessible
@@ -821,14 +837,14 @@ function CreateInvoiceSlideOver({
               />
             </div>
           </div>
-        </form>
+        </form>}
       </SlideOver.Body>
       <SlideOver.Footer>
         <TahiButton variant="secondary" size="sm" onClick={onClose}>
           Cancel
         </TahiButton>
         <div style={{ flex: 1 }} />
-        <TahiButton
+        {savedXeroDraft ? <TahiButton size="sm" style={{ minHeight: '2.75rem' }} onClick={() => onCreated(savedXeroDraft.id)}>View saved invoice</TahiButton> : <TahiButton
           type="submit"
           form="create-invoice-form"
           size="sm"
@@ -840,7 +856,7 @@ function CreateInvoiceSlideOver({
             : destination === 'xero' ? 'Create Xero draft'
             : destination === 'stripe' ? 'Create + get payment link'
             : 'Create invoice'}
-        </TahiButton>
+        </TahiButton>}
       </SlideOver.Footer>
     </SlideOver>
   )

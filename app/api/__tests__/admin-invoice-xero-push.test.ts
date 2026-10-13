@@ -135,6 +135,44 @@ beforeEach(() => {
 })
 
 describe('POST /api/admin/invoices/xero-sync', () => {
+  it('reports an unlinked client as an overall error without calling Xero or writing', async () => {
+    const reads: unknown[] = ledger()
+    reads[1] = [{ id: 'org-a', name: 'Renamed client', xeroContactId: null }]
+    const { handle, queries } = makeDb(reads)
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await pushToXero(pushReq({ invoiceId: 'inv-1' }))
+    expect(res.status).toBe(422)
+    expect(await res.json()).toMatchObject({
+      success: false, synced: 0, updated: 0, failed: 1,
+      error: 'Link this client to a Xero contact first',
+      results: [{ invoiceId: 'inv-1', status: 'error', error: 'Link this client to a Xero contact first' }],
+    })
+    expect(callXeroAPI).not.toHaveBeenCalled()
+    expect(callXeroAPIOrThrow).not.toHaveBeenCalled()
+    expect(byEntry(queries, 'update')).toHaveLength(0)
+  })
+
+  it('keeps every per-invoice result when only part of the batch fails', async () => {
+    const linked = ledger({ id: 'inv-2' })
+    const { handle } = makeDb([
+      [{ id: 'inv-1', orgId: 'org-b' }], [{ id: 'org-b', xeroContactId: null }],
+      ...linked, [],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await pushToXero(pushReq({ invoiceIds: ['inv-1', 'inv-2'] }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      success: false, synced: 1, failed: 1,
+      results: [
+        { invoiceId: 'inv-1', status: 'error', error: 'Link this client to a Xero contact first' },
+        { invoiceId: 'inv-2', status: 'synced' },
+      ],
+    })
+    expect(callXeroAPIOrThrow).toHaveBeenCalledOnce()
+  })
+
   it('refuses a caller who is not a Tahi admin', async () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_client', orgId: 'org_client' } as never)
     const { handle, queries } = makeDb()

@@ -21,6 +21,15 @@ import {
 const toolNames = new Set(TOOLS.map((t) => t.name))
 
 describe('classification table', () => {
+  it('declares template delivery links so designer calls retain the guarded ids', () => {
+    const tool = TOOLS.find(tool => tool.name === 'create_task_from_template')
+    expect(tool?.inputSchema.properties).toMatchObject({ trackId: { type: 'string' }, scheduleRowId: { type: 'string' } })
+    const args = { templateId: 'template-a', orgId: 'org-a', trackId: 'track-a', scheduleRowId: 'row-a' }
+    expect(gateToolCall('create_task_from_template', args, 'designer', 'Staci', {
+      declaredArgs: Object.keys(tool!.inputSchema.properties),
+    })).toEqual({ ok: true, args })
+  })
+
   it('names only tools that exist (a typo would silently block a tool)', () => {
     for (const set of [DESIGNER_READ_TOOLS, DESIGNER_WRITE_TOOLS, DESIGNER_CONFIRM_TOOLS]) {
       for (const name of set) expect(toolNames.has(name), name).toBe(true)
@@ -53,7 +62,7 @@ describe('classification table', () => {
     'sync_xero_balances', 'auto_generate_invoices', 'stamp_time_invoiced', 'backfill_invoice_numbers',
     'update_subscription', 'change_billing_cycle', 'delete_subscription', 'add_client_cost', 'delete_client_cost',
     'add_commitment', 'update_commitment', 'delete_commitment', 'snapshot_fill_month', 'refresh_exchange_rates',
-    'fire_retainer_alerts',
+    'fire_retainer_alerts', 'confirm_xero_contact',
     'create_contract', 'update_contract', 'delete_contract', 'send_contract', 'add_contract_signer',
     'remove_contract_signer', 'revoke_contract_share', 'resend_contract_signed_pdf', 'create_contract_template',
     'create_client', 'update_client', 'delete_client', 'merge_client', 'create_client_contact',

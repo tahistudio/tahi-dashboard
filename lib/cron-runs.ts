@@ -96,7 +96,7 @@ export interface CronAuthResult {
 }
 
 /** Compare every character, including for different-length headers. */
-function constantTimeEqual(value: string, expected: string): boolean {
+export function constantTimeEqual(value: string, expected: string): boolean {
   let mismatch = value.length ^ expected.length
   const length = Math.max(value.length, expected.length)
   for (let index = 0; index < length; index++) {

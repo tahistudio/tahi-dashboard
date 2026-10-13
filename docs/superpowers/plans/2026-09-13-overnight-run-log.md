@@ -872,3 +872,52 @@ fixture uses shared primitives, not the mounted dialog interaction flow.
 Signed-in Tweak and Stripe dialog interaction, full suite, build, integration
 and live verification remain for the main session. Changes are left
 uncommitted as requested; existing task states remain unchanged.
+
+## 2026-10-13, round 2 fixes for next-20 items 2 to 7
+
+Started on fix/next20-items-2-7 at 4e1a7f00 with a clean tree. F1 now reports
+per-invoice errors and failed totals in both invoice callers, retains the
+created local draft for recovery, and returns 422 when every push fails. The
+client Money tab has an admin/integrations-gated Xero contact card using the
+existing suggestions GET and confirmation PATCH, with client and Xero emails,
+direct ContactID entry and explicit collision errors. Worker MCP
+confirm_xero_contact validates both ids, maps to the same PATCH and is
+explicitly blocked for designers. Authorisation remains userId/api-service;
+attribution never becomes an access input.
+
+L1 applies the shared track/schedule ownership guard before template inserts.
+L2 rejects mismatched explicit client/request pairs in createTaskRecord,
+including unchanged model proposals. Full transcript read deadlines now
+defer only that transcript; provider 429/529 and sweep deadlines retain batch
+stops. Atomic settings counters record each deferred failure, stamp/skip the
+fifth with a clear run-summary reason, and clear on processing or exhaustion.
+Public lead intake uses the shared constant-time secret comparison.
+
+User-requested gate passed: npm run type-check, CI=1 npm run lint (existing
+warnings), worker tsc, and 19 Vitest files / 493 tests. The existing native
+config-loader sandbox runner avoids npm test's esbuild spawn EPERM. Tests
+cover actual invoice action/form callbacks, contact confirmation/409, real
+SQLite ownership and five-timeout progression. Initial fixture expectations
+for the old Xero 200 response and an escaped JSX apostrophe were corrected
+before the final gate. TASKS.md and STATUS.md batch entries are updated;
+existing completion states remain unchanged.
+
+No schema, commit, push, deploy, production data or secret changes. Build,
+full suite and signed-in/deployed verification are outside this round's
+requested gate. Fresh source/test QA found no remaining findings. The local
+browser fixture exposed compressed Xero candidate rows; flexShrink: 0 keeps
+the identity and conflict text visible in the scrollable list. After that
+fix, type-check, lint, worker tsc and the 2 affected files / 17 tests passed
+again.
+
+Local static SSR fixtures rendered the final card, candidates, dialog,
+loading and read-error states at 375 and 768 in light and dark (16 cases).
+No horizontal document overflow; dialog bounds fit the viewport, candidate
+text no longer overlaps, and button/link/text-input targets measure 44 CSS
+pixels (about 43.996 in animated bounding rectangles). Dark billing links
+use the theme link token. Connected Chrome provided the check after native
+Playwright launch hit spawn EPERM. These fixtures mock SWR and do not prove
+hydration or signed-in/deployed interactions; Vitest covers confirmation
+callbacks. The final hover review also moved candidate background tokens out
+of inline styles into static Tailwind classes so hover feedback can render.
+Visual/source reviews have no remaining findings.

@@ -263,11 +263,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const failed = results.filter(r => r.status === 'error').length
+  const allFailed = results.length > 0 && failed === results.length
   return NextResponse.json({
-    success: true,
+    success: failed === 0,
     synced: results.filter(r => r.status === 'synced').length,
     updated: results.filter(r => r.status === 'updated').length,
-    failed: results.filter(r => r.status === 'error').length,
+    failed,
     results,
-  })
+    ...(allFailed ? { error: results[0].error } : {}),
+  }, { status: allFailed ? 422 : 200 })
 }

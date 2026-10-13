@@ -132,7 +132,7 @@ beforeEach(() => {
     schema.teamMembers, schema.roles, schema.teamMemberRoles, schema.permissions, schema.rolePermissions,
     schema.featureVisibility, schema.teamMemberAccess, schema.teamMemberAccessOrgs, schema.organisations,
     schema.callTranscripts, schema.scheduledCalls, schema.taskSuggestions, schema.cronRuns,
-    schema.tasks, schema.requests, schema.contacts,
+    schema.tasks, schema.requests, schema.contacts, schema.settings,
   ])
   vi.mocked(db).mockResolvedValue(fixture.database as never)
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_reader', orgId: 'org_tahi', sessionId: 'fixture' })

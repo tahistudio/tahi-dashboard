@@ -91,6 +91,35 @@ describe('edited proposal isolation over real SQLite', () => {
       .toMatchObject({ org_id: orgA, request_id: 'request-a' })
   })
 
+  it('rejects a foreign request proposed by the model and approved unchanged', async () => {
+    seedSuggestion('create_task', { title: 'Model task', requestId: 'request-b' })
+    const initialTasks = fixture.rows(schema.tasks)
+    const response = await POST(new NextRequest('http://localhost/api/admin/task-suggestions/suggestion/decide', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve' }),
+    }), { params: Promise.resolve({ id: 'suggestion' }) })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      suggestion: { status: 'failed', applyError: 'Request must belong to the task client' },
+    })
+    expect(fixture.rows(schema.tasks)).toEqual(initialTasks)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it.each(['team_member', 'system'] as const)('rejects a mismatched request/client pair for a %s task writer without writes', async actorType => {
+    const initial = snapshot()
+    const result = await createTaskRecord(fixture.database, {
+      title: 'Foreign request task', orgId: orgA, requestId: 'request-b',
+    }, { actorType, actorId: 'scoped' })
+
+    expect(result).toMatchObject({
+      ok: false, failure: { status: 400, error: 'Request must belong to the task client' },
+    })
+    expect(snapshot()).toEqual(initial)
+    expect(fixture.queries.filter(query => /^(insert|update|delete)\b/i.test(query))).toEqual([])
+    expect(fixture.errors).toEqual([])
+  })
+
   it('allows changing to another request belonging to the suggestion client', async () => {
     fixture.insert(schema.requests, { id: 'request-a2', org_id: orgA, title: 'Another request', status: 'submitted' })
     seedSuggestion('create_task', { title: 'Original task', requestId: 'request-a' })

@@ -109,6 +109,7 @@ function makeDb(selectResults: unknown[]) {
   const selects: Array<{ methods: string[]; args: unknown[][] }> = []
   const inserts: Recorded[] = []
   const updates: Recorded[] = []
+  const failureCounts = new Map<string, number>()
 
   function chain(result: unknown, record: { methods: string[]; args: unknown[][] }): Record<string, unknown> {
     const proxy: Record<string, unknown> = new Proxy({}, {
@@ -137,6 +138,16 @@ function makeDb(selectResults: unknown[]) {
     insert: (table: unknown) => ({
       values: (values: unknown) => {
         inserts.push({ table, values })
+        if (table === schema.settings) return {
+          onConflictDoUpdate: () => ({
+            returning: async () => {
+              const { key } = values as { key: string }
+              const count = (failureCounts.get(key) ?? 0) + 1
+              failureCounts.set(key, count)
+              return [{ value: String(count) }]
+            },
+          }),
+        }
         return Promise.resolve({ success: true })
       },
     }),
@@ -148,6 +159,7 @@ function makeDb(selectResults: unknown[]) {
         },
       }),
     }),
+    delete: () => ({ where: async () => ({ success: true }) }),
   }
 
   // The three methods the suggester actually calls, shaped like Drizzle's.
@@ -1660,16 +1672,21 @@ describe('runSuggestionSweep inside its time budget', () => {
 
     afterEach(() => { vi.useRealTimers() })
 
-    it('aborts a never-resolving first read at 30 seconds and leaves it and the rest for retry', async () => {
-      const suggest = vi.fn<(input: SuggestFromTranscriptInput) => Promise<SuggestResult>>(() => new Promise(() => {}))
+    it('aborts a never-resolving first read at 30 seconds and continues with newer transcripts', async () => {
+      const suggest = vi.fn<(input: SuggestFromTranscriptInput) => Promise<SuggestResult>>()
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValue({ suggestions: [], dropped: [], usage: { model: 'fixture', inputTokens: 0, outputTokens: 0 } })
       const { handle, inserts, updates } = makeDb([
         rows,
         [{ orgId: 'org-a', meetingType: null }],
         ...contextSelects(),
+        NO_REJECTIONS,
+        [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+        [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
         [], [],
       ])
       let settled = false
-      const pending = runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+      const pending = runSuggestionSweep(handle, { suggest, secondPass: false, now: NOW_CN1C })
         .then(summary => { settled = true; return summary })
 
       await vi.advanceTimersByTimeAsync(0)
@@ -1687,16 +1704,20 @@ describe('runSuggestionSweep inside its time budget', () => {
       const summary = await pending
 
       expect(input.signal?.aborted).toBe(true)
-      expect(suggest).toHaveBeenCalledTimes(1)
+      expect(suggest).toHaveBeenCalledTimes(3)
       expect(summary).toMatchObject({
+        looked: 3,
         inserted: 0,
-        deferred: 3,
-        deferredIds: ['ct-1', 'ct-2', 'ct-3'],
+        deferred: 1,
+        deferredIds: ['ct-1'],
         secondPass: { ran: 0, failed: [], skipped: [] },
       })
       expect(summary.skipped).toEqual([{ transcriptId: 'ct-1', reason: expect.stringMatching(/timed out/i) }])
-      expect(stamps(updates)).toEqual([])
-      expect(inserts).toEqual([])
+      expect(stamps(updates)).toHaveLength(2)
+      expect(inserts.filter(insert => insert.table === schema.settings)).toEqual([
+        { table: schema.settings, values: { key: 'suggester.failures.ct-1', value: '1', updatedAt: '2026-09-19T00:00:00Z' } },
+      ])
+      expect(inserts.filter(insert => insert.table === schema.taskSuggestions)).toEqual([])
       expect(vi.getTimerCount()).toBe(0)
     })
 
@@ -1732,10 +1753,9 @@ describe('runSuggestionSweep inside its time budget', () => {
       expect(vi.getTimerCount()).toBe(0)
     })
 
-    it.each([
-      { elapsed: 0, timeout: 30_000 },
-      { elapsed: 40_000, timeout: 29_000 },
-    ])('persists the first proposals when a second read times out with $elapsed ms already spent', async ({ elapsed, timeout }) => {
+    it('persists the first proposals when a second read uses up the shortened sweep-budget deadline', async () => {
+      const elapsed = 40_000
+      const timeout = 29_000
       const suggest = vi.fn((input: SuggestFromTranscriptInput): Promise<SuggestResult> => {
         if (input.alreadyProposed !== undefined) return new Promise(() => {})
         return new Promise(resolve => {
@@ -1778,6 +1798,35 @@ describe('runSuggestionSweep inside its time budget', () => {
       expect(stamps(updates)).toEqual([{ table: schema.callTranscripts, set: { suggestedAt: '2026-09-19T00:00:00Z' } }])
       expect(summary.deferredIds).toEqual(['ct-2', 'ct-3'])
       expect(inserts.filter(i => i.table === schema.aiCostLog).map(i => (i.values as { stage: string }).stage)).toEqual(['suggest'])
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('defers a full second-read timeout and continues to a newer transcript', async () => {
+      const suggest = vi.fn<(input: SuggestFromTranscriptInput) => Promise<SuggestResult>>()
+        .mockResolvedValueOnce({ suggestions: [FAQ], usage: USAGE, dropped: [] })
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValue({ suggestions: [], dropped: [], usage: { model: 'fixture', inputTokens: 0, outputTokens: 0 } })
+      const { handle, inserts, updates } = makeDb([
+        rows.slice(0, 2),
+        [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+        [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+        [], [],
+      ])
+      const pending = runSuggestionSweep(handle, { suggest, now: NOW_CN1C, budgetMs: 100_000 })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(suggest).toHaveBeenCalledTimes(2)
+      const second = suggest.mock.calls[1][0]
+      expect(second.timeoutMs).toBe(30_000)
+      await vi.advanceTimersByTimeAsync(30_000)
+      const summary = await pending
+
+      expect(second.signal?.aborted).toBe(true)
+      expect(suggest).toHaveBeenCalledTimes(4)
+      expect(summary).toMatchObject({ looked: 2, inserted: 0, deferredIds: ['ct-1'], secondPass: { ran: 1 } })
+      expect(summary.secondPass?.failed).toEqual([{ transcriptId: 'ct-1', reason: expect.stringMatching(/timed out/i) }])
+      expect(inserts.filter(insert => insert.table === schema.taskSuggestions)).toEqual([])
+      expect(inserts.filter(insert => insert.table === schema.settings)).toHaveLength(1)
+      expect(stamps(updates)).toHaveLength(1)
       expect(vi.getTimerCount()).toBe(0)
     })
 

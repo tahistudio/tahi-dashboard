@@ -119,7 +119,7 @@ export const DESIGNER_CONFIRM_TOOLS: ReadonlySet<string> = new Set([
 export const CONDITIONAL_CONFIRM_TOOLS: ReadonlySet<string> = new Set(['update_request_fields'])
 
 /** Explicit money classifications, in addition to default deny for all unlisted tools. */
-export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set(['link_stripe_customer'])
+export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set(['link_stripe_customer', 'confirm_xero_contact'])
 
 const INTERNAL_WHEN_FLAGGED: ReadonlySet<string> = new Set(['post_request_message', 'post_message', 'send_message'])
 

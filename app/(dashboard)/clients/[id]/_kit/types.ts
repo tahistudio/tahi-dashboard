@@ -68,6 +68,7 @@ export interface Organisation {
   /** When it is due: 'card' | 'net_7' | 'net_14' | 'net_30', or null. */
   paymentTerms?: string | null
   stripeCustomerId?: string | null
+  xeroContactId?: string | null
   /** invoiceChannel resolved against the studio default; always a real rail. */
   effectiveInvoiceChannel?: string | null
   /**
