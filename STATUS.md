@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-12** by Claude Code (per-person MCP connector with a designer profile LIVE; Liam to reconnect). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-13** by Codex (REC.0 review fixes prepared, not live; per-person MCP connector remains LIVE). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## Live 2026-10-12: per-person MCP connector (Decision #070)
 
@@ -52,13 +52,17 @@ rate herself).
 
 ## Work in progress, 2026-10-11
 
-REC.0 phase 1 source is prepared locally on 2026-10-13: manual Windows
+REC.0 phase 1 was committed as 1608f4c6 on feat/rec0-manual-recorder, then
+reviewed by Opus. Review fixes are prepared for a follow-up commit by the main
+session, currently uncommitted. The build adds a manual Windows
 Chromium mic/system recorder at /calls/record, durable chunk uploads,
 Whisper turbo transcription, explicit transcript linking and read/link MCP
 parity. This is not live. Additive migration 0113 is written and registered
-but has not been applied. No push, deploy or secrets change is authorised.
-The sandbox blocks branch/commit writes to the parent repository's shared
-.git and the standard test/build runners hit subprocess spawn EPERM.
+but has not been applied. Apply 0113 BEFORE deployment: the suggestion sweep,
+rebuild, client delete/merge and ManyRequests cleanup read meeting_recordings.
+The main session will apply it to production before merging. This review-fix
+session performs no commit, push, deploy, migration apply or secret change.
+The standard test/build runners previously hit subprocess spawn EPERM.
 Local checks and browser-proof gaps are recorded in
 docs/superpowers/audits/2026-10-13-rec0-phase1-report.md. REC.0 stays open.
 

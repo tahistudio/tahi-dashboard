@@ -25,6 +25,7 @@ import { linkTranscript, parseCallKind, resolveCallOrgId } from '@/lib/call-tran
 import { logAudit } from '@/lib/audit'
 import type { DB } from '@/db/d1'
 import { linkRecording, recordingTranscriptOrg, withRecordingContext } from '@/lib/meeting-recordings-server'
+import { RecordingError } from '@/lib/meeting-recordings'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -65,7 +66,15 @@ async function guardTranscript(
   userId: string | null,
   row: { callKind: string | null; callId: string | null; source: string; externalId: string },
 ): Promise<NextResponse | null> {
-  const recorder = await recordingTranscriptOrg(database as unknown as DB, row)
+  let recorder: Awaited<ReturnType<typeof recordingTranscriptOrg>>
+  try {
+    recorder = await recordingTranscriptOrg(database as unknown as DB, row)
+  } catch (error) {
+    if (error instanceof RecordingError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
+    throw error
+  }
   if (recorder) {
     const denied = await requireAccessToOrgOrPreClient(database, userId, recorder.orgId)
     if (denied) return denied
@@ -137,7 +146,7 @@ export async function PATCH(
     const recorderId = row.externalId.slice('recording:'.length)
     return withRecordingContext(req, recorderId, async context => {
       const detail = await linkRecording(context, { callKind, callId })
-      return NextResponse.json({ ok: true, id, callKind, callId, mirrored: callKind === 'discovery', recording: detail.recording })
+      return NextResponse.json({ ok: true, id, callKind, callId, mirrored: detail.mirrored, recording: detail.recording })
     })
   }
 

@@ -1507,6 +1507,23 @@ its first client. This prevents a suggester already reading client A from
 writing work against A after the transcript is moved to B. Organisation
 cleanup refuses retained recording rows rather than orphaning their scope.
 
+**Deploy prerequisite:** Apply migration 0113 BEFORE deployment: the suggestion
+sweep, rebuild, client delete/merge and ManyRequests cleanup read
+meeting_recordings. The main session will apply it to production before this
+branch merges. Deploying first breaks these existing paths with no such table.
+
+**Phase 1 review notes:**
+
+- P2-2: The browser tab drives transcription. Closing it stops processing until
+  Retry is clicked. This is acceptable for phase 1; a queue or cron comes later.
+- P2-3: Suggestions from a client-only recording (no callId) reach the dashboard
+  inbox and do not send Slack DMs.
+- P3-3: The microphone speaker label is hard-coded as "Liam".
+- P3-4: Unlinked recordings are visible to any scoped seat, following the
+  existing allow-if-any-scope rule. Revisit before the first scoped hire.
+- P3-6: Abandoned recordings keep their R2 audio under the open retention
+  question.
+
 **Model:** @cf/openai/whisper-large-v3-turbo on the existing Workers AI binding.
 Cloudflare lists it as available with base64 audio input and timed output
 segments. Select it for the larger Whisper generation and timed merging;
@@ -1531,4 +1548,6 @@ For now audio stays in R2 until an admin deletes it. Verify Windows audio
 sharing across Vivaldi/Chrome/Edge and Zoom/Teams/Meet, headphones/echo, input
 changes, browser Stop sharing, background tabs, sleep and network failures.
 Measure New Zealand speech and client/product-name accuracy. Migration 0113
-is written only, no production apply, deployment or secrets are authorised.
+is written only; the main session owns its required production apply before
+merge. This review-fix session performs no production apply, deployment or
+secret change.

@@ -275,8 +275,12 @@ export async function uploadChunk(context: RecordingContext, req: NextRequest): 
     if (active.leaseToken !== lease || active.deletedAt) throw new RecordingError('Upload expired. Retry the saved audio chunk.', 409, 'busy')
     await context.database.update(chunks).set({ state: 'uploading', error: null }).where(chunkFence(chunk.id, row.id, lease))
     try {
+      // R2Conditional's wildcard makes this write atomic and create-only, even
+      // if a retry outlives its lease. A UNIQUE(recording_id, track, sequence)
+      // reservation owns the upload token; head validates an existing upload
+      // before acknowledging a retry instead of overwriting its audio.
       const stored = await bucket.put(chunk.storageKey, audio, {
-        onlyIf: new Headers({ 'If-None-Match': '*' }), httpMetadata: { contentType: chunk.mimeType },
+        onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: chunk.mimeType },
         customMetadata: { recordingId: row.id, track, sequence: String(sequence), uploadToken: token },
       })
       if (!stored) {
@@ -346,11 +350,13 @@ export async function stopRecording(context: RecordingContext, value: unknown): 
   return scopedRecordingDetail(context, context.recording!.id)
 }
 
-async function mirrorDiscovery(context: RecordingContext, text: string, target: { callKind: string | null; callId: string | null }, lease: string): Promise<void> {
-  if (target.callKind !== 'discovery' || !target.callId) return
-  await context.database.update(schema.discoveryCalls).set({ transcript: text.slice(0, 250_000), transcriptSource: 'manual', updatedAt: new Date().toISOString() })
+async function mirrorDiscovery(context: RecordingContext, text: string, target: { callKind: string | null; callId: string | null }, lease: string): Promise<boolean> {
+  if (target.callKind !== 'discovery' || !target.callId) return false
+  const updated = await context.database.update(schema.discoveryCalls).set({ transcript: text.slice(0, 250_000), transcriptSource: 'manual', updatedAt: new Date().toISOString() })
     .where(and(eq(schema.discoveryCalls.id, target.callId), or(isNull(schema.discoveryCalls.transcript), eq(schema.discoveryCalls.transcript, '')),
       sql`EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${context.recording!.id} AND lease_token = ${lease})`))
+    .returning({ id: schema.discoveryCalls.id })
+  return updated.length > 0
 }
 
 async function finalizeRecording(context: RecordingContext, row: RecordingRow, lease: string, found: ChunkRow[]): Promise<void> {
@@ -414,10 +420,10 @@ export async function transcribeNextChunk(context: RecordingContext): Promise<Me
   return { ...detail, pending: detail.recording.state === 'transcribing' }
 }
 
-export async function linkRecording(context: RecordingContext, value: unknown): Promise<MeetingRecordingDetail> {
+export async function linkRecording(context: RecordingContext, value: unknown): Promise<MeetingRecordingDetail & { mirrored: boolean }> {
   if (!value || typeof value !== 'object') throw new RecordingError('Choose a client or a call.')
   if (!('orgId' in value) && !('callId' in value)) throw new RecordingError('Choose a client or a call.')
-  await withRecordingLease(context, async (row, lease) => {
+  const mirrored = await withRecordingLease(context, async (row, lease) => {
     const target = await choice(context, value)
     if (row.state !== 'ready' || !row.transcriptId) throw new RecordingError('Finish transcription before linking the recording.', 409)
     if (row.orgId && target.orgId !== row.orgId) {
@@ -443,14 +449,15 @@ export async function linkRecording(context: RecordingContext, value: unknown): 
         .where(and(eq(recordings.id, row.id), eq(recordings.leaseToken, lease))),
     ])
     const detail = await recordingDetail(context.database, row.id)
-    await mirrorDiscovery(context, detail.transcript.text, target, lease)
+    const mirrored = await mirrorDiscovery(context, detail.transcript.text, target, lease)
     await updateLeased(context, lease, {})
     await logAudit(context.database, {
       userId: attributedUserId(context.auth), action: 'meeting_recording.linked', entityType: 'meeting_recording', entityId: row.id,
       metadata: { ...target, transcriptId: row.transcriptId },
     })
+    return mirrored
   }, true)
-  return scopedRecordingDetail(context, context.recording!.id)
+  return { ...await scopedRecordingDetail(context, context.recording!.id), mirrored }
 }
 
 export async function deleteRecordingAudio(context: RecordingContext): Promise<boolean> {

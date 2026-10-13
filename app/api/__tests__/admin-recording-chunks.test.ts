@@ -113,8 +113,8 @@ beforeEach(() => {
   objects = new Map()
   failTranscript = false
   failLinkBatch = false
-  puts = vi.fn(async (key: string, audio: ArrayBuffer, options: { customMetadata: Record<string, string> }) => {
-    if (objects.has(key)) return null
+  puts = vi.fn(async (key: string, audio: ArrayBuffer, options: { onlyIf?: R2Conditional; customMetadata: Record<string, string> }) => {
+    if (options.onlyIf?.etagDoesNotMatch === '*' && objects.has(key)) return null
     objects.set(key, { audio, metadata: options.customMetadata })
     return { key }
   })
@@ -158,8 +158,7 @@ describe('recording chunks route guards and uniqueness', () => {
     expect(again.status).toBe(409)
     expect(await again.json()).toMatchObject({ duplicate: true, uploaded: true })
     expect(puts).toHaveBeenCalledTimes(1)
-    const options = puts.mock.calls[0][2] as { onlyIf: Headers }
-    expect(options.onlyIf.get('If-None-Match')).toBe('*')
+    expect(puts.mock.calls[0][2].onlyIf).toEqual({ etagDoesNotMatch: '*' })
     expect(sqlite.prepare('SELECT * FROM meeting_recording_chunks').all()).toHaveLength(1)
     expect((await reserve(req('chunks', { ...metadata, size: 4 }), params)).status).toBe(409)
   })
@@ -168,6 +167,29 @@ describe('recording chunks route guards and uniqueness', () => {
     const responses = await Promise.all([reserve(req('chunks', metadata), params), reserve(req('chunks', metadata), params)])
     expect(responses.map(response => response.status).sort()).toEqual([200, 409])
     expect(sqlite.prepare('SELECT * FROM meeting_recording_chunks').all()).toHaveLength(1)
+  })
+
+  it('acknowledges audio retained in R2 after its D1 upload acknowledgement failed', async () => {
+    const uploadUrl = await reserveAndUpload()
+    const [key, saved] = [...objects.entries()][0]
+    sqlite.prepare("UPDATE meeting_recording_chunks SET state='reserved', uploaded_at=NULL").run()
+    const response = await upload(new NextRequest(`http://localhost${uploadUrl}`, { method: 'PUT', body: Uint8Array.from([4, 5, 6]) }), params)
+    expect(response.status).toBe(200)
+    expect(objects.get(key)).toBe(saved)
+    expect(sqlite.prepare('SELECT state, uploaded_at FROM meeting_recording_chunks').get()).toMatchObject({ state: 'uploaded', uploaded_at: expect.any(String) })
+  })
+
+  it('refuses an existing R2 object owned by a different reservation without overwriting it', async () => {
+    const reserved = await reserve(req('chunks', metadata), params)
+    const { uploadUrl } = await reserved.json() as { uploadUrl: string }
+    const key = 'meeting-recordings/rec/mic/0.audio'
+    const saved = { audio: Uint8Array.from([7, 8, 9]).buffer, metadata: { uploadToken: 'different-reservation' } }
+    objects.set(key, saved)
+    const response = await upload(new NextRequest(`http://localhost${uploadUrl}`, { method: 'PUT', body: Uint8Array.from([1, 2, 3]) }), params)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'Saved audio does not match this chunk reservation.' })
+    expect(objects.get(key)).toBe(saved)
+    expect(sqlite.prepare('SELECT state, uploaded_at FROM meeting_recording_chunks').get()).toMatchObject({ state: 'reserved', uploaded_at: null })
   })
 
   it('rejects forged upload tokens and over-limit metadata', async () => {

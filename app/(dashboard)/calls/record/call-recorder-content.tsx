@@ -403,7 +403,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
   }
 
   async function deleteRecording(id: string) {
-    if (!window.confirm('Delete this recording and its retained audio? The saved transcript will remain.')) return
+    if (!window.confirm('Delete this recording audio? The saved transcript and recording details will remain.')) return
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -522,14 +522,14 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
 
       {detail && !recording && <Card padding="md">
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="min-w-0 break-words font-semibold">{detail.recording.title}</h2><Badge className="capitalize" tone={detail.recording.state === 'failed' ? 'danger' : detail.recording.state === 'ready' ? 'positive' : 'info'}>{detail.recording.state}</Badge></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="min-w-0 break-words font-semibold">{detail.recording.title}</h2><Badge className={detail.recording.deletedAt ? undefined : 'capitalize'} tone={detail.recording.deletedAt ? 'neutral' : detail.recording.state === 'failed' ? 'danger' : detail.recording.state === 'ready' ? 'positive' : 'info'}>{detail.recording.deletedAt ? 'Audio deleted' : detail.recording.state}</Badge></div>
           {busy && <p role="status" className="text-sm text-[var(--color-text-muted)]">Saving audio or transcribing a chunk. Keep this page open.</p>}
           {detail.recording.error && <p role="alert" className="break-words text-sm text-[var(--color-danger-ink)]">{detail.recording.error}</p>}
           {detail.transcript.text ? <pre data-private className="whitespace-pre-wrap break-words rounded-lg p-4 text-sm leading-relaxed" style={{ fontFamily: 'inherit', background: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>{detail.transcript.text}</pre> : <p className="text-sm text-[var(--color-text-muted)]">The transcript will appear here after the audio is processed.</p>}
           {failedChunks.length > 0 && <ul className="space-y-2 break-words text-sm text-[var(--color-danger-ink)]" aria-label="Failed audio chunks">{failedChunks.map(chunk => <li key={chunk.id}>{chunk.track === 'mic' ? 'Liam' : 'Them'}, {formatElapsed(chunk.startMs)}: {chunk.error ?? 'Transcription failed.'}</li>)}</ul>}
           <div className="flex flex-wrap gap-2">
-            {detail.recording.state === 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => { if (window.confirm('Finish this interrupted recording using its saved chunks? Audio since the last saved chunk may be missing.')) void recover(detail.recording.id, true) }}>Finish interrupted recording</TahiButton>}
-            {detail.recording.state !== 'ready' && detail.recording.state !== 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} iconLeft={<RefreshCw className="h-4 w-4 shrink-0" />} onClick={() => void recover(detail.recording.id)}>Retry saved audio and failed chunks</TahiButton>}
+            {!detail.recording.deletedAt && detail.recording.state === 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => { if (window.confirm('Finish this interrupted recording using its saved chunks? Audio since the last saved chunk may be missing.')) void recover(detail.recording.id, true) }}>Finish interrupted recording</TahiButton>}
+            {!detail.recording.deletedAt && detail.recording.state !== 'ready' && detail.recording.state !== 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} iconLeft={<RefreshCw className="h-4 w-4 shrink-0" />} onClick={() => void recover(detail.recording.id)}>Retry saved audio and failed chunks</TahiButton>}
             {detail.recording.state === 'ready' && <Link href="/calls" className="tahi-focus-ring flex max-w-full items-center rounded-md px-3 py-2 text-sm hover:bg-[var(--color-bg-secondary)]" style={{ minHeight: '2.75rem', color: 'var(--color-link)' }}>Open calls and task suggestions</Link>}
             {canDeleteAudio && <TahiButton variant="ghost" style={BUTTON_STYLE} disabled={disabled} iconLeft={<Trash2 className="h-4 w-4 shrink-0" />} onClick={() => void deleteRecording(detail.recording.id)}>Delete recording audio</TahiButton>}
           </div>
@@ -542,7 +542,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
           : listError ? <div role="alert" className="space-y-3"><p className="break-words text-sm text-[var(--color-danger-ink)]">{listError}</p><TahiButton variant="secondary" style={BUTTON_STYLE} onClick={() => void loadItems()}>Retry loading</TahiButton></div>
           : items.length === 0 ? <EmptyState icon={<FileText className="h-6 w-6" />} title="No recordings yet" description="Start a manual recording to save both sides of a call." />
           : <ul className="space-y-2">{items.map(item => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md p-3" style={{ background: 'var(--color-bg-secondary)', border: '0.0625rem solid var(--color-border-subtle)' }}>
-            <div className="min-w-0 flex-1"><p data-private className="break-words text-sm font-semibold">{item.title}</p><p className="text-xs text-[var(--color-text-muted)]">{new Date(item.startedAt).toLocaleString()} · {formatElapsed(item.durationMs)} · {item.state}</p></div>
+            <div className="min-w-0 flex-1"><p data-private className="break-words text-sm font-semibold">{item.title}</p><p className="text-xs text-[var(--color-text-muted)]">{new Date(item.startedAt).toLocaleString()} · {formatElapsed(item.durationMs)}{!item.deletedAt && ` · ${item.state}`}</p>{item.deletedAt && <Badge tone="neutral" className="mt-1">Audio deleted</Badge>}</div>
             <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => void chooseRecording(item.id)}>Open</TahiButton>
           </li>)}</ul>}
       </Card>

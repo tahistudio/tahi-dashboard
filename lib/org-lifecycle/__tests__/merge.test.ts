@@ -221,6 +221,44 @@ describe('merge dry run', () => {
 // ── apply ────────────────────────────────────────────────────────────────────
 
 describe('merge apply: every org-scoped table', () => {
+  it.each(['discovery', 'scheduled'])('moves a %s recording with its call and preserves chunks and transcript links', async (callKind) => {
+    seedPair()
+    const callTable = callKind === 'discovery' ? 'discovery_calls' : 'scheduled_calls'
+    store[callTable] = [{ id: 'call1', orgId: SHELL }]
+    store.meeting_recordings = [
+      { id: 'recording1', orgId: SHELL, callKind, callId: 'call1', transcriptId: 'transcript1' },
+      { id: 'recording2', orgId: SURVIVOR, callKind: null, callId: null, transcriptId: null },
+      { id: 'recording3', orgId: SHELL, callKind: null, callId: null, transcriptId: 'transcript3' },
+    ]
+    store.meeting_recording_chunks = [{
+      id: 'chunk1', recordingId: 'recording1', storageKey: 'recordings/recording1/mic/0.webm',
+    }]
+    store.call_transcripts = [
+      { id: 'transcript1', callKind, callId: 'call1', externalId: 'recording1' },
+      { id: 'transcript3', callKind: null, callId: null, externalId: 'recording3' },
+    ]
+    const chunksBefore = structuredClone(store.meeting_recording_chunks)
+    const transcriptsBefore = structuredClone(store.call_transcripts)
+
+    const preview = await runOrgMerge(db(), { shellId: SHELL, survivorId: SURVIVOR, dryRun: true })
+    expect(preview.tables.meeting_recordings).toBe(2)
+    expect(recorded.events).toEqual([])
+
+    const plan = await runOrgMerge(db(), { shellId: SHELL, survivorId: SURVIVOR, dryRun: false })
+
+    expect(plan.tables.meeting_recordings).toBe(2)
+    expect(store[callTable]).toEqual([{ id: 'call1', orgId: SURVIVOR }])
+    expect(store.meeting_recordings).toEqual([
+      { id: 'recording1', orgId: SURVIVOR, callKind, callId: 'call1', transcriptId: 'transcript1' },
+      { id: 'recording2', orgId: SURVIVOR, callKind: null, callId: null, transcriptId: null },
+      { id: 'recording3', orgId: SURVIVOR, callKind: null, callId: null, transcriptId: 'transcript3' },
+    ])
+    expect(store.meeting_recording_chunks).toEqual(chunksBefore)
+    expect(store.call_transcripts).toEqual(transcriptsBefore)
+    expect(recorded.deletes.map((entry) => entry.table)).not.toContain('meeting_recordings')
+    expect(store.organisations.map((row) => row.id)).toEqual([SURVIVOR])
+  })
+
   it('re-points EVERY table in ORG_SCOPED_TABLES, not the six somebody remembered', async () => {
     seedPair()
     // One row on the shell in every org-scoped table the list names, plus a

@@ -129,6 +129,23 @@ describe('delete refusals', () => {
       .rejects.toThrow(/leads \(1\)/)
   })
 
+  it.each([true, false])('refuses a client with a recording before any write (dryRun=%s)', async (dryRun) => {
+    seedOrg()
+    store.requests = [{ id: 'request1', orgId: ORG }]
+    store.meeting_recordings = [{ id: 'recording1', orgId: ORG, transcriptId: 'transcript1' }]
+    store.meeting_recording_chunks = [{
+      id: 'chunk1', recordingId: 'recording1', storageKey: 'recordings/recording1/mic/0.webm',
+    }]
+    const before = structuredClone(store)
+
+    const call = runOrgDelete(db(), { orgId: ORG, confirmName: NAME, dryRun })
+
+    await expect(call).rejects.toBeInstanceOf(OrgDeleteRefusal)
+    await expect(call).rejects.toThrow(/meeting_recordings \(1\)/)
+    expect(recorded.events).toEqual([])
+    expect(store).toEqual(before)
+  })
+
   it('refuses a real ledger: a paid invoice on a rail plus a Xero contact id', async () => {
     seedOrg({ xeroContactId: 'xero_real' })
     store.invoices = [{ id: 'inv1', orgId: ORG, status: 'paid', xeroInvoiceId: 'xr_1', totalUsd: 900 }]

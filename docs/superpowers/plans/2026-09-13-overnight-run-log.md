@@ -818,3 +818,48 @@ accuracy, 375/768/dark layouts and signed-in regression remain unverified.
 SPA history Back/Forward leave warnings also need proof. REC.0 stays open.
 Full file list, gate outputs, model sources, planned commit trailers and
 handoff details: docs/superpowers/audits/2026-10-13-rec0-phase1-report.md.
+
+## 2026-10-13, REC.0 Opus review fixes, uncommitted handoff
+
+Initial git status confirmed a clean feat/rec0-manual-recorder worktree at
+1608f4c6. The earlier branch/commit note above is superseded: phase 1 was
+committed as 1608f4c6, then reviewed by Opus with two P1 findings. Follow-up
+fixes stay uncommitted for the main session. No branch write, commit, push,
+deploy, migration apply, production data write or secret change occurs here.
+
+Migration 0113 must apply BEFORE deployment because the existing suggestion
+sweep, rebuild, client delete/merge and ManyRequests cleanup read
+meeting_recordings. The main session will apply it to production before merge.
+STATUS.md, TASKS.md, Decision #071 and SPECS/meeting-audio-capture.md record the
+deployment prerequisite and corrected branch/commit state.
+
+Decision #071 and the spec now record the accepted phase 1 limits: the browser
+tab drives transcription until it closes, after which Retry resumes it;
+client-only recordings send suggestions to the dashboard inbox without Slack
+DMs; the mic speaker label is hard-coded as Liam; unlinked recordings follow
+the existing allow-if-any-scope rule, to revisit before the first scoped hire;
+and abandoned recordings retain R2 audio under the open retention question.
+
+Code fixes: client deletion refuses retained recording rows before any
+destructive action. Merge already moves recordings to the surviving org;
+regression tests preserve chunk/R2 and transcript links. R2 writes use typed
+onlyIf: { etagDoesNotMatch: '*' }, verified against current official docs and
+workerd wildcard tests ([R2 API reference](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/#conditional-operations),
+[workerd tests](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/tests/r2-test.js)).
+The transcript guard returns 404 for a missing
+recording row, PATCH reports the actual discovery-mirror result, and deleted
+audio shows a neutral Audio deleted badge with confirmation that retains the
+transcript.
+
+Local gates: npm run type-check exit 0; CI=1 npm run lint exit 0 with existing
+repository warnings and no errors in touched files; worker tsc --noEmit exit
+0; git diff --check exit 0. Standard targeted Vitest was blocked by esbuild
+spawn EPERM. The sandbox runner with .wrangler/vitest-sandbox.config.mjs and
+--configLoader native passed all four touched files: admin-recording-chunks,
+patch-link, organisation delete and merge, 110 tests in 2.21s. Independent QA
+and UIUX source reviews pass; no browser proof is claimed. Review caught and
+fixed a cleanup-retry affordance: the administrator's Delete recording audio
+action remains available after a tombstone so an R2 failure can be retried.
+The main session reruns the full suite and build. REC.0 stays open: real
+Windows mic/system capture, call accuracy, background/device behaviour,
+375/768/dark layouts and the deployed signed-in round trip remain unverified.

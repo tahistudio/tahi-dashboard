@@ -2467,7 +2467,7 @@ const MIGRATIONS: Migration[] = [
   },
   {
     name: '0113',
-    description: 'REC.0 private manual recording metadata, unique chunk claims and retry leases. Apply before enabling the recorder. No existing data is changed.',
+    description: 'Apply BEFORE deploying: the suggestion sweep, rebuild, client delete/merge and ManyRequests cleanup read this table.',
     statements: [...MEETING_RECORDING_MIGRATION],
   },
 ]

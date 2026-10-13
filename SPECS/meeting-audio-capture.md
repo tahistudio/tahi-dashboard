@@ -16,7 +16,10 @@ Stop and a beforeunload warning accompany capture.
 
 Chunks are saved locally before upload and keyed in R2 by recording, track
 and sequence. Additive migration 0113 supplies durable recording/chunk state,
-unique sequences, retry text/segments and operation leases. The existing
+unique sequences, retry text/segments and operation leases. Apply 0113 BEFORE
+deployment: the suggestion sweep, rebuild, client delete/merge and ManyRequests
+cleanup read meeting_recordings. The main session will apply it to production
+before merging. The existing
 call_transcripts columns hold one finished manual transcript. Client/call
 selection is explicit. A client-only recording remains unlinked to a call,
 inherits its recording's client scope and is eligible for task_suggestions.
@@ -28,8 +31,20 @@ the admin deletes the recording audio; the transcript and client-scope
 tombstone remain. Read/list/link MCP actions accompany the browser capture.
 Designer reads are allowed; recording linking is blocked for that profile.
 
-No push, deploy, production migration or secret change is authorised for this
-build. Windows system-audio capture, call accuracy, background/device behaviour
+Phase 1 review notes:
+
+- P2-2: The browser tab drives transcription. Closing it stops processing until
+  Retry is clicked. This is acceptable for phase 1; a queue or cron comes later.
+- P2-3: Suggestions from a client-only recording (no callId) reach the dashboard
+  inbox and do not send Slack DMs.
+- P3-3: The microphone speaker label is hard-coded as "Liam".
+- P3-4: Unlinked recordings are visible to any scoped seat, following the
+  existing allow-if-any-scope rule. Revisit before the first scoped hire.
+- P3-6: Abandoned recordings keep their R2 audio under the open retention
+  question.
+
+This review-fix session performs no push, deploy, production migration or
+secret change. Windows system-audio capture, call accuracy, background/device behaviour
 and the signed-in responsive/dark round trip must be proven before release.
 
 ## Earlier future scope
