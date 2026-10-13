@@ -36,7 +36,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW)
   vi.stubEnv('SLACK_BOT_TOKEN', '')
   fixture = permissionSqlite([
-    schema.settings, schema.callTranscripts, schema.scheduledCalls, schema.teamMembers,
+    schema.settings, schema.callTranscripts, schema.meetingRecordings, schema.scheduledCalls, schema.teamMembers,
     schema.tasks, schema.requests, schema.contacts, schema.taskSuggestions,
   ], ['CREATE UNIQUE INDEX settings_key ON settings (key)'])
   fixture.insert(schema.scheduledCalls, { id: 'client-call', org_id: 'org-a' })
