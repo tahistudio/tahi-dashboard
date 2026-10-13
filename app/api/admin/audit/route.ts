@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, eq, and, gte, lte, inArray, sql } from 'drizzle-orm'
+import { requireManagePermissions } from '@/lib/require-permission'
 import { AUDIT_LIKE_ESCAPE, escapeAuditLikePrefix } from '@/lib/audit'
 
 // ── GET /api/admin/audit ─────────────────────────────────────────────────────
@@ -15,10 +16,15 @@ import { AUDIT_LIKE_ESCAPE, escapeAuditLikePrefix } from '@/lib/audit'
 //   ?resolveNames=1            adds actorName + entityName per row (for the
 //                              Team & access change history and audit viewer)
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const database = await db()
+  const { denied } = await requireManagePermissions(database, auth)
+  if (denied) return denied
 
   const url = new URL(req.url)
   const action = url.searchParams.get('action')
@@ -32,8 +38,6 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
   const limit = 50
   const offset = (page - 1) * limit
-
-  const database = await db()
 
   const conditions = []
   if (action) conditions.push(eq(schema.auditLog.action, action))

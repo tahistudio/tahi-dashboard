@@ -91,6 +91,19 @@ describe('POST /api/admin/crons/suggest-from-transcripts', () => {
     expect(runSuggestionSweep).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts an exact bearer scheduler secret', async () => {
+    const res = await POST(post({ authorization: 'Bearer shhh' }))
+    expect(res.status).toBe(200)
+    expect(runSuggestionSweep).toHaveBeenCalledTimes(1)
+    expect(getRequestAuth).not.toHaveBeenCalled()
+  })
+
+  it.each(['shh', 'shhhx', 'shhx', 'SHHH'])('rejects a near-match scheduler secret %s', async secret => {
+    const res = await POST(post({ 'x-cron-secret': secret, authorization: `Bearer ${secret}` }))
+    expect(res.status).toBe(403)
+    expect(runSuggestionSweep).not.toHaveBeenCalled()
+  })
+
   it('runs for a signed-in Tahi admin firing it by hand', async () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_1', orgId: 'org_tahi' } as never)
     const res = await POST(post())

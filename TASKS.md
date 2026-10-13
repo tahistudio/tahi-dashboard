@@ -38,6 +38,8 @@ states remain open. Source and commits use isolated Git metadata inside the
 worktree because the shared Git directory is outside the writable sandbox.
 Nothing in this batch is pushed or deployed.
 
+Next-20 item 3: M2 guards all named handlers and their secondary links. Audit requires permission-management access; activities and engagements filter before aggregate reads. Includes constant-time cron secret checks, literal LIKE ESCAPE and archived-deal exclusion. The SQLite harness now preserves duplicate joined columns and exposes its database for race injection.
+
 ## Execution update, 2026-10-11
 
 Liam approved the eight grouped priorities. Both batches are deployed at

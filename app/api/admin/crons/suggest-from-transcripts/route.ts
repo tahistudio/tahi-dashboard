@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { schema } from '@/db/d1'
 import { db } from '@/lib/db'
-import { assertCronAuth, logCronRun } from '@/lib/cron-runs'
+import { assertCronAuth, hasCronSecretAuth, logCronRun } from '@/lib/cron-runs'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { can, resolvePermissions } from '@/lib/permissions'
 import { resolveTeamMember, SERVICE_USER_ID } from '@/lib/team-identity'
@@ -77,9 +77,7 @@ export async function POST(req: NextRequest) {
   const auth = await assertCronAuth(req)
   if (!auth.ok) return auth.response!
 
-  const secret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const scheduler = !!secret && (req.headers.get('x-cron-secret') === secret
-    || req.headers.get('authorization') === `Bearer ${secret}`)
+  const scheduler = hasCronSecretAuth(req)
   const database = await db() as unknown as D1
   if (!scheduler && !(await mayRunManually(database, auth.userId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

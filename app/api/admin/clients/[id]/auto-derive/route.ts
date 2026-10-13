@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { db } from '@/lib/db'
 import {
   applyBillingDerivation,
@@ -31,7 +32,9 @@ export async function POST(
   if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
-  const database = (await db()) as unknown as AnyDb
+  const database = await db()
+  const denied = await requireAccessToOrg(database, userId, id)
+  if (denied) return denied
 
   let body: { clearOverrides?: { billingModel?: boolean; retainerDates?: boolean; customMrr?: boolean } } = {}
   try {
@@ -41,9 +44,9 @@ export async function POST(
   }
 
   if (body.clearOverrides) {
-    await clearManualOverrides(database, id, body.clearOverrides)
+    await clearManualOverrides(database as unknown as AnyDb, id, body.clearOverrides)
   }
 
-  const result = await applyBillingDerivation(database, id)
+  const result = await applyBillingDerivation(database as unknown as AnyDb, id)
   return NextResponse.json(result)
 }

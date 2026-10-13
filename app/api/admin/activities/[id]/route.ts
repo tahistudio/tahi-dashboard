@@ -1,5 +1,6 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
+import { requireActivityLinks } from '@/lib/activity-access'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
@@ -12,7 +13,7 @@ interface RouteContext {
 
 // PATCH /api/admin/activities/[id]
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -32,6 +33,18 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 
   const database = await db() as unknown as D1
+  const [activity] = await database.select().from(schema.activities)
+    .where(eq(schema.activities.id, id)).limit(1)
+  if (!activity) return NextResponse.json({ error: 'Activity not found' }, { status: 404 })
+  const denied = await requireActivityLinks(database, { userId, orgId }, activity)
+  if (denied) return denied
+  const targetDenied = await requireActivityLinks(database, { userId, orgId }, {
+    orgId: body.orgId === undefined ? activity.orgId : body.orgId,
+    dealId: body.dealId === undefined ? activity.dealId : body.dealId,
+    contactId: body.contactId === undefined ? activity.contactId : body.contactId,
+    leadId: activity.leadId,
+  })
+  if (targetDenied) return targetDenied
   const now = new Date().toISOString()
 
   const updates: Record<string, unknown> = { updatedAt: now }
@@ -57,13 +70,18 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
 // DELETE /api/admin/activities/[id]
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1
+  const [activity] = await database.select().from(schema.activities)
+    .where(eq(schema.activities.id, id)).limit(1)
+  if (!activity) return NextResponse.json({ error: 'Activity not found' }, { status: 404 })
+  const denied = await requireActivityLinks(database, { userId, orgId }, activity)
+  if (denied) return denied
 
   await database
     .delete(schema.activities)

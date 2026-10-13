@@ -1,5 +1,5 @@
 /**
- * lib/cron-runs.ts — small helper that wraps a cron handler with
+ * lib/cron-runs.ts, small helper that wraps a cron handler with
  * cron_runs logging so /settings/automations can show "last run" status
  * without re-running.
  *
@@ -11,7 +11,7 @@
  *   })
  *
  * The helper:
- *   - authenticates (cron secret or admin session — same rules as before)
+ *   - authenticates (cron secret or admin session, same rules as before)
  *   - times the run
  *   - writes one row to cron_runs with status / durationMs / summary / error
  *   - returns the cron's summary JSON to the caller
@@ -81,7 +81,7 @@ export async function logCronRun(
           }
         }
       } catch {
-        // Silent — never let notification plumbing break a cron.
+        // Silent, never let notification plumbing break a cron.
       }
     }
   } catch {
@@ -95,13 +95,28 @@ export interface CronAuthResult {
   response?: NextResponse
 }
 
+/** Compare every character, including for different-length headers. */
+function constantTimeEqual(value: string, expected: string): boolean {
+  let mismatch = value.length ^ expected.length
+  const length = Math.max(value.length, expected.length)
+  for (let index = 0; index < length; index++) {
+    mismatch |= (value.charCodeAt(index) || 0) ^ (expected.charCodeAt(index) || 0)
+  }
+  return mismatch === 0
+}
+
+/** Shared scheduler check so a route cannot mistake a manual caller for cron. */
+export function hasCronSecretAuth(req: NextRequest): boolean {
+  const secret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
+  if (!secret) return false
+  const cronMatch = constantTimeEqual(req.headers.get('x-cron-secret') ?? '', secret)
+  const bearerMatch = constantTimeEqual(req.headers.get('authorization') ?? '', `Bearer ${secret}`)
+  return cronMatch || bearerMatch
+}
+
 /** Run the shared cron auth check (cron secret or admin session). */
 export async function assertCronAuth(req: NextRequest): Promise<CronAuthResult> {
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
-  if (hasCronAuth) return { ok: true, userId: 'system' }
+  if (hasCronSecretAuth(req)) return { ok: true, userId: 'system' }
   const auth = await getRequestAuth(req)
   if (!isTahiAdmin(auth.orgId)) {
     return { ok: false, userId: '', response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }

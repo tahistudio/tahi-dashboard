@@ -14,9 +14,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { and, or, like, sql, desc, isNull, type SQL } from 'drizzle-orm'
+import { and, or, sql, desc, isNull, type SQL } from 'drizzle-orm'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
+import { AUDIT_LIKE_ESCAPE, escapeAuditLikePrefix } from '@/lib/audit'
 import { schema } from '@/db/d1'
 import { resolvePermissions, can } from '@/lib/permissions'
 import { scopedOrgIds } from '@/lib/access-scope'
@@ -69,7 +70,9 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  const needle = `%${q.replace(/[%_]/g, m => `\\${m}`)}%`
+  const needle = `%${escapeAuditLikePrefix(q)}%`
+  const literalLike = (column: SQLiteColumn): SQL =>
+    sql`${column} LIKE ${needle} ESCAPE ${AUDIT_LIKE_ESCAPE}`
   const database = await db()
 
   const access = await resolvePermissions(database, { userId, orgId })
@@ -110,8 +113,8 @@ export async function GET(req: NextRequest) {
     }).from(schema.requests).where(and(
       owned(schema.requests.orgId),
       or(
-        like(schema.requests.title, needle),
-        like(schema.requests.description, needle),
+        literalLike(schema.requests.title),
+        literalLike(schema.requests.description),
       ),
     )).orderBy(desc(schema.requests.updatedAt)).limit(PER_GROUP_LIMIT)),
 
@@ -122,8 +125,8 @@ export async function GET(req: NextRequest) {
     }).from(schema.tasks).where(and(
       owned(schema.tasks.orgId, true),
       or(
-        like(schema.tasks.title, needle),
-        like(schema.tasks.description, needle),
+        literalLike(schema.tasks.title),
+        literalLike(schema.tasks.description),
       ),
     )).orderBy(desc(schema.tasks.updatedAt)).limit(PER_GROUP_LIMIT)),
 
@@ -133,7 +136,7 @@ export async function GET(req: NextRequest) {
       status: schema.organisations.status,
     }).from(schema.organisations).where(and(
       owned(schema.organisations.id),
-      like(schema.organisations.name, needle),
+      literalLike(schema.organisations.name),
     )).orderBy(desc(schema.organisations.updatedAt)).limit(PER_GROUP_LIMIT)),
 
     run('brand', () => database.select({
@@ -142,7 +145,7 @@ export async function GET(req: NextRequest) {
       orgId: schema.brands.orgId,
     }).from(schema.brands).where(and(
       owned(schema.brands.orgId),
-      like(schema.brands.name, needle),
+      literalLike(schema.brands.name),
     )).orderBy(desc(schema.brands.updatedAt)).limit(PER_GROUP_LIMIT)),
 
     run('contact', () => database.select({
@@ -153,8 +156,8 @@ export async function GET(req: NextRequest) {
     }).from(schema.contacts).where(and(
       owned(schema.contacts.orgId),
       or(
-        like(schema.contacts.name, needle),
-        like(schema.contacts.email, needle),
+        literalLike(schema.contacts.name),
+        literalLike(schema.contacts.email),
       ),
     )).orderBy(desc(schema.contacts.updatedAt)).limit(PER_GROUP_LIMIT)),
 
@@ -164,7 +167,8 @@ export async function GET(req: NextRequest) {
       stageId: schema.deals.stageId,
     }).from(schema.deals).where(and(
       scope.kind === 'none' ? sql`0 = 1` : owned(schema.deals.orgId, true),
-      like(schema.deals.title, needle),
+      sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`,
+      literalLike(schema.deals.title),
     )).orderBy(desc(schema.deals.updatedAt)).limit(PER_GROUP_LIMIT)),
 
     run('invoice', () => database.select({
@@ -181,11 +185,11 @@ export async function GET(req: NextRequest) {
         // The number goes FIRST because it is the only one of these a human
         // types: it is what the client quotes, what the email prints and what
         // Xero shows. Searching an invoice used to mean knowing a Stripe id.
-        like(schema.invoices.number, needle),
-        like(schema.invoices.notes, needle),
-        like(schema.invoices.stripeInvoiceId, needle),
-        like(schema.invoices.xeroInvoiceId, needle),
-        like(schema.invoices.id, needle),
+        literalLike(schema.invoices.number),
+        literalLike(schema.invoices.notes),
+        literalLike(schema.invoices.stripeInvoiceId),
+        literalLike(schema.invoices.xeroInvoiceId),
+        literalLike(schema.invoices.id),
       ),
     )).orderBy(desc(schema.invoices.updatedAt)).limit(PER_GROUP_LIMIT)),
 
@@ -196,7 +200,7 @@ export async function GET(req: NextRequest) {
       orgId: schema.contractDocuments.orgId,
     }).from(schema.contractDocuments).where(and(
       artifactOwned(schema.contractDocuments.orgId, schema.contractDocuments.dealId),
-      like(schema.contractDocuments.name, needle),
+      literalLike(schema.contractDocuments.name),
     )).orderBy(desc(schema.contractDocuments.updatedAt)).limit(PER_GROUP_LIMIT)),
 
     run('proposal', () => database.select({
@@ -205,7 +209,7 @@ export async function GET(req: NextRequest) {
       status: schema.proposals.status,
     }).from(schema.proposals).where(and(
       artifactOwned(schema.proposals.orgId, schema.proposals.dealId),
-      like(schema.proposals.title, needle),
+      literalLike(schema.proposals.title),
     )).orderBy(desc(schema.proposals.updatedAt)).limit(PER_GROUP_LIMIT)),
 
     run('schedule', () => database.select({
@@ -214,7 +218,7 @@ export async function GET(req: NextRequest) {
       orgId: schema.projectSchedules.orgId,
     }).from(schema.projectSchedules).where(and(
       artifactOwned(schema.projectSchedules.orgId, schema.projectSchedules.dealId),
-      like(schema.projectSchedules.title, needle),
+      literalLike(schema.projectSchedules.title),
     )).orderBy(desc(schema.projectSchedules.updatedAt)).limit(PER_GROUP_LIMIT)),
 
     run('doc', () => database.select({
@@ -223,8 +227,8 @@ export async function GET(req: NextRequest) {
       slug: schema.docPages.slug,
     }).from(schema.docPages).where(
       or(
-        like(schema.docPages.title, needle),
-        like(schema.docPages.contentText, needle),
+        literalLike(schema.docPages.title),
+        literalLike(schema.docPages.contentText),
       ),
     ).orderBy(desc(schema.docPages.updatedAt)).limit(PER_GROUP_LIMIT)),
 
@@ -236,8 +240,8 @@ export async function GET(req: NextRequest) {
     }).from(schema.scheduledCalls).where(and(
       owned(schema.scheduledCalls.orgId),
       or(
-        like(schema.scheduledCalls.title, needle),
-        like(schema.scheduledCalls.description, needle),
+        literalLike(schema.scheduledCalls.title),
+        literalLike(schema.scheduledCalls.description),
       ),
     )).orderBy(desc(schema.scheduledCalls.updatedAt)).limit(PER_GROUP_LIMIT)),
 
@@ -247,8 +251,8 @@ export async function GET(req: NextRequest) {
     }).from(schema.services).where(and(
       owned(schema.services.orgId, true),
       or(
-        like(schema.services.name, needle),
-        like(schema.services.description, needle),
+        literalLike(schema.services.name),
+        literalLike(schema.services.description),
       ),
     )).orderBy(desc(schema.services.updatedAt)).limit(PER_GROUP_LIMIT)),
 
@@ -259,8 +263,8 @@ export async function GET(req: NextRequest) {
     }).from(schema.announcements).where(and(
       scope.kind === 'all' ? undefined : sql`(${schema.announcements.targetType} != 'org' OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${schema.announcements.targetIds}) AND json_type(${schema.announcements.targetIds}) = 'array' THEN ${schema.announcements.targetIds} ELSE '[]' END) AS target WHERE ${scope.kind === 'some' ? sql`target.value IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))` : sql`0 = 1`}))`,
       or(
-        like(schema.announcements.title, needle),
-        like(schema.announcements.body, needle),
+        literalLike(schema.announcements.title),
+        literalLike(schema.announcements.body),
       ),
     )).orderBy(desc(schema.announcements.createdAt)).limit(PER_GROUP_LIMIT)),
 
@@ -269,7 +273,7 @@ export async function GET(req: NextRequest) {
       name: schema.automationRules.name,
       enabled: schema.automationRules.enabled,
     }).from(schema.automationRules).where(
-      like(schema.automationRules.name, needle),
+      literalLike(schema.automationRules.name),
     ).orderBy(desc(schema.automationRules.updatedAt)).limit(PER_GROUP_LIMIT)),
 
     run('team', () => database.select({
@@ -279,8 +283,8 @@ export async function GET(req: NextRequest) {
       role: schema.teamMembers.role,
     }).from(schema.teamMembers).where(
       or(
-        like(schema.teamMembers.name, needle),
-        like(schema.teamMembers.email, needle),
+        literalLike(schema.teamMembers.name),
+        literalLike(schema.teamMembers.email),
       ),
     ).orderBy(desc(schema.teamMembers.updatedAt)).limit(PER_GROUP_LIMIT)),
   ])

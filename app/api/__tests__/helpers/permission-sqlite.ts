@@ -22,7 +22,12 @@ export function permissionSqlite(tables: AnySQLiteTable[], migrationSql: readonl
         const statement = sqlite.prepare(query)
         const bind = (...params: SQLInputValue[]) => ({
           async all() { return { results: statement.all(...params) } },
-          async raw() { return statement.all(...params).map(Object.values) },
+          async raw() {
+            // D1 raw preserves column order and duplicate names across joins.
+            statement.setReturnArrays(true)
+            try { return statement.all(...params) }
+            finally { statement.setReturnArrays(false) }
+          },
           async run() { statement.run(...params); return { success: true } },
         })
         return { bind, ...bind() }
@@ -33,6 +38,7 @@ export function permissionSqlite(tables: AnySQLiteTable[], migrationSql: readonl
     },
   }
   return {
+    sqlite,
     database: drizzle(adapter as unknown as AnyD1Database),
     queries,
     errors,

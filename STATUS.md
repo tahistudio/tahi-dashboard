@@ -11,6 +11,8 @@ have SQLite scoped-seat coverage. This is local source work, pending normal
 repository integration and live verification. No deployment or production
 data operation is authorised for this batch.
 
+Next-20 item 3: M2 guards all named handlers and their secondary links. Audit requires permission-management access; activities and engagements filter before aggregate reads. Includes constant-time cron secret checks, literal LIKE ESCAPE and archived-deal exclusion. The SQLite harness now preserves duplicate joined columns and exposes its database for race injection.
+
 ## Live 2026-10-12: per-person MCP connector (Decision #070)
 
 LIVE on production 2026-10-12 (NZ): dashboard 0870fb71 (Deploy dashboard

@@ -461,3 +461,22 @@ describe('GET /api/admin/search docs audience', () => {
     expect(ids(body, 'request')).toEqual(['request-a'])
   })
 })
+
+describe('GET /api/admin/search literal matching and archived deals', () => {
+  it.each(['50%', 'file_name', 'folder\\name'])('matches %s literally in SQLite LIKE', async query => {
+    seed(group('request'), 'literal', ORG_A, { title: `A ${query} result` })
+    seed(group('request'), 'wildcard-lookalike', ORG_A, {
+      title: `A ${query.replace('%', 'percent').replace('_', 'X').replace('\\', '')} result`,
+    })
+    expect(ids(await search(query), 'request')).toEqual(['literal'])
+  })
+
+  it('excludes archived deals before LIMIT for both scoped members and super admins', async () => {
+    for (let index = 0; index < 8; index++) seed(group('deal'), `archived-${index}`, ORG_A, {
+      close_reason: 'archived', updated_at: NEW,
+    })
+    expect(ids(await search(), 'deal')).toEqual(['deal-a'])
+    access = { ...access, level: 'super_admin', isSuperAdmin: true, isAdmin: true, viewableResources: null }
+    expect(ids(await search(), 'deal')).toEqual(['deal-a'])
+  })
+})
