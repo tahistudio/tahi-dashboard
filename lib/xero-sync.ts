@@ -937,7 +937,7 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
 
       // Only an explicitly linked Xero identity can select a billing client.
       const contactId = inv.Contact?.ContactID
-      const exactMatches = contactId ? allOrgs.filter(o => o.xeroContactId === contactId) : []
+      const exactMatches = contactId ? allOrgs.filter(o => o.xeroContactId?.trim().toLowerCase() === contactId.trim().toLowerCase()) : []
       if (exactMatches.length > 1) {
         skipped++
         results.push({

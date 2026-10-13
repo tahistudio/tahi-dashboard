@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 
   const matches = xeroData.Contacts.map(xc => {
     // Already linked?
-    const linked = allOrgs.find(o => o.xeroContactId === xc.ContactID)
+    const linked = allOrgs.find(o => o.xeroContactId?.trim().toLowerCase() === xc.ContactID.trim().toLowerCase())
     if (linked) {
       return {
         xeroContactId: xc.ContactID,
@@ -80,26 +80,41 @@ export async function PATCH(req: NextRequest) {
   const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
-  const body = await req.json() as { orgId: string; xeroContactId: string }
-  if (!body.orgId || !body.xeroContactId) {
+  const body = await req.json() as { orgId?: unknown; xeroContactId?: unknown; replace?: unknown } | null
+  if (typeof body?.orgId !== 'string' || !body.orgId || typeof body.xeroContactId !== 'string') {
     return NextResponse.json({ error: 'orgId and xeroContactId required' }, { status: 400 })
+  }
+  const xeroContactId = body.xeroContactId.trim().toLowerCase()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(xeroContactId)) {
+    return NextResponse.json({ error: 'xeroContactId must be a valid UUID.' }, { status: 400 })
   }
 
   const database = await db() as unknown as D1
-  const [org] = await database.select({ id: schema.organisations.id })
+  const [org] = await database.select({ id: schema.organisations.id, xeroContactId: schema.organisations.xeroContactId })
     .from(schema.organisations).where(eq(schema.organisations.id, body.orgId)).limit(1)
   if (!org) return NextResponse.json({ error: 'Organisation not found' }, { status: 404 })
+  if (org.xeroContactId && org.xeroContactId.trim().toLowerCase() !== xeroContactId && body.replace !== true) {
+    return NextResponse.json({ error: 'This client already has a different Xero contact. Confirm replacing the current link and send replace: true.' }, { status: 409 })
+  }
 
   // Claim the contact in one statement so concurrent confirmations cannot
-  // link the same Xero identity to different clients.
+  // link the same Xero identity to different clients or replace a changed link.
   const linked = await database.update(schema.organisations).set({
-    xeroContactId: body.xeroContactId,
+    xeroContactId,
     updatedAt: new Date().toISOString(),
   }).where(and(
     eq(schema.organisations.id, body.orgId),
-    sql`NOT EXISTS (SELECT 1 FROM organisations AS linked WHERE linked.xero_contact_id = ${body.xeroContactId} AND linked.id <> ${body.orgId})`,
+    org.xeroContactId === null ? sql`${schema.organisations.xeroContactId} IS NULL` : eq(schema.organisations.xeroContactId, org.xeroContactId),
+    sql`NOT EXISTS (SELECT 1 FROM organisations AS linked WHERE lower(linked.xero_contact_id) = ${xeroContactId} AND linked.id <> ${body.orgId})`,
   )).returning({ id: schema.organisations.id })
-  if (!linked.length) return NextResponse.json({ error: 'This Xero contact is already linked to another client.' }, { status: 409 })
+  if (!linked.length) {
+    const [current] = await database.select({ xeroContactId: schema.organisations.xeroContactId })
+      .from(schema.organisations).where(eq(schema.organisations.id, body.orgId)).limit(1)
+    const error = !current || current.xeroContactId !== org.xeroContactId
+      ? 'The current Xero contact link changed. Reload the client and confirm the link again.'
+      : 'This Xero contact is already linked to another client.'
+    return NextResponse.json({ error }, { status: 409 })
+  }
 
   return NextResponse.json({ ok: true })
 }

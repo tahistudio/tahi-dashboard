@@ -12,6 +12,8 @@ const captured = vi.hoisted(() => ({
   stateIndex: 0, stateCount: 0, states: new Map<number, unknown>(),
   buttons: new Map<string, () => void>(),
   submit: null as ((event: { preventDefault: () => void }) => Promise<void>) | null,
+  confirmReplacement: null as (() => Promise<void> | void) | null,
+  cancelReplacement: null as (() => void) | null,
   toast: vi.fn(), mutate: vi.fn(),
   xeroLoading: false,
   xeroError: undefined as unknown,
@@ -43,6 +45,14 @@ vi.mock('@/components/tahi/tahi-button', async original => {
     return <actual.TahiButton {...props} />
   } }
 })
+vi.mock('@/components/tahi/confirm-dialog', async original => {
+  const actual = await original<typeof import('@/components/tahi/confirm-dialog')>()
+  return { ...actual, ConfirmDialog: (props: ComponentProps<typeof actual.ConfirmDialog>) => {
+    captured.confirmReplacement = props.open ? props.onConfirm : null
+    captured.cancelReplacement = props.open ? props.onCancel : null
+    return <actual.ConfirmDialog {...props} />
+  } }
+})
 vi.mock('@/components/tahi/slide-over', async original => {
   const actual = await original<typeof import('@/components/tahi/slide-over')>()
   const OriginalBody = actual.SlideOver.Body
@@ -65,6 +75,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
   captured.stateIndex = 0; captured.stateCount = 0; captured.states.clear(); captured.buttons.clear(); captured.submit = null
+  captured.confirmReplacement = null; captured.cancelReplacement = null
   captured.xeroLoading = false; captured.xeroError = undefined
   captured.mutate.mockResolvedValue(undefined)
 })
@@ -123,9 +134,9 @@ const client: Organisation = {
   createdAt: '2026-10-13T00:00:00.000Z', updatedAt: '2026-10-13T00:00:00.000Z',
 }
 const contacts = [{ name: 'Michael', email: 'michael@client.test' }]
-function renderXeroDialog(onUpdated = vi.fn()) {
-  captured.stateIndex = 0; captured.stateCount = 4
-  return renderToStaticMarkup(<XeroLinkDialog org={client} contacts={contacts} onClose={() => undefined} onUpdated={onUpdated} />)
+function renderXeroDialog(onUpdated = vi.fn(), org = client) {
+  captured.stateIndex = 0; captured.stateCount = 5
+  return renderToStaticMarkup(<XeroLinkDialog org={org} contacts={contacts} onClose={() => undefined} onUpdated={onUpdated} />)
 }
 
 describe('Xero contact dialog confirmation', () => {
@@ -161,5 +172,55 @@ describe('Xero contact dialog confirmation', () => {
     expect(html).toContain('Loading Xero contacts...')
     expect(html).toContain('michael@client.test')
     expect(html).toContain('Xero ContactID')
+  })
+  it('shows the current link and requires a separate confirmation before replacement', async () => {
+    const currentId = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    const contactId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    const org = { ...client, xeroContactId: currentId }
+    captured.states.set(0, contactId.toUpperCase())
+    const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }))
+    vi.stubGlobal('fetch', fetch)
+    const updated = vi.fn()
+
+    expect(renderXeroDialog(updated, org)).toContain('Current Xero link')
+    captured.submit?.({ preventDefault: () => undefined })
+    expect(fetch).not.toHaveBeenCalled()
+    const confirmation = renderXeroDialog(updated, org)
+    for (const text of ['Replace current Xero contact?', currentId, contactId, 'Replace Xero link']) expect(confirmation).toContain(text)
+    expect(captured.confirmReplacement).not.toBeNull()
+    await captured.confirmReplacement?.()
+
+    expect(fetch).toHaveBeenCalledWith('/api/admin/integrations/xero/match-contacts', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orgId: client.id, xeroContactId: contactId, replace: true }),
+    })
+    expect(updated).toHaveBeenCalledOnce()
+    expect(renderXeroDialog(updated, org)).toContain('Xero contact linked')
+  })
+  it('leaves the current link unchanged when replacement confirmation is cancelled', () => {
+    const org = { ...client, xeroContactId: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890' }
+    captured.states.set(0, 'a1b2c3d4-e5f6-7890-abcd-ef1234567890')
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const updated = vi.fn()
+    renderXeroDialog(updated, org)
+    captured.submit?.({ preventDefault: () => undefined })
+    renderXeroDialog(updated, org)
+    captured.cancelReplacement?.()
+    expect(renderXeroDialog(updated, org)).not.toContain('Replace current Xero contact?')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(updated).not.toHaveBeenCalled()
+  })
+  it('confirms the same current contact with different casing without replacement approval', async () => {
+    const contactId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    captured.states.set(0, contactId)
+    const org = { ...client, xeroContactId: contactId.toUpperCase() }
+    const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }))
+    vi.stubGlobal('fetch', fetch)
+    const updated = vi.fn()
+    renderXeroDialog(updated, org)
+    captured.submit?.({ preventDefault: () => undefined })
+    await vi.waitFor(() => expect(updated).toHaveBeenCalledOnce())
+    expect(JSON.parse(String(fetch.mock.calls[0][1].body))).toEqual({ orgId: client.id, xeroContactId: contactId })
+    expect(captured.confirmReplacement).toBeNull()
   })
 })

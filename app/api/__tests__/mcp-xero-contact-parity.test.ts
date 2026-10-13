@@ -42,7 +42,7 @@ describe('MCP Xero contact confirmation parity', () => {
   it('declares and requires both identity arguments', () => {
     const tool = TOOLS.find(tool => tool.name === 'confirm_xero_contact')
     expect(tool?.inputSchema.required).toEqual(['orgId', 'contactId'])
-    expect(tool?.inputSchema.properties).toMatchObject({ orgId: { type: 'string' }, contactId: { type: 'string' } })
+    expect(tool?.inputSchema.properties).toMatchObject({ orgId: { type: 'string' }, contactId: { type: 'string' }, replace: { type: 'boolean' } })
   })
 
   it('classifies this money write as blocked for the designer at both layers', () => {
@@ -77,6 +77,13 @@ describe('MCP Xero contact confirmation parity', () => {
       orgId: 'org-a', contactId: 'contact-a', [argument]: '../other?write=1',
     }, { bearer: 'qa-token', actor: null }, { token: 'qa-mr', baseUrl: 'https://mr.example/api/v1' })).rejects.toThrow(`${argument} is not a valid id`)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('passes explicit replacement approval %s through the confirmation route', async replace => {
+    const result = await call({ orgId: 'org-a', contactId: 'contact-a', replace })
+    expect(result.result.isError).not.toBe(true)
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(String(init?.body))).toEqual({ orgId: 'org-a', xeroContactId: 'contact-a', replace })
   })
 
   it.each(['orgId', 'contactId'])('refuses missing %s without a request', async argument => {

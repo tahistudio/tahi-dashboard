@@ -48,14 +48,20 @@ Recorded actors never upgrade that access.
 Xero pushes require an explicitly confirmed contact link. Failed pushes show
 the server reason and client Money link; an all-failed batch returns 422. The
 admin Money card compares Xero names/emails with client contact emails and
-confirms suggested or pasted ContactIDs. MCP confirm_xero_contact exposes
-the same PATCH and is blocked for designers. Contact linking is unique across
-clients; imports use exact ids, exclude archived clients and skip ambiguous
-links. Cron and public lead secrets use the shared constant-time helper.
+confirms suggested or pasted ContactIDs. ContactIDs are trimmed, validated as
+UUIDs and stored lowercase; linking and imports compare ids without case.
+Changing an existing link requires explicit replacement confirmation in the
+card and replace: true through the PATCH or MCP confirm_xero_contact. The
+tool remains blocked for designers. Contact linking is unique across clients;
+imports exclude archived clients and skip ambiguous links. Cron and public
+lead secrets use the shared constant-time helper.
 Transcript server, connection and full read timeout failures defer only the
 affected call; 429, 529 and sweep deadlines retain batch deferral. Settings
-counters stamp and skip after five deferred failures, report the reason in
-the run summary, and clear after success or exhaustion. No migration.
+counters exclude 429/529 and provider-wide connection/server outages. A
+connection/server failure counts only when another model read in the same
+sweep succeeds. Counted failures exhaust after five attempts; second-read
+exhaustion keeps the first read's drafts before stamping. Counters clear on
+processing or exhaustion, with the reason in the run summary. No migration.
 
 Source regression coverage is recorded in the run log. Deployment and signed-in
 proof are still required before the existing task states can be completed.

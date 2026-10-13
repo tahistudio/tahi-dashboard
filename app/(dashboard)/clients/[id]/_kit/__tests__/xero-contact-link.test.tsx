@@ -56,6 +56,11 @@ describe('Xero contact billing card', () => {
     expect(html).toContain('Already linked to another client: Another company')
     expect(html).toContain('disabled=""')
   })
+  it('keeps an uppercase Xero candidate selected after normalizing its id', () => {
+    const html = renderToStaticMarkup(<XeroContactChoices org={org} contacts={contacts} matches={[{ ...match, xeroContactId: contactId.toUpperCase() }]} selectedId={contactId} onSelect={() => undefined} />)
+    expect(html).toContain('checked=""')
+    expect(html).toContain('bg-[var(--color-brand-50)]')
+  })
   it('explains absent contacts and the direct ContactID fallback', () => {
     const html = renderToStaticMarkup(<XeroContactChoices org={org} contacts={[]} matches={[]} selectedId="" onSelect={() => undefined} />)
     expect(html).toContain('No contacts on this client')
@@ -72,5 +77,13 @@ describe('Xero contact billing card', () => {
   it('preserves the server conflict message on a 409', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'This Xero contact is already linked to another client.' }, { status: 409 })))
     await expect(confirmXeroContact(org.id, contactId)).rejects.toThrow('This Xero contact is already linked to another client.')
+  })
+  it('sends replacement approval only when explicitly requested', async () => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }))
+    vi.stubGlobal('fetch', fetch)
+    await confirmXeroContact(org.id, contactId, true)
+    expect(fetch).toHaveBeenCalledWith('/api/admin/integrations/xero/match-contacts', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orgId: org.id, xeroContactId: contactId, replace: true }),
+    })
   })
 })

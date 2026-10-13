@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { Landmark, Link2 } from 'lucide-react'
 import { apiPath } from '@/lib/api'
@@ -27,11 +27,11 @@ export interface XeroContactMatch {
 
 type ClientContacts = Pick<Contact, 'name' | 'email'>[]
 
-export async function confirmXeroContact(orgId: string, contactId: string): Promise<void> {
+export async function confirmXeroContact(orgId: string, contactId: string, replace = false): Promise<void> {
   const response = await fetch(apiPath(MATCH_CONTACTS_PATH), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orgId, xeroContactId: contactId }),
+    body: JSON.stringify({ orgId, xeroContactId: contactId, ...(replace ? { replace: true } : {}) }),
   })
   const result = await response.json() as { ok?: boolean; error?: string }
   if (!response.ok || result.ok !== true) {
@@ -72,9 +72,10 @@ export function XeroContactChoices({ org, contacts, matches, selectedId, onSelec
             <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>No Xero contacts found. Paste a ContactID below to link it directly.</p>
           ) : sorted.map(match => {
             const conflict = match.confidence === 'linked' && match.matchedOrgId !== org.id
+            const checked = selectedId.toLowerCase() === match.xeroContactId.toLowerCase()
             return (
-              <label key={match.xeroContactId} className={`flex items-start rounded-lg border border-[var(--color-border)] focus-within:ring-2 focus-within:ring-[var(--color-brand)] ${selectedId === match.xeroContactId ? 'bg-[var(--color-brand-50)] hover:bg-[var(--color-brand-100)]' : 'bg-[var(--color-bg)] hover:bg-[var(--color-bg-secondary)]'}`} style={{ gap: '0.5rem', padding: '0.75rem', minHeight: '2.75rem', flexShrink: 0, cursor: conflict ? 'not-allowed' : 'pointer', minWidth: 0 }}>
-                <input type="radio" name="xero-contact" value={match.xeroContactId} checked={selectedId === match.xeroContactId} disabled={conflict || disabled} onChange={() => onSelect(match.xeroContactId)} style={{ margin: '0.1875rem 0 0', accentColor: 'var(--color-brand)', flexShrink: 0 }} />
+              <label key={match.xeroContactId} className={`flex items-start rounded-lg border border-[var(--color-border)] focus-within:ring-2 focus-within:ring-[var(--color-brand)] ${checked ? 'bg-[var(--color-brand-50)] hover:bg-[var(--color-brand-100)]' : 'bg-[var(--color-bg)] hover:bg-[var(--color-bg-secondary)]'}`} style={{ gap: '0.5rem', padding: '0.75rem', minHeight: '2.75rem', flexShrink: 0, cursor: conflict ? 'not-allowed' : 'pointer', minWidth: 0 }}>
+                <input type="radio" name="xero-contact" value={match.xeroContactId} checked={checked} disabled={conflict || disabled} onChange={() => onSelect(match.xeroContactId)} style={{ margin: '0.1875rem 0 0', accentColor: 'var(--color-brand)', flexShrink: 0 }} />
                 <span className="flex flex-col" style={{ gap: '0.1875rem', minWidth: 0, overflowWrap: 'anywhere', fontSize: '0.8125rem', color: 'var(--color-text)' }}>
                   <strong>{match.xeroName}</strong>
                   <span>{match.xeroEmail || 'No email on this Xero contact'}</span>
@@ -96,20 +97,35 @@ export function XeroLinkDialog({ org, contacts, onClose, onUpdated }: { org: Org
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [linkedId, setLinkedId] = useState<string | null>(null)
-  const trimmedId = contactId.trim()
+  const [pendingReplacement, setPendingReplacement] = useState<string | null>(null)
+  const footerRef = useRef<HTMLDivElement>(null)
+  const trimmedId = contactId.trim().toLowerCase()
+  const currentId = org.xeroContactId?.trim().toLowerCase()
   const matches = data?.matches ?? []
   const selected = matches.find(match => match.xeroContactId.toLowerCase() === trimmedId.toLowerCase())
+  const current = matches.find(match => match.xeroContactId.toLowerCase() === currentId)
+  const replacement = matches.find(match => match.xeroContactId.toLowerCase() === pendingReplacement)
   const conflict = selected?.confidence === 'linked' && selected.matchedOrgId !== org.id
   const readMessage = readError instanceof ApiError && typeof readError.info === 'object' && readError.info !== null && 'error' in readError.info && typeof readError.info.error === 'string'
     ? readError.info.error : 'Could not load Xero contacts. Retry, or paste a ContactID directly.'
 
-  async function confirm() {
-    if (saving || linkedId || !CONTACT_ID_PATTERN.test(trimmedId) || conflict) return
+  useEffect(() => {
+    if (pendingReplacement) footerRef.current?.querySelector<HTMLButtonElement>('[data-xero-cancel-replacement]')?.focus()
+  }, [pendingReplacement])
+
+  async function confirm(replace = false, candidateId = trimmedId) {
+    if (saving || linkedId || !CONTACT_ID_PATTERN.test(candidateId) || conflict) return
+    if (currentId && currentId !== candidateId && !replace) {
+      setError(null)
+      setPendingReplacement(candidateId)
+      return
+    }
     setSaving(true)
     setError(null)
     try {
-      await confirmXeroContact(org.id, trimmedId)
-      setLinkedId(trimmedId)
+      await confirmXeroContact(org.id, candidateId, replace)
+      setLinkedId(candidateId)
+      setPendingReplacement(null)
       void mutate()
       onUpdated()
     } catch (cause) {
@@ -120,12 +136,19 @@ export function XeroLinkDialog({ org, contacts, onClose, onUpdated }: { org: Org
   }
 
   return (
-    <SlideOver open variant="center" maxWidth="44rem" title="Link Xero contact" subtitle={org.name} icon={<Link2 style={{ width: '1rem', height: '1rem' }} />} onClose={() => { if (!saving) onClose() }} contentKey={linkedId ? 'success' : 'contacts'}>
+    <SlideOver open variant="center" maxWidth="44rem" title="Link Xero contact" subtitle={org.name} icon={<Link2 style={{ width: '1rem', height: '1rem' }} />} onClose={() => { if (!saving) onClose() }} contentKey={linkedId ? 'success' : pendingReplacement ? 'replacement' : 'contacts'}>
       <SlideOver.Body>
         <div className="flex flex-col" style={{ gap: '1rem', minWidth: 0, overflowWrap: 'anywhere' }} aria-busy={saving || isLoading}>
           {linkedId ? <div role="status"><Callout tone="success" title="Xero contact linked">{org.name} now uses {linkedId}.</Callout></div> : (
             <>
               <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Compare the Xero name and email with this client&apos;s contacts before confirming. A suggested name match has not been verified.</p>
+              {currentId && <Callout tone="info" title="Current Xero link">{current ? `${current.xeroName}, ${current.xeroEmail || 'no email on this Xero contact'}. ` : ''}{org.xeroContactId}</Callout>}
+              {pendingReplacement ? (
+                <Callout tone="warning" title="Replace current Xero contact?">
+                  <p style={{ margin: '0 0 0.5rem' }}>New Xero link: {replacement ? `${replacement.xeroName}, ${replacement.xeroEmail || 'no email on this Xero contact'}. ` : ''}{pendingReplacement}</p>
+                  <p style={{ margin: 0 }}>Replacing {org.xeroContactId} changes the contact used for future invoice pushes. Confirm the new contact&apos;s name and email before replacing this link.</p>
+                </Callout>
+              ) : <>
               {isLoading ? (
                 <>
                   <ContactDetails org={org} contacts={contacts} />
@@ -147,14 +170,15 @@ export function XeroLinkDialog({ org, contacts, onClose, onUpdated }: { org: Org
                 {trimmedId && !CONTACT_ID_PATTERN.test(trimmedId) && <p role="status" style={{ margin: 0, fontSize: '0.75rem', color: 'var(--badge-danger-text)' }}>Enter the full ContactID from Xero, including its hyphens.</p>}
               </form>
               {conflict && <div role="alert"><Callout tone="danger" title="Link blocked">This Xero contact is already linked to another client: {selected.matchedOrgName ?? selected.matchedOrgId}.</Callout></div>}
+              </>}
               {error && <div role="alert"><Callout tone="danger" title="Could not link contact">{error}</Callout></div>}
             </>
           )}
         </div>
       </SlideOver.Body>
       <SlideOver.Footer>
-        <div className="flex flex-wrap items-center justify-end" style={{ gap: '0.75rem' }}>
-          {linkedId ? <TahiButton style={{ minHeight: '2.75rem' }} onClick={onClose}>Done</TahiButton> : <><TahiButton variant="secondary" style={{ minHeight: '2.75rem' }} disabled={saving} onClick={onClose}>Cancel</TahiButton><TahiButton type="submit" form="xero-contact-link" style={{ minHeight: '2.75rem' }} disabled={saving || !CONTACT_ID_PATTERN.test(trimmedId) || conflict} loading={saving}>{saving ? 'Linking contact...' : 'Confirm link'}</TahiButton></>}
+        <div ref={footerRef} className="flex flex-wrap items-center justify-end" style={{ gap: '0.75rem' }}>
+          {linkedId ? <TahiButton style={{ minHeight: '2.75rem' }} onClick={onClose}>Done</TahiButton> : pendingReplacement ? <><TahiButton data-xero-cancel-replacement variant="secondary" style={{ minHeight: '2.75rem' }} disabled={saving} onClick={() => { setPendingReplacement(null); setError(null) }}>Cancel replacement</TahiButton><TahiButton style={{ minHeight: '2.75rem' }} disabled={saving || conflict} loading={saving} onClick={() => { void confirm(true, pendingReplacement) }}>{saving ? 'Replacing contact...' : 'Replace Xero link'}</TahiButton></> : <><TahiButton variant="secondary" style={{ minHeight: '2.75rem' }} disabled={saving} onClick={onClose}>Cancel</TahiButton><TahiButton type="submit" form="xero-contact-link" style={{ minHeight: '2.75rem' }} disabled={saving || !CONTACT_ID_PATTERN.test(trimmedId) || conflict} loading={saving}>{saving ? 'Linking contact...' : 'Confirm link'}</TahiButton></>}
         </div>
       </SlideOver.Footer>
     </SlideOver>
@@ -177,7 +201,7 @@ export function XeroContactLink({ org, contacts, onUpdated }: { org: Organisatio
               <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>{org.xeroContactId ? `Linked to ${org.xeroContactId}` : 'Connect an existing Xero contact before pushing invoices.'}</p>
             </div>
           </div>
-          <TahiButton variant="secondary" style={{ minHeight: '2.75rem' }} onClick={() => setOpen(true)} disabled={org.status === 'archived'} iconLeft={<Link2 style={{ width: '1rem', height: '1rem' }} />}>Link Xero contact</TahiButton>
+          <TahiButton variant="secondary" style={{ minHeight: '2.75rem' }} onClick={() => setOpen(true)} disabled={org.status === 'archived'} iconLeft={<Link2 style={{ width: '1rem', height: '1rem' }} />}>{org.xeroContactId ? 'Change Xero contact' : 'Link Xero contact'}</TahiButton>
         </div>
       </Card>
       {open && <XeroLinkDialog org={org} contacts={contacts} onClose={() => setOpen(false)} onUpdated={onUpdated} />}

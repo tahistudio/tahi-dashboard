@@ -921,3 +921,35 @@ hydration or signed-in/deployed interactions; Vitest covers confirmation
 callbacks. The final hover review also moved candidate background tokens out
 of inline styles into static Tailwind classes so hover feedback can render.
 Visual/source reviews have no remaining findings.
+
+## 2026-10-13, round 3 small fixes for next-20 items 2 to 7
+
+Started on fix/next20-items-2-7 at 78f49f57 with a clean tree. This round is
+limited to L-1, I-3, L-2 and L-3. Contact confirmation trims and lowercases
+the ContactID, validates its UUID shape, and checks uniqueness without case.
+Xero imports and contact choices compare ids without case. A different
+existing link requires literal replace: true, and an atomic current-link
+guard refuses a concurrent change. The Money card shows the current link
+and opens the shared confirmation dialog before approving replacement.
+MCP confirm_xero_contact forwards optional replace while retaining its
+designer denial and existing access checks.
+
+429/529 never spend a transcript's retry allowance. First-read connection
+and server failures wait until the sweep finishes to count only when another
+model read succeeded; provider-wide outages preserve existing counters and
+leave transcripts unprocessed. Second-read retry exhaustion preserves the
+first read's drafts, writes them through insertSuggestions, then stamps and
+clears the counter. An insertion failure leaves the transcript unprocessed.
+
+Requested local gate passed: npm run type-check, CI=1 npm run lint (existing
+warnings), worker tsc, and 9 Vitest files / 316 tests. The ignored native
+config-loader sandbox runner avoids standard Vitest's esbuild spawn EPERM.
+Raw output is .claude/round3-final-gates.log, ending ALL_ROUND3_GATES_PASSED.
+Real SQLite regressions cover repeated outages, preserved existing counters,
+successes before and after failures, second-read rate limits, exactly one
+draft after five second-read timeouts, and failed insertion before stamping.
+Xero tests cover invalid/uppercase ids, strict approval, collisions, concurrent
+link changes, UI confirmation/cancellation and MCP parity. Independent QA
+source/test review passed. Local visual review is in progress. TASKS.md and
+STATUS.md record the behavior; existing completion states remain unchanged.
+No schema, commit, push, deploy, production data or secret changes.

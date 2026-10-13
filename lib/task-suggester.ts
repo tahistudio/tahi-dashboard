@@ -105,13 +105,13 @@ export class SuggesterTimeoutError extends Error {
 function modelErrorStatus(error: unknown): number {
   const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : NaN
   if (Number.isFinite(status) && status > 0) return status
-  const matched = error instanceof Error ? /^(?:error[:\s]*)?(429|500|502|503|504|529)\b/i.exec(error.message) : null
+  const matched = error instanceof Error ? /^(?:error[:\s]*)?(429|5\d{2})\b/i.exec(error.message) : null
   return matched ? Number(matched[1]) : NaN
 }
 
 function transientModelError(error: unknown): boolean {
   const status = modelErrorStatus(error)
-  if ([429, 500, 502, 503, 504, 529].includes(status)) return true
+  if (status === 429 || (status >= 500 && status <= 599)) return true
   return !Number.isFinite(status) && error instanceof Error
     && (/APIConnection(?:Timeout)?Error/i.test(error.name)
       || /connection error|connection (?:reset|refused|closed)|network error|fetch failed|failed to fetch|socket hang up|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(error.message))
@@ -1428,8 +1428,10 @@ export function mergeSecondRead(
  *
  * The stamp is the load bearing part. It goes on every transcript the sweep
  * LOOKED at, including gate rejections and permanent model failures. Transient
- * failures stay unread until a later run succeeds or five deferred failures
+ * failures stay unread until a later run succeeds or five counted failures
  * exhaust that transcript's durable retry allowance in the settings table.
+ * Rate limits never count. Connection and server errors count only when
+ * another model read succeeded in the same run, rather than during outages.
  *
  * The converse holds as strictly: a transcript the sweep did NOT take on is
  * never stamped. The run has a time budget (SWEEP_BUDGET_MS) because its
@@ -1481,13 +1483,16 @@ export async function runSuggestionSweep(
   const readsPerCall = secondPass.enabled ? 2 : 1
   const fits = (reads: number): boolean => clock() - startedAt + reads * slowestRead <= budgetMs
   const readTimeout = (): number => Math.min(MODEL_READ_TIMEOUT_MS, budgetMs - (clock() - startedAt) - WRITE_RESERVE_MS)
+  let modelReadSucceeded = false
   const read = (input: SuggestFromTranscriptInput): Promise<SuggestResult> => {
     const timeoutMs = readTimeout()
     if (timeoutMs <= 0) throw new SuggesterTimeoutError(timeoutMs)
     return timed(async () => {
       const began = clock()
       try {
-        return await boundedRead(signal => suggest({ ...input, signal, timeoutMs }), timeoutMs)
+        const result = await boundedRead(signal => suggest({ ...input, signal, timeoutMs }), timeoutMs)
+        modelReadSucceeded = true
+        return result
       } catch (error) {
         // An SDK timeout that reaches a shortened deadline is budget-limited
         // too. An earlier connection failure still belongs to the transcript.
@@ -1523,7 +1528,8 @@ export async function runSuggestionSweep(
     summary.deferred = summary.deferredIds.length
   }
 
-  const deferredFailure = async (transcriptId: string, message: string): Promise<boolean> => {
+  const providerFailures: Array<{ transcriptId: string; message: string }> = []
+  const deferredFailure = async (transcriptId: string, message: string, stampOnExhaustion = true): Promise<boolean> => {
     const failures = await incrementDeferredFailures(database, transcriptId, nowIso)
     if (failures < MAX_DEFERRED_FAILURES) return false
     const skipped = {
@@ -1533,8 +1539,10 @@ export async function runSuggestionSweep(
     const existing = summary.skipped.findIndex(item => item.transcriptId === transcriptId)
     if (existing >= 0) summary.skipped[existing] = skipped
     else summary.skipped.push(skipped)
-    await stamp(database, transcriptId, nowIso)
-    await clearDeferredFailures(database, transcriptId)
+    if (stampOnExhaustion) {
+      await stamp(database, transcriptId, nowIso)
+      await clearDeferredFailures(database, transcriptId)
+    }
     return true
   }
 
@@ -1620,11 +1628,18 @@ export async function runSuggestionSweep(
         break
       }
       if (transientModelError(err) || modelReadTimedOut(err)) {
-        const exhausted = await deferredFailure(transcript.id, message)
         if ([429, 529].includes(modelErrorStatus(err))) {
-          defer(transcripts.slice(index + (exhausted ? 1 : 0)).map(t => t.id))
+          defer(transcripts.slice(index).map(t => t.id))
           break
         }
+        // A later transcript may be the first successful read in this run.
+        // Wait for it before distinguishing an isolated failure from an outage.
+        if (transientModelError(err)) {
+          providerFailures.push({ transcriptId: transcript.id, message })
+          defer([transcript.id])
+          continue
+        }
+        const exhausted = await deferredFailure(transcript.id, message)
         if (!exhausted) defer([transcript.id])
         continue
       }
@@ -1672,13 +1687,17 @@ export async function runSuggestionSweep(
           secondPass.failed.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
           const budgetDeadline = err instanceof SuggesterTimeoutError && err.timeoutMs < MODEL_READ_TIMEOUT_MS
           if (!budgetDeadline && (transientModelError(err) || modelReadTimedOut(err))) {
-            const exhausted = await deferredFailure(transcript.id, message)
             if ([429, 529].includes(modelErrorStatus(err))) {
-              defer(transcripts.slice(index + (exhausted ? 1 : 0)).map(t => t.id))
+              defer(transcripts.slice(index).map(t => t.id))
               break
             }
-            if (!exhausted) defer([transcript.id])
-            continue
+            // The first read succeeded, so this is an isolated failure. At
+            // the cap, keep its drafts and stamp only after they are written.
+            const exhausted = await deferredFailure(transcript.id, message, false)
+            if (!exhausted) {
+              defer([transcript.id])
+              continue
+            }
           }
         }
       }
@@ -1723,6 +1742,15 @@ export async function runSuggestionSweep(
 
     await stamp(database, transcript.id, nowIso)
     await clearDeferredFailures(database, transcript.id)
+  }
+
+  if (modelReadSucceeded) {
+    for (const failure of providerFailures) {
+      if (await deferredFailure(failure.transcriptId, failure.message)) {
+        summary.deferredIds = summary.deferredIds?.filter(id => id !== failure.transcriptId)
+        summary.deferred = summary.deferredIds?.length ?? 0
+      }
+    }
   }
 
   summary.resurfaced = await resurfaceSnoozed(database, new Date(nowIso))

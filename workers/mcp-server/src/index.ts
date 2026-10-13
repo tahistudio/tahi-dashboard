@@ -1790,9 +1790,10 @@ export const TOOLS: ToolDef[] = [
     dryRun: prop('boolean', 'Preview only. Defaults to TRUE: pass false to actually stamp invoiced_at on the eligible entries.'),
   }, ['before']),
   tool('match_xero_contacts', 'List Xero contacts with suggested dashboard client matches'),
-  tool('confirm_xero_contact', 'Confirm the Xero contact for an existing client. First read match_xero_contacts and compare the Xero name and email with the client contacts; names alone are not proof of identity. Refuses a contact already linked to another client with 409. Requires admin access to settings.integrations; unavailable to the designer profile. Sends no email and makes no Xero changes.', {
+  tool('confirm_xero_contact', 'Confirm the Xero contact for an existing client. First read match_xero_contacts and compare the Xero name and email with the client contacts; names alone are not proof of identity. Refuses a contact already linked to another client with 409. Replacing a different existing link requires explicit human confirmation and replace true. Requires admin access to settings.integrations; unavailable to the designer profile. Sends no email and makes no Xero changes.', {
     orgId: prop('string', 'Existing client organisation id'),
     contactId: prop('string', 'Xero ContactID confirmed by the person'),
+    replace: prop('boolean', 'Replace a different current Xero link only after the person explicitly confirms the replacement. Defaults to false.'),
   }, ['orgId', 'contactId']),
   tool('import_stripe_invoices', 'Import all invoices from Stripe into dashboard'),
   tool('link_stripe_customer', 'Link an existing live Stripe customer to an existing client without importing an invoice, sending email or changing Stripe. Dry run by default: review the client, contacts and customer before applying with the signed previewKey, valid for ten minutes. Refuses a customer already linked elsewhere and never replaces a different client customer. Requires a human super_admin session; the MCP service identity is admin and returns 403 by design. Use POST /api/admin/integrations/stripe/link-customer in a signed-in super-admin browser session.', {
@@ -3183,6 +3184,7 @@ export async function executeTool(
       assertSafeIdArgs({ orgId: need('orgId'), contactId: need('contactId') })
       return json(await apiWrite('/api/admin/integrations/xero/match-contacts', token, 'PATCH', {
         orgId: s('orgId'), xeroContactId: s('contactId'),
+        ...(args.replace === undefined ? {} : { replace: args.replace === true }),
       }))
     case 'import_stripe_invoices':
       return json(await apiWrite('/api/admin/integrations/stripe/import-invoices', token, 'POST'))
