@@ -24,11 +24,13 @@ vi.mock('@/lib/access-scoping', async (importOriginal) => ({
 }))
 
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 
 import { db } from '@/lib/db'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { NextRequest } from 'next/server'
 import { PATCH } from '@/app/api/admin/call-transcripts/[id]/route'
+import { schema } from '@/db/d1'
 
 type QueryRecord = { method: string; args: unknown[] }
 
@@ -62,6 +64,7 @@ function makeDb(results: unknown[] = []) {
     insert: (...args: unknown[]) => entry('insert', args),
     update: (...args: unknown[]) => entry('update', args),
     delete: (...args: unknown[]) => entry('delete', args),
+    batch: (statements: PromiseLike<unknown>[]) => Promise.all(statements),
   }
   return { handle, queries }
 }
@@ -90,6 +93,15 @@ const parkedRow = {
   matchedBy: null,
   unlinkedReason: 'ambiguous',
   createdAt: '2026-09-18T03:05:00Z',
+}
+
+const recorderTranscript = { ...parkedRow, source: 'manual', externalId: 'recording:rec-1' }
+const recording = {
+  id: 'rec-1', title: 'Client call', orgId: 'org-a', callKind: null, callId: null,
+  createdById: 'user_member', tracks: '["mic"]', state: 'ready', startedAt: parkedRow.receivedAt,
+  stoppedAt: parkedRow.receivedAt, durationMs: 30_000, expectedChunks: '{"mic":1,"system":0}',
+  transcriptId: 'ct-1', error: null, leaseToken: null, leaseUntil: null, deletedAt: null,
+  createdAt: parkedRow.createdAt, updatedAt: parkedRow.createdAt,
 }
 
 beforeEach(() => {
@@ -121,6 +133,16 @@ describe('PATCH /api/admin/call-transcripts/[id], validation', () => {
 
     const res = await PATCH(req({ callKind: 'discovery', callId: 'disc-1' }), params('ct-nope'))
     expect(res.status).toBe(404)
+  })
+
+  it('404s a recorder transcript whose recording is missing, writing nothing', async () => {
+    const { handle, queries } = makeDb([[recorderTranscript], []])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ callKind: 'discovery', callId: 'disc-1' }), params('ct-1'))
+    expect(res.status).toBe(404)
+    expect(await res.json()).toMatchObject({ error: 'Recording not found.' })
+    expect(queries.some(q => q[0].method === 'update')).toBe(false)
   })
 
   it('404s when the target call does not exist, writing nothing', async () => {
@@ -210,5 +232,38 @@ describe('PATCH /api/admin/call-transcripts/[id], attaching', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ mirrored: false })
     expect(queries.filter(q => q[0].method === 'update')).toHaveLength(1)
+  })
+
+  it.each([
+    { mirrored: false, updatedCalls: [], description: 'skips an existing transcript' },
+    { mirrored: true, updatedCalls: [{ id: 'disc-1' }], description: 'writes an empty transcript' },
+  ])('returns mirrored=$mirrored when the recorder $description', async ({ mirrored, updatedCalls }) => {
+    const linkedRecording = { ...recording, callKind: 'discovery', callId: 'disc-1' }
+    const { handle, queries } = makeDb([
+      [recorderTranscript],
+      [recording],
+      [recording],
+      [recording],
+      [{ orgId: 'org-a' }],
+      [],
+      [],
+      [linkedRecording],
+      [],
+      [{ text: recorderTranscript.text }],
+      updatedCalls,
+      [{ id: 'rec-1' }],
+      [],
+      [linkedRecording],
+      [],
+      [{ text: recorderTranscript.text }],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ callKind: 'discovery', callId: 'disc-1' }), params('ct-1'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ mirrored, recording: { callKind: 'discovery', callId: 'disc-1' } })
+
+    const mirror = queries.find(q => q[0].method === 'update' && q[0].args[0] === schema.discoveryCalls)
+    expect(mirror?.find(c => c.method === 'returning')?.args[0]).toEqual({ id: schema.discoveryCalls.id })
   })
 })

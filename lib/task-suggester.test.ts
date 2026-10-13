@@ -814,6 +814,29 @@ const okSuggest = vi.fn(async () => ({
 beforeEach(() => { okSuggest.mockClear() })
 
 describe('runSuggestionSweep', () => {
+  it('proposes through the existing approval inbox for an explicit recorded client without inventing a call', async () => {
+    const { handle, inserts } = makeDb([
+      [{ ...TRANSCRIPT_ROW, callId: null, callKind: null, recordingOrgId: 'org-a' }],
+      ...contextSelects(), NO_REJECTIONS, [], [], [],
+    ])
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, secondPass: false, now: new Date('2026-09-19T00:00:00Z') })
+    expect(summary.eligible).toBe(1)
+    expect(summary.inserted).toBe(1)
+    const written = inserts.find(i => i.table === schema.taskSuggestions)
+    expect(written?.values).toEqual(expect.objectContaining({ orgId: 'org-a', transcriptId: 'ct-1', callId: null, callKind: null }))
+    expect(inserts.some(i => i.table === schema.tasks || i.table === schema.requests)).toBe(false)
+  })
+
+  it('leaves an unlinked recording without an explicit client ineligible', async () => {
+    const { handle, inserts } = makeDb([
+      [{ ...TRANSCRIPT_ROW, callId: null, callKind: null, recordingOrgId: null }], [], [],
+    ])
+    const summary = await runSuggestionSweep(handle, { suggest: okSuggest, secondPass: false })
+    expect(summary.eligible).toBe(0)
+    expect(okSuggest).not.toHaveBeenCalled()
+    expect(inserts).toEqual([])
+  })
+
   it('skips a call with no client and stamps it anyway, so it is never read twice', async () => {
     const { handle, updates } = makeDb([
       [TRANSCRIPT_ROW],

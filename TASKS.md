@@ -2,6 +2,8 @@
 
 # Tahi Dashboard, reorganised task list
 
+Last updated: 2026-10-13 (REC.0 review fixes prepared, not live).
+
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
 `docs/superpowers/plans/2026-09-13-overnight-run-log.md`, and the merge commits of
@@ -1199,7 +1201,20 @@ scheduled; each needs a scope before building.
   Reuse feedback-ball lessons; do not mix client-site QA with beta feedback.
   No delivery mechanism, guest policy or schema selected. Webflow comment
   intake remains an interim idea, not a built connector.
-- [ ] REC.0 - [Scope] Calendar-aware meeting audio and transcription beyond
+- [ ] REC.0 - [BE/FE] Manual browser call recorder, phase 1 (Liam,
+  2026-10-13, Decision #071). Windows Chromium mic plus system audio,
+  independent 30-second tracks, durable chunk uploads/retries, Workers AI
+  transcription and explicit client/call linking into the human approval
+  inbox. Committed as 1608f4c6 on feat/rec0-manual-recorder, then reviewed by
+  Opus, with fixes in 989e31db (re-reviewed, PASS with notes).
+  Migration 0113 is written but not applied; the main
+  session will apply it to production before merging because existing sweep,
+  rebuild, client delete/merge and ManyRequests cleanup paths read the table.
+  No push or deployment occurs in this review-fix session.
+  Real Windows capture, background recording, accuracy, 375/768 and dark
+  browser proof remain outstanding. Phase 1 excludes calendar detection,
+  a desktop app and a joining bot. Earlier scope retained below as future work:
+  Calendar-aware meeting audio and transcription beyond
   Gemini (Liam clarified 2026-10-10, Decision #068): detect meetings in Liam's
   calendar, capture PC system audio plus microphone so both sides are heard,
   and produce highly accurate transcripts at very low cost across Google Meet,

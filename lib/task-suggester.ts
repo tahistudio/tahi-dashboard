@@ -40,6 +40,7 @@ import { postSuggestionsForCall } from '@/lib/slack/mirror'
 import { insertSuggestions, isRepeatOf, listSuggestions, resurfaceSnoozed, type SuggestionKind } from '@/lib/task-suggestions'
 import { HANDOFF_REASONS } from '@/lib/request-handoff-copy'
 import { REQUEST_CATEGORIES, REQUEST_PRIORITIES, REQUEST_TYPES } from '@/lib/request-vocabulary'
+import { recordingClientOrgExpression, recordingTranscriptReadyCondition } from '@/lib/recording-transcript-client'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -1499,10 +1500,12 @@ export async function runSuggestionSweep(
       receivedAt: schema.callTranscripts.receivedAt,
       text: schema.callTranscripts.text,
       wrapUp: schema.callTranscripts.wrapUp,
+      recordingOrgId: recordingClientOrgExpression(),
     })
     .from(schema.callTranscripts)
     .where(and(
-      isNotNull(schema.callTranscripts.callId),
+      or(isNotNull(schema.callTranscripts.callId), isNotNull(recordingClientOrgExpression())),
+      recordingTranscriptReadyCondition(),
       // Named transcripts are read whatever their age and whatever their
       // mark; the window and the mark are the scheduled sweep's rules for
       // finding work, not rules about reading it.
@@ -1525,7 +1528,9 @@ export async function runSuggestionSweep(
     }
 
     summary.looked++
-    const gate = await resolveCallGate(database, transcript.callKind, transcript.callId)
+    const gate: Gate = !transcript.callId && transcript.recordingOrgId
+      ? { eligible: true, orgId: transcript.recordingOrgId, orgVia: 'recording' }
+      : await resolveCallGate(database, transcript.callKind, transcript.callId)
 
     if (!gate.eligible) {
       summary.skipped.push({ transcriptId: transcript.id, reason: gate.reason })
@@ -1682,7 +1687,7 @@ async function deliverToSlack(database: Drizzle, callId: string | null): Promise
 }
 
 type Gate =
-  | { eligible: true; orgId: string | null; orgVia: 'call' | 'deal' | 'attendees' | null }
+  | { eligible: true; orgId: string | null; orgVia: 'call' | 'deal' | 'attendees' | 'recording' | null }
   | { eligible: false; reason: string }
 
 /** The attendee emails on a discovery call, lower-cased, studio addresses dropped. */

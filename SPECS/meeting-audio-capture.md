@@ -1,4 +1,53 @@
-# Spec: calendar-aware meeting audio and transcription
+# Spec: meeting audio capture and transcription
+
+## Phase 1, manual browser recorder (2026-10-13)
+
+Liam authorised a manual recorder inside the studio dashboard on Windows
+Chromium (Vivaldi, Chrome or Edge). This phase supersedes the companion and
+calendar feasibility scope below. No calendar detection, desktop application
+or meeting bot is included.
+
+The browser asks for Entire screen with Share system audio and for microphone
+permission. Video is discarded immediately. Separate MediaRecorder instances
+for microphone (Liam) and system audio (Them) rotate about every 30 seconds,
+so each file has a complete container header. Missing system audio requires
+an explicit mic-only choice or retry. Meters, elapsed time, a visible indicator,
+Stop and a beforeunload warning accompany capture.
+
+Chunks are saved locally before upload and keyed in R2 by recording, track
+and sequence. Additive migration 0113 supplies durable recording/chunk state,
+unique sequences, retry text/segments and operation leases. Apply 0113 BEFORE
+deployment: the suggestion sweep, rebuild, client delete/merge and ManyRequests
+cleanup read meeting_recordings. The main session will apply it to production
+before merging. The existing
+call_transcripts columns hold one finished manual transcript. Client/call
+selection is explicit. A client-only recording remains unlinked to a call,
+inherits its recording's client scope and is eligible for task_suggestions.
+An entirely unlinked transcript waits for a human choice. Only the existing
+approve/apply path creates work.
+
+Model and current price are recorded in Decision #071. Audio is retained until
+the admin deletes the recording audio; the transcript and client-scope
+tombstone remain. Read/list/link MCP actions accompany the browser capture.
+Designer reads are allowed; recording linking is blocked for that profile.
+
+Phase 1 review notes:
+
+- P2-2: The browser tab drives transcription. Closing it stops processing until
+  Retry is clicked. This is acceptable for phase 1; a queue or cron comes later.
+- P2-3: Suggestions from a client-only recording (no callId) reach the dashboard
+  inbox and do not send Slack DMs.
+- P3-3: The microphone speaker label is hard-coded as "Liam".
+- P3-4: Unlinked recordings are visible to any scoped seat, following the
+  existing allow-if-any-scope rule. Revisit before the first scoped hire.
+- P3-6: Abandoned recordings keep their R2 audio under the open retention
+  question.
+
+This review-fix session performs no push, deploy, production migration or
+secret change. Windows system-audio capture, call accuracy, background/device behaviour
+and the signed-in responsive/dark round trip must be proven before release.
+
+## Earlier future scope
 
 Status: scoped for a feasibility spike, not implemented. REC.0 owns this work;
 LP.12 adds per-meeting controls after the capture path exists. Decision #068

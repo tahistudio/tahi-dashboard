@@ -93,6 +93,7 @@ import { MAX_SWEEP_BATCH, runSuggestionSweep, sweepWillReach, type SweepSummary 
 import { requireFeature } from '@/lib/require-feature'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { requireAccessToOrgOrPreClient } from '@/lib/require-access'
+import { recordingClientOrgExpression, recordingTranscriptReadyCondition } from '@/lib/recording-transcript-client'
 import { taskSuggestionOrgCondition } from '@/lib/task-suggestions-overview'
 
 /**
@@ -131,13 +132,15 @@ function byCodeUnit(a: string, b: string): number {
   return a < b ? -1 : 1
 }
 
-type SkipReason = 'not_found' | 'unlinked' | 'too_old_to_defer'
+type SkipReason = 'not_found' | 'unlinked' | 'too_old_to_defer' | 'recording_not_ready'
 
 interface Candidate {
   id: string
   callId: string | null
   callKind: string | null
   receivedAt: string
+  recordingOrgId?: string | null
+  recordingReady?: boolean
 }
 
 /** Check every current client link before a scoped caller queues this call.
@@ -147,7 +150,10 @@ async function canQueueTranscript(
   userId: string,
   transcript: Candidate,
 ): Promise<boolean> {
-  if (!transcript.callId) return true // Reported as unlinked, never queued.
+  if (!transcript.callId) {
+    if (!transcript.recordingOrgId) return true
+    return !(await requireAccessToOrgOrPreClient(database, userId, transcript.recordingOrgId))
+  }
   const orgIds = new Set<string | null>()
   if (transcript.callKind === 'scheduled') {
     const [call] = await database.select({ orgId: schema.scheduledCalls.orgId })
@@ -271,6 +277,8 @@ export async function POST(req: NextRequest) {
     callId: schema.callTranscripts.callId,
     callKind: schema.callTranscripts.callKind,
     receivedAt: schema.callTranscripts.receivedAt,
+    recordingOrgId: recordingClientOrgExpression(),
+    recordingReady: recordingTranscriptReadyCondition().mapWith(Boolean),
   }
   const found: Candidate[] = []
   if (all) {
@@ -295,6 +303,10 @@ export async function POST(req: NextRequest) {
   // to falling out of the sweep's window are the ones read inline.
   const candidates: Candidate[] = []
   for (const row of found) {
+    if (row.recordingReady === false) {
+      skipped.push({ transcriptId: row.id, reason: 'recording_not_ready' })
+      continue
+    }
     if (scope !== null) {
       try {
         if (!(await canQueueTranscript(drizzle, userId, row))) {
@@ -305,7 +317,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
     }
-    if (row.callId) candidates.push(row)
+    if (row.callId || row.recordingOrgId) candidates.push(row)
     else skipped.push({ transcriptId: row.id, reason: 'unlinked' })
   }
   candidates.sort((a, b) => byCodeUnit(a.receivedAt, b.receivedAt) || byCodeUnit(a.id, b.id))

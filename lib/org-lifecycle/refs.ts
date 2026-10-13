@@ -217,6 +217,7 @@ export const PIPELINE_REFUSAL_TABLES: readonly { schemaKey: string; table: strin
   { schemaKey: 'deals', table: 'deals', label: 'deal' },
   { schemaKey: 'activities', table: 'activities', label: 'CRM activity' },
   { schemaKey: 'discoveryCalls', table: 'discovery_calls', label: 'discovery call' },
+  { schemaKey: 'meetingRecordings', table: 'meeting_recordings', label: 'call recording' },
   { schemaKey: 'contracts', table: 'contracts', label: 'contract' },
   { schemaKey: 'contractDocuments', table: 'contract_documents', label: 'contract document' },
   { schemaKey: 'proposals', table: 'proposals', label: 'proposal' },

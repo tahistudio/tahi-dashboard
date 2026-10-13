@@ -1478,3 +1478,76 @@ refresh grant worked for form, Basic and JSON token requests in a local probe,
 so no code cause was found. The worker now logs every refresh rejection with
 a reason code and answers 503 when the identity check cannot answer, so the
 next forced reconnect can be diagnosed from worker logs.
+
+## #071, REC.0 phase 1 is a manual browser audio recorder
+
+**Date:** 2026-10-13
+
+**Decision (Liam):** Build manual mic and Windows system-audio capture inside
+the studio dashboard, using Chromium browser permissions. Calendar detection,
+a desktop app and a call-joining bot are outside phase 1. Speakers identify
+the capture tracks: Liam is the microphone, Them is system audio. This does
+not distinguish individual people on the remote side or remove speaker echo.
+
+**Implementation:** Rotate two independent MediaRecorder streams about every
+30 seconds to keep each WebM file independently decodable. Upload durable
+chunks into existing R2 STORAGE through guarded reservation/proxy endpoints.
+Retain local completed files until acknowledged. PM review approved new
+meeting_recordings and meeting_recording_chunks tables (0113, all tables and
+indexes IF NOT EXISTS): existing call_transcripts cannot safely hold unique
+chunk sequences, retry/lease state or a client-only scope. Reuse every existing
+transcript column, with source manual and external_id recording:<id>. One
+finished transcript is eligible for suggestions after an explicit client or
+call choice. Partial transcripts never enter the suggester; retries replace
+chunk results rather than appending duplicates. Existing human approval owns
+all task and request writes. Audio deletion retains the transcript and scope.
+Once a finished recording has an explicit client, that client is kept: it may
+gain a call link for the same client. A truly unlinked recording may receive
+its first client. This prevents a suggester already reading client A from
+writing work against A after the transcript is moved to B. Organisation
+cleanup refuses retained recording rows rather than orphaning their scope.
+
+**Deploy prerequisite:** Apply migration 0113 BEFORE deployment: the suggestion
+sweep, rebuild, client delete/merge and ManyRequests cleanup read
+meeting_recordings. The main session will apply it to production before this
+branch merges. Deploying first breaks these existing paths with no such table.
+
+**Phase 1 review notes:**
+
+- P2-2: The browser tab drives transcription. Closing it stops processing until
+  Retry is clicked. This is acceptable for phase 1; a queue or cron comes later.
+- P2-3: Suggestions from a client-only recording (no callId) reach the dashboard
+  inbox and do not send Slack DMs.
+- P3-3: The microphone speaker label is hard-coded as "Liam".
+- P3-4: Unlinked recordings are visible to any scoped seat, following the
+  existing allow-if-any-scope rule. Revisit before the first scoped hire.
+- P3-6: Abandoned recordings keep their R2 audio under the open retention
+  question.
+
+**Model:** @cf/openai/whisper-large-v3-turbo on the existing Workers AI binding.
+Cloudflare lists it as available with base64 audio input and timed output
+segments. Select it for the larger Whisper generation and timed merging;
+real call accuracy remains unmeasured. Price checked 2026-10-13: the model
+page lists USD 0.000513 per audio minute (46.63 neurons per minute at USD
+0.011/1,000 neurons). That is USD 0.03078 per track hour, or USD 0.06156
+for an hour recorded on both tracks before retries, R2 and suggestion costs.
+The general pricing table rounds both Whisper variants to USD 0.0005 per
+minute; its precise neuron rate supports the model-page figure. The older
+@cf/openai/whisper page lists USD 0.000453 per minute (41.14 neurons) and
+the existing Slack implementation sends byte arrays. Turbo uses base64, a
+transcribe task, English, voice activity filtering and no previous-text
+conditioning. No fallback model is used silently.
+
+Sources: [Turbo model](https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/),
+[Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/),
+[Cloudflare chunk tutorial](https://developers.cloudflare.com/workers-ai/guides/tutorials/build-a-workers-ai-whisper-with-chunking/),
+[Whisper model](https://developers.cloudflare.com/ai/models/%40cf/openai/whisper/).
+
+**Open:** Choose an automatic audio-retention period after real-call validation.
+For now audio stays in R2 until an admin deletes it. Verify Windows audio
+sharing across Vivaldi/Chrome/Edge and Zoom/Teams/Meet, headphones/echo, input
+changes, browser Stop sharing, background tabs, sleep and network failures.
+Measure New Zealand speech and client/product-name accuracy. Migration 0113
+is written only; the main session owns its required production apply before
+merge. This review-fix session performs no production apply, deployment or
+secret change.

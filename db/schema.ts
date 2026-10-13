@@ -2103,6 +2103,57 @@ export const callTranscripts = sqliteTable('call_transcripts', {
   index('idx_call_transcripts_received').on(table.receivedAt),
 ])
 
+// Manual browser audio capture. Audio remains private in R2; D1 owns claims,
+// durable client scope and one stable transcript identity (migration 0113).
+export const meetingRecordings = sqliteTable('meeting_recordings', {
+  id: text('id').primaryKey().notNull(),
+  title: text('title').notNull(),
+  orgId: text('org_id'),
+  callKind: text('call_kind').$type<'discovery' | 'scheduled'>(),
+  callId: text('call_id'),
+  createdById: text('created_by_id').notNull(),
+  tracks: text('tracks').notNull(),
+  state: text('state').notNull().$type<import('@/lib/meeting-recordings-types').RecordingState>(),
+  startedAt: text('started_at').notNull(),
+  stoppedAt: text('stopped_at'),
+  durationMs: integer('duration_ms').notNull().default(0),
+  expectedChunks: text('expected_chunks'),
+  transcriptId: text('transcript_id'),
+  error: text('error'),
+  leaseToken: text('lease_token'),
+  leaseUntil: text('lease_until'),
+  deletedAt: text('deleted_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_meeting_recordings_transcript').on(table.transcriptId),
+  index('idx_meeting_recordings_org_created').on(table.orgId, table.createdAt),
+])
+
+export const meetingRecordingChunks = sqliteTable('meeting_recording_chunks', {
+  id: text('id').primaryKey().notNull(),
+  recordingId: text('recording_id').notNull().references(() => meetingRecordings.id),
+  track: text('track').notNull().$type<import('@/lib/meeting-recordings-types').RecordingTrack>(),
+  sequence: integer('sequence').notNull(),
+  startMs: integer('start_ms').notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  mimeType: text('mime_type').notNull(),
+  size: integer('size').notNull(),
+  storageKey: text('storage_key').notNull(),
+  uploadToken: text('upload_token').notNull(),
+  state: text('state').notNull().$type<import('@/lib/meeting-recordings-types').RecordingChunkState>(),
+  text: text('text'),
+  segments: text('segments'),
+  error: text('error'),
+  attempts: integer('attempts').notNull().default(0),
+  uploadedAt: text('uploaded_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_meeting_chunks_sequence').on(table.recordingId, table.track, table.sequence),
+  index('idx_meeting_chunks_recording_state').on(table.recordingId, table.state),
+])
+
 // ============================================================
 // TASK SUGGESTIONS (the approval gate, call notes to tasks Phase 1)
 // ============================================================

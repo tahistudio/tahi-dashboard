@@ -99,6 +99,28 @@ beforeEach(() => {
 afterEach(() => { fixture.close(); vi.unstubAllEnvs() })
 
 describe('rebuild permissions with real role resolution and SQLite', () => {
+  it.each([orgA, orgB])('checks the explicitly selected recording client %s before queueing', async orgId => {
+    fixture.insert(schema.callTranscripts, {
+      id: 'recorded-transcript', call_id: null, call_kind: null, source: 'manual',
+      external_id: 'recording:recorded-call', hash: 'h', text: 'Private recorded transcript',
+      received_at: at(), suggested_at: at(),
+    })
+    fixture.insert(schema.meetingRecordings, {
+      id: 'recorded-call', org_id: orgId, transcript_id: 'recorded-transcript', state: 'ready',
+    })
+    const initial = before()
+    const response = await rebuild(request({ transcriptIds: ['recorded-transcript'], readNow: false }))
+    expect(response.status).toBe(orgId === orgA ? 200 : 403)
+    if (orgId === orgA) {
+      await expect(response.json()).resolves.toMatchObject({ transcripts: 1, deferred: 1 })
+      const row = fixture.rows(schema.callTranscripts).find(item => item.id === 'recorded-transcript')
+      expect(row?.suggested_at).toBeNull()
+    } else {
+      expect(before()).toEqual(initial)
+      expect(writes()).toEqual([])
+    }
+  })
+
   it.each(['roleless', 'requests-only', 'tasks-only', 'revoked'])('denies %s before body parsing or business SQL', async user => {
     if (user === 'revoked') await fixture.database.update(schema.teamMemberRoles).set({ endedAt: at() }).where(eq(schema.teamMemberRoles.id, 'grant-revoked'))
     fixture.queries.length = 0

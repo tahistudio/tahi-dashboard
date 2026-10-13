@@ -24,7 +24,7 @@
  * two makes ties MORE likely, not less, which is exactly why the rule stays.
  */
 
-import { and, desc, eq, gte, isNull, lte } from 'drizzle-orm'
+import { and, desc, eq, gte, isNull, lte, type SQL } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -358,11 +358,20 @@ export async function linkTranscript(
   callKind: CallKind,
   callId: string,
   matchedBy: MatchedBy = 'manual',
+  writeGuard?: SQL,
 ): Promise<void> {
-  await database
+  await linkTranscriptStatement(database, id, callKind, callId, matchedBy, writeGuard)
+}
+
+/** The same link write can participate in an atomic D1 batch with recorder scope. */
+export function linkTranscriptStatement(
+  database: DrizzleDB, id: string, callKind: CallKind, callId: string,
+  matchedBy: MatchedBy = 'manual', writeGuard?: SQL,
+) {
+  return database
     .update(schema.callTranscripts)
     .set({ callKind, callId, matchedBy, unlinkedReason: null })
-    .where(eq(schema.callTranscripts.id, id))
+    .where(writeGuard ? and(eq(schema.callTranscripts.id, id), writeGuard) : eq(schema.callTranscripts.id, id))
 }
 
 export interface CallTranscriptRow {

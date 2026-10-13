@@ -778,3 +778,88 @@ was built in this batch. Vivaldi is saved as Liam's preferred browser.
 ## 2026-10-11, Opus review of the Codex batch and the next 20
 
 Liam asked for Codex's 9 to 11 October work to be checked. Three fresh-context Opus reviews (billing, CN.3 integration, permissions) passed it with notes; findings and the ranked next 20 are in docs/superpowers/plans/2026-10-11-next-20.md, built from the Sonnet inventory docs/superpowers/plans/2026-10-11-open-task-inventory.md (158 open items, 85 verify-only, 24 contradictions). The billing review found that the 15:00 UTC sync-stripe run, the first unattended pass on the corrected live key, would auto-create a new client for every unmatched Stripe customer (about 25 active orgs have no stripe_customer_id). Fixed by Opus in 962b184b (auto-create off unless opted in; unmatched money skipped as no_client_linked and listed in the cron log), checked by a fresh Opus review and the full suite (423 files, 7,534 tests), deployed green at 10:46 UTC. Working model agreed with Liam: Opus leads, Sonnet builds, Codex takes grunt work, reviews scale to stakes, fresh session per batch.
+
+## 2026-10-13, REC.0 phase 1 prepared locally, no production action
+
+Liam authorised a manual browser recorder inside the studio dashboard. Phase
+1 excludes calendar detection, a desktop app and a joining bot. Source adds
+/calls/record, separate rotating mic/system MediaRecorder files, local durable
+outbox, unique guarded R2 uploads, per-chunk Whisper turbo transcription,
+Liam/Them timestamp merge, explicit client/call linking, audio deletion and
+MCP read/link parity. Decision #071 records model cost, additive storage,
+client-lock rationale and the open retention period. Finished transcripts
+reuse call_transcripts and the existing human suggestion approval gate.
+
+Initial git status was clean at e57279902b8ae5f000dda2d181a6146aa576c9c0.
+Creating feat/rec0-manual-recorder failed: the sandbox cannot write the parent
+repository's shared .git/refs. Actual branch remains
+worktree-agent-af1035f88ebd4b3d9; no commit exists for this work. No push,
+deploy, production migration/data write or secret change occurred. Migration
+0113 is written, schema/runner registered, only executed by in-memory SQLite
+tests, not on production or the app's local D1 snapshot.
+
+Final local gates: type-check exit 0, CI-mode lint exit 0 with existing
+warnings, worker tsc exit 0, git diff --check exit 0. Standard Vitest config
+loading fails esbuild spawn EPERM. Ignored TypeScript/native-thread harness
+ran the full frozen suite: 442 files, 7870 tests, all passed in 119.10s.
+Earlier sweeps exposed missing cleanup/lifecycle test fixtures for the new
+table; repaired and targeted 81 tests passed before the final run. No flake
+was rerun away. Standard build fails spawn EPERM. A supplementary in-process
+webpack build compiled successfully in 42s, passed lint/types and reached
+static generation, then failed DataCloneError with worker threads; build is
+not passed. That process was stopped.
+
+Fresh QA and UIUX source reviews passed after lease/scope/atomic-link fixes,
+truthful deletion metadata, admin-only delete visibility, long-label wrapping,
+timer accessibility and dark contrast token refinements. No browser render or
+live sign-off: actual Windows mic/system audio, Zoom/Teams/Meet desktop calls,
+sharing-bar Stop, background/sleep/device/echo behaviour, deployed AI/R2,
+accuracy, 375/768/dark layouts and signed-in regression remain unverified.
+SPA history Back/Forward leave warnings also need proof. REC.0 stays open.
+Full file list, gate outputs, model sources, planned commit trailers and
+handoff details: docs/superpowers/audits/2026-10-13-rec0-phase1-report.md.
+
+## 2026-10-13, REC.0 Opus review fixes, uncommitted handoff
+
+Initial git status confirmed a clean feat/rec0-manual-recorder worktree at
+1608f4c6. The earlier branch/commit note above is superseded: phase 1 was
+committed as 1608f4c6, then reviewed by Opus with two P1 findings. Follow-up
+fixes stay uncommitted for the main session. No branch write, commit, push,
+deploy, migration apply, production data write or secret change occurs here.
+
+Migration 0113 must apply BEFORE deployment because the existing suggestion
+sweep, rebuild, client delete/merge and ManyRequests cleanup read
+meeting_recordings. The main session will apply it to production before merge.
+STATUS.md, TASKS.md, Decision #071 and SPECS/meeting-audio-capture.md record the
+deployment prerequisite and corrected branch/commit state.
+
+Decision #071 and the spec now record the accepted phase 1 limits: the browser
+tab drives transcription until it closes, after which Retry resumes it;
+client-only recordings send suggestions to the dashboard inbox without Slack
+DMs; the mic speaker label is hard-coded as Liam; unlinked recordings follow
+the existing allow-if-any-scope rule, to revisit before the first scoped hire;
+and abandoned recordings retain R2 audio under the open retention question.
+
+Code fixes: client deletion refuses retained recording rows before any
+destructive action. Merge already moves recordings to the surviving org;
+regression tests preserve chunk/R2 and transcript links. R2 writes use typed
+onlyIf: { etagDoesNotMatch: '*' }, verified against current official docs and
+workerd wildcard tests ([R2 API reference](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/#conditional-operations),
+[workerd tests](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/tests/r2-test.js)).
+The transcript guard returns 404 for a missing
+recording row, PATCH reports the actual discovery-mirror result, and deleted
+audio shows a neutral Audio deleted badge with confirmation that retains the
+transcript.
+
+Local gates: npm run type-check exit 0; CI=1 npm run lint exit 0 with existing
+repository warnings and no errors in touched files; worker tsc --noEmit exit
+0; git diff --check exit 0. Standard targeted Vitest was blocked by esbuild
+spawn EPERM. The sandbox runner with .wrangler/vitest-sandbox.config.mjs and
+--configLoader native passed all four touched files: admin-recording-chunks,
+patch-link, organisation delete and merge, 110 tests in 2.21s. Independent QA
+and UIUX source reviews pass; no browser proof is claimed. Review caught and
+fixed a cleanup-retry affordance: the administrator's Delete recording audio
+action remains available after a tombstone so an R2 failure can be retried.
+The main session reruns the full suite and build. REC.0 stays open: real
+Windows mic/system capture, call accuracy, background/device behaviour,
+375/768/dark layouts and the deployed signed-in round trip remain unverified.

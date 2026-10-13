@@ -1264,6 +1264,18 @@ export const TOOLS: ToolDef[] = [
     call_id: prop('string', 'Id of the call in that table'),
   }, ['id', 'call_kind', 'call_id']),
 
+  // Manual browser recordings: capture itself requires the dashboard browser.
+  tool('list_meeting_recordings', 'List manual call recordings visible to this studio identity, with their processing state and explicit client or call link. Recording capture happens only in the dashboard browser. Returns { items }.'),
+  tool('get_meeting_recording', 'Read a manual call recording, its chunk processing states and its saved transcript. Speaker labels are Liam for microphone audio and Them for system audio. Returns { recording, chunks, transcript }.', {
+    id: prop('string', 'Meeting recording id'),
+  }, ['id']),
+  tool('link_meeting_recording', 'Link a manual call recording to the client or call explicitly selected by the person. Pass either orgId, or callKind plus callId, never both. Never infer a client from transcript content. Validates call ownership and client access. Linking makes its saved transcript eligible for the existing suggestions approval flow; it never applies a task or request.', {
+    id: prop('string', 'Meeting recording id'),
+    orgId: prop('string', 'Explicitly selected client id; omit when linking to a call'),
+    callKind: { type: 'string', enum: ['discovery', 'scheduled'], description: 'Explicitly selected call table; requires callId and no orgId' },
+    callId: prop('string', 'Explicitly selected call id; requires callKind and no orgId'),
+  }, ['id']),
+
   // ── Lead rescore (batched, ICP-aware) ────────────────────────────────
   tool('leads_rescore_batch', 'Force-rescore a batch of leads with Haiku using the current ICP-aware rubric. Loop until scored=0 to drain the backlog. Any lead scoring >= enrichThreshold (default 60) gets queued for Sonnet full enrichment on the next cron tick. Use after the ICP doc is updated or the scoring prompt changes.', {
     limit: prop('number', 'Max leads to process this call (default 20, max 25)'),
@@ -2802,6 +2814,28 @@ export async function executeTool(
         callKind: args.call_kind,
         callId: args.call_id,
       }))
+
+    // Manual browser recordings. IDs are checked here too for direct dispatches.
+    case 'list_meeting_recordings':
+      return json(await apiGet('/api/admin/recordings', token))
+    case 'get_meeting_recording': {
+      const id = need('id')
+      assertSafeIdArgs({ id })
+      return json(await apiGet(`/api/admin/recordings/${id}`, token))
+    }
+    case 'link_meeting_recording': {
+      const id = need('id')
+      const orgId = s('orgId')
+      const callId = s('callId')
+      const callKind = s('callKind')
+      assertSafeIdArgs({ id, orgId, callId })
+      if (orgId && (callId || callKind)) throw new Error('Choose either a client or a call, not both')
+      if (!orgId && (!callId || !callKind)) throw new Error('Choose a client or provide both callKind and callId')
+      if (callKind && callKind !== 'discovery' && callKind !== 'scheduled') throw new Error("callKind must be 'discovery' or 'scheduled'")
+      return json(await apiWrite(`/api/admin/recordings/${id}/link`, token, 'PATCH', orgId
+        ? { orgId }
+        : { callKind, callId }))
+    }
 
     // ── Lead rescore ──────────────────────────────────────────────────
     case 'leads_rescore_batch': {

@@ -24,6 +24,8 @@ import { requireAccessToOrg, requireAccessToOrgOrPreClient } from '@/lib/require
 import { linkTranscript, parseCallKind, resolveCallOrgId } from '@/lib/call-transcripts'
 import { logAudit } from '@/lib/audit'
 import type { DB } from '@/db/d1'
+import { linkRecording, recordingTranscriptOrg, withRecordingContext } from '@/lib/meeting-recordings-server'
+import { RecordingError } from '@/lib/meeting-recordings'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -62,8 +64,21 @@ async function loadTranscript(database: D1, id: string) {
 async function guardTranscript(
   database: D1,
   userId: string | null,
-  row: { callKind: string | null; callId: string | null },
+  row: { callKind: string | null; callId: string | null; source: string; externalId: string },
 ): Promise<NextResponse | null> {
+  let recorder: Awaited<ReturnType<typeof recordingTranscriptOrg>>
+  try {
+    recorder = await recordingTranscriptOrg(database as unknown as DB, row)
+  } catch (error) {
+    if (error instanceof RecordingError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
+    throw error
+  }
+  if (recorder) {
+    const denied = await requireAccessToOrgOrPreClient(database, userId, recorder.orgId)
+    if (denied) return denied
+  }
   if (!row.callId) return requireAccessToOrgOrPreClient(database, userId, null)
   const kind = parseCallKind(row.callKind)
   if (!kind) return requireAccessToOrgOrPreClient(database, userId, null)
@@ -84,6 +99,10 @@ export async function GET(
 
   const row = await loadTranscript(database, id)
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  if (row.source === 'manual' && row.externalId.startsWith('recording:')) {
+    return withRecordingContext(req, row.externalId.slice('recording:'.length), async () => NextResponse.json({ transcript: row }))
+  }
 
   const denied = await guardTranscript(database, userId, row)
   if (denied) return denied
@@ -120,6 +139,16 @@ export async function PATCH(
   // transcript you could not otherwise open.
   const deniedSource = await guardTranscript(database, userId, row)
   if (deniedSource) return deniedSource
+
+  // Recorder transcripts keep durable client scope and links in one lease,
+  // including links made through the existing unlinked transcript picker.
+  if (row.source === 'manual' && row.externalId.startsWith('recording:')) {
+    const recorderId = row.externalId.slice('recording:'.length)
+    return withRecordingContext(req, recorderId, async context => {
+      const detail = await linkRecording(context, { callKind, callId })
+      return NextResponse.json({ ok: true, id, callKind, callId, mirrored: detail.mirrored, recording: detail.recording })
+    })
+  }
 
   const target = await resolveCallOrgId(database, callKind, callId)
   if (!target.found) {

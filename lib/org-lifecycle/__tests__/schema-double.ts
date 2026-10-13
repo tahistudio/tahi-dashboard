@@ -44,6 +44,7 @@ export const schemaDouble = {
   kanbanColumns: fakeTable('kanban_columns', ORG),
   contracts: fakeTable('contracts', ORG),
   discoveryCalls: fakeTable('discovery_calls', ORG),
+  meetingRecordings: fakeTable('meeting_recordings', ORG),
   scheduledCalls: fakeTable('scheduled_calls', ORG),
   services: fakeTable('services', ORG),
   deals: fakeTable('deals', ORG),
