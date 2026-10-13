@@ -1,4 +1,4 @@
--- REC.0 phase 1. Do not apply on production in this branch session.
+-- REC.0 phase 1. Apply BEFORE deploying recorder code: the suggestion sweep, rebuild, client delete/merge and ManyRequests cleanup read these tables.
 CREATE TABLE IF NOT EXISTS meeting_recordings (
   id text PRIMARY KEY NOT NULL, title text NOT NULL, org_id text,
   call_kind text, call_id text, created_by_id text NOT NULL,

@@ -1206,8 +1206,8 @@ scheduled; each needs a scope before building.
   independent 30-second tracks, durable chunk uploads/retries, Workers AI
   transcription and explicit client/call linking into the human approval
   inbox. Committed as 1608f4c6 on feat/rec0-manual-recorder, then reviewed by
-  Opus, with fixes prepared for a follow-up commit by the main session
-  (currently uncommitted). Migration 0113 is written but not applied; the main
+  Opus, with fixes in 989e31db (re-reviewed, PASS with notes).
+  Migration 0113 is written but not applied; the main
   session will apply it to production before merging because existing sweep,
   rebuild, client delete/merge and ManyRequests cleanup paths read the table.
   No push or deployment occurs in this review-fix session.

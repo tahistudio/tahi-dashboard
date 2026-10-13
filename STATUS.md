@@ -53,8 +53,8 @@ rate herself).
 ## Work in progress, 2026-10-11
 
 REC.0 phase 1 was committed as 1608f4c6 on feat/rec0-manual-recorder, then
-reviewed by Opus. Review fixes are prepared for a follow-up commit by the main
-session, currently uncommitted. The build adds a manual Windows
+reviewed by Opus. Review fixes are in 989e31db (re-reviewed, PASS with notes). The
+build adds a manual Windows
 Chromium mic/system recorder at /calls/record, durable chunk uploads,
 Whisper turbo transcription, explicit transcript linking and read/link MCP
 parity. This is not live. Additive migration 0113 is written and registered

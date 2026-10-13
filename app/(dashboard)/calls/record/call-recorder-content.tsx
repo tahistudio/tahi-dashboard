@@ -402,8 +402,8 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
     finally { setBusy(false) }
   }
 
-  async function deleteRecording(id: string) {
-    if (!window.confirm('Delete this recording audio? The saved transcript and recording details will remain.')) return
+  async function deleteRecording(id: string, hasTranscript: boolean) {
+    if (!window.confirm(hasTranscript ? 'Delete this recording audio? The saved transcript and recording details will remain.' : 'Delete this recording audio? There is no saved transcript yet, so only the recording details will remain.')) return
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -531,7 +531,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
             {!detail.recording.deletedAt && detail.recording.state === 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => { if (window.confirm('Finish this interrupted recording using its saved chunks? Audio since the last saved chunk may be missing.')) void recover(detail.recording.id, true) }}>Finish interrupted recording</TahiButton>}
             {!detail.recording.deletedAt && detail.recording.state !== 'ready' && detail.recording.state !== 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} iconLeft={<RefreshCw className="h-4 w-4 shrink-0" />} onClick={() => void recover(detail.recording.id)}>Retry saved audio and failed chunks</TahiButton>}
             {detail.recording.state === 'ready' && <Link href="/calls" className="tahi-focus-ring flex max-w-full items-center rounded-md px-3 py-2 text-sm hover:bg-[var(--color-bg-secondary)]" style={{ minHeight: '2.75rem', color: 'var(--color-link)' }}>Open calls and task suggestions</Link>}
-            {canDeleteAudio && <TahiButton variant="ghost" style={BUTTON_STYLE} disabled={disabled} iconLeft={<Trash2 className="h-4 w-4 shrink-0" />} onClick={() => void deleteRecording(detail.recording.id)}>Delete recording audio</TahiButton>}
+            {canDeleteAudio && !detail.recording.deletedAt && <TahiButton variant="ghost" style={BUTTON_STYLE} disabled={disabled} iconLeft={<Trash2 className="h-4 w-4 shrink-0" />} onClick={() => void deleteRecording(detail.recording.id, Boolean(detail.recording.transcriptId))}>Delete recording audio</TahiButton>}
           </div>
         </div>
       </Card>}
