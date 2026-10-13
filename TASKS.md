@@ -46,6 +46,8 @@ Next-20 item 5: Adds caller/state-bound signed previews, refreshed live Stripe G
 
 Next-20 item 6: Xero imports use exact nonempty contact ids only. Unlinked contacts are skipped and recorded in cron output, with no name-based assignment or automatic organisation creation. Real SQLite tests cover exact, substring, missing-id and repeat-run cases.
 
+Next-20 item 7: Provider 429, 500 and 529 errors defer the current transcript and remaining batch without suggested_at stamping, for either read. Permanent errors and existing timeout handling keep their prior semantics. Tests cover SDK status properties and text fallback.
+
 ## Execution update, 2026-10-11
 
 Liam approved the eight grouped priorities. Both batches are deployed at

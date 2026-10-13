@@ -998,8 +998,8 @@ describe('runSuggestionSweep', () => {
     expect(inserts.find(i => i.table === schema.taskSuggestions)).toBeUndefined()
   })
 
-  it('stamps the high-water mark even when the model call throws', async () => {
-    const boom = vi.fn(async () => { throw new Error('529 overloaded') })
+  it.each([429, 500, 529])('defers a transient provider %s without stamping the transcript', async status => {
+    const boom = vi.fn(async () => { throw Object.assign(new Error('provider unavailable'), { status }) })
     const { handle, updates } = makeDb([
       [TRANSCRIPT_ROW],
       [{ orgId: 'org-a', meetingType: null }],
@@ -1011,9 +1011,9 @@ describe('runSuggestionSweep', () => {
     const summary = await runSuggestionSweep(handle, { suggest: boom, now: new Date('2026-09-19T00:00:00Z') })
 
     expect(summary.inserted).toBe(0)
-    expect(summary.skipped[0]).toEqual({ transcriptId: 'ct-1', reason: 'suggester_failed: 529 overloaded' })
-    const stamp = updates.find(u => u.table === schema.callTranscripts)
-    expect((stamp!.set as { suggestedAt: string }).suggestedAt).toBe('2026-09-19T00:00:00Z')
+    expect(summary.skipped[0]).toEqual({ transcriptId: 'ct-1', reason: 'suggester_failed: provider unavailable' })
+    expect(summary.deferredIds).toEqual(['ct-1'])
+    expect(updates.find(u => u.table === schema.callTranscripts)).toBeUndefined()
   })
 
   it('returns snoozed suggestions to pending on its way out', async () => {
@@ -1299,18 +1299,28 @@ describe('runSuggestionSweep reads every call twice', () => {
   })
 
   it('writes the first read when the second one throws, and says so', async () => {
-    const suggest = twoReads([FAQ], new Error('529 overloaded'))
+    const suggest = twoReads([FAQ], new Error('invalid model response'))
     const { handle, updates } = makeDb(oneClientTranscript())
 
     const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
 
     expect(summary.inserted).toBe(1)
     expect(summary.skipped).toEqual([])
-    expect(summary.secondPass?.failed).toEqual([{ transcriptId: 'ct-1', reason: 'suggester_failed: 529 overloaded' }])
+    expect(summary.secondPass?.failed).toEqual([{ transcriptId: 'ct-1', reason: 'suggester_failed: invalid model response' }])
     // `ran` counts second reads that came back, so a thrown one is in
     // `failed` and nowhere else.
     expect(summary.secondPass?.ran).toBe(0)
     expect(updates.find(u => u.table === schema.callTranscripts)).toBeTruthy()
+  })
+
+  it.each([429, 500, 529])('leaves the transcript unread when the second read returns %s', async status => {
+    const suggest = twoReads([FAQ], new Error(`${status} provider unavailable`))
+    const { handle, updates } = makeDb(oneClientTranscript())
+    const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+    expect(summary.inserted).toBe(0)
+    expect(summary.deferredIds).toEqual(['ct-1'])
+    expect(summary.secondPass?.failed).toEqual([{ transcriptId: 'ct-1', reason: `suggester_failed: ${status} provider unavailable` }])
+    expect(updates.find(u => u.table === schema.callTranscripts)).toBeUndefined()
   })
 
   it('reads once, uncached, when the caller switches the second read off', async () => {

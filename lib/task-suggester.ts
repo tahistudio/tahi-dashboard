@@ -101,6 +101,12 @@ export class SuggesterTimeoutError extends Error {
   }
 }
 
+function transientModelError(error: unknown): boolean {
+  const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : NaN
+  return [429, 500, 529].includes(status)
+    || (error instanceof Error && /^(?:error[:\s]*)?(429|500|529)\b/i.test(error.message))
+}
+
 async function boundedRead<T>(read: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -1558,10 +1564,10 @@ export async function runSuggestionSweep(
     } catch (err) {
       // The summary has one slot for "this transcript produced nothing and
       // why", so a failure is reported there rather than in a field the
-      // contract does not have. The stamp still goes on.
+      // contract does not have. Transient failures remain unread for retry.
       const message = err instanceof Error ? err.message : String(err)
       summary.skipped.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
-      if (err instanceof SuggesterTimeoutError || (err instanceof Error && /timeout|timed out|aborted/i.test(err.message))) {
+      if (transientModelError(err) || err instanceof SuggesterTimeoutError || (err instanceof Error && /timeout|timed out|aborted/i.test(err.message))) {
         summary.deferredIds = transcripts.slice(index).map(t => t.id)
         summary.deferred = summary.deferredIds.length
         break
@@ -1583,8 +1589,8 @@ export async function runSuggestionSweep(
     // read's before the writer sees either, so both go through exactly one
     // dedupe. Skipped when the first read already filled the ceiling, since a
     // second read could add nothing, and when it would risk the budget. A
-    // failure here costs the second read only: the first is already in hand
-    // and is written regardless.
+    // Permanent failures keep the first read. A transient provider failure
+    // leaves this transcript unread so the next sweep can finish both reads.
     let drafts = result.suggestions
     const room = MAX_SUGGESTIONS - drafts.length
     if (secondPass.enabled) {
@@ -1607,6 +1613,11 @@ export async function runSuggestionSweep(
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           secondPass.failed.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
+          if (transientModelError(err)) {
+            summary.deferredIds = transcripts.slice(index).map(t => t.id)
+            summary.deferred = summary.deferredIds.length
+            break
+          }
         }
       }
     }

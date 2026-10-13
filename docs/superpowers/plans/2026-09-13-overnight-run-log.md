@@ -823,3 +823,12 @@ Xero imports use exact nonempty contact ids only. Unlinked contacts are skipped 
 Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
 
 Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+
+## 2026-10-13, next-20 item 7 prepared on the local branch
+
+Provider 429, 500 and 529 errors defer the current transcript and remaining batch without suggested_at stamping, for either read. Permanent errors and existing timeout handling keep their prior semantics. Tests cover SDK status properties and text fallback.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
