@@ -28,6 +28,16 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
 - An item only flips to `[x]` when the evidence names a commit AND a live
   observation. Merged with no live look stays `[~]` with the commit named.
 
+## Branch hardening, 2026-10-13
+
+Next-20 item 2 (M1) is implemented locally on fix/next20-items-2-7:
+edited suggestions cannot change their client or request, and task-update
+fields cannot reassign either link. SQLite scoped-seat regressions cover
+refused and permitted edits. This follows up T1.6/T1.16; their live-proof
+states remain open. Source and commits use isolated Git metadata inside the
+worktree because the shared Git directory is outside the writable sandbox.
+Nothing in this batch is pushed or deployed.
+
 ## Execution update, 2026-10-11
 
 Liam approved the eight grouped priorities. Both batches are deployed at

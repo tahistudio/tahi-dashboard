@@ -1380,6 +1380,22 @@ function parseProposal(proposal: string): Record<string, unknown> {
   }
 }
 
+/** Tweak edits the proposed work, never the client or request it belongs to. */
+export function proposalOverrideError(row: SuggestionRow, override: unknown): string | null {
+  if (!override || typeof override !== 'object' || Array.isArray(override)) {
+    return 'An edited proposal must be an object'
+  }
+  const edited = override as Record<string, unknown>
+  const original = parseProposal(row.proposal)
+  if (Object.hasOwn(edited, 'orgId') && edited.orgId !== row.orgId) {
+    return 'An edited proposal cannot change its client'
+  }
+  if ((edited.requestId ?? null) !== (original.requestId ?? null)) {
+    return 'An edited proposal cannot change its request'
+  }
+  return null
+}
+
 /** "status to in_progress, due date to 2026-10-02", for the bot line. */
 function describeFields(fields: Record<string, unknown>): string {
   const labels: Record<string, string> = {
@@ -1605,7 +1621,7 @@ export async function applySuggestion(
       const created = await createTaskRecord(drizzle, {
         title: typeof proposal.title === 'string' ? proposal.title : '',
         type: typeof proposal.type === 'string' ? proposal.type : undefined,
-        orgId: (proposal.orgId as string | null | undefined) ?? row.orgId ?? null,
+        orgId: row.orgId,
         requestId: (proposal.requestId as string | null | undefined) ?? null,
         description: (proposal.description as string | null | undefined) ?? null,
         priority: typeof proposal.priority === 'string' ? proposal.priority : undefined,
@@ -1618,7 +1634,10 @@ export async function applySuggestion(
       taskId = created.task.id
       description = `New task created: ${created.task.title}`
     } else if (row.kind === 'update_task') {
-      const fields = (proposal.fields && typeof proposal.fields === 'object' ? proposal.fields : {}) as TaskPatchInput
+      const fields = { ...(proposal.fields && typeof proposal.fields === 'object' ? proposal.fields : {}) } as TaskPatchInput
+      // Suggestion approval cannot reassign work through the system actor.
+      delete fields.orgId
+      delete fields.requestId
       const updated = await updateTaskRecord(drizzle, row.targetTaskId!, fields, actor)
       if (!updated.ok) return { ok: false, appliedTaskId: null, appliedRequestId: null, error: updated.failure.error }
       const note = typeof proposal.note === 'string' && proposal.note.trim() ? ` ${proposal.note.trim()}` : ''
@@ -1804,6 +1823,11 @@ export async function decideSuggestion(
 ): Promise<DecisionResult | null> {
   const row = await loadSuggestion(drizzle, id)
   if (!row) return null
+
+  if (decision.action === 'approve' && decision.proposalOverride !== undefined) {
+    const error = proposalOverrideError(row, decision.proposalOverride)
+    if (error) return { suggestion: row, changed: false, error, appliedTaskId: null, appliedRequestId: null }
+  }
 
   if (decision.action === 'reject' && row.status === 'rejected') {
     const reason = normaliseRejectReason(decision.reason)

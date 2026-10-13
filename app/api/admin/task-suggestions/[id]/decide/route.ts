@@ -30,6 +30,7 @@ import {
   guardSuggestion,
   loadSuggestion,
   normaliseRejectReason,
+  proposalOverrideError,
   snoozePreset,
   type DecisionInput,
   type DecisionVia,
@@ -82,6 +83,10 @@ export async function POST(
 
   let decision: DecisionInput
   if (body.action === 'approve') {
+    if (body.proposal !== undefined) {
+      const error = proposalOverrideError(row, body.proposal)
+      if (error) return NextResponse.json({ error }, { status: 400 })
+    }
     // `force` is only ever added when it is true: an approve that carries
     // `force: false` and one that carries nothing are the same decision, and
     // the row should record the same thing for both.

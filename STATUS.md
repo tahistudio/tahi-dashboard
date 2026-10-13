@@ -3,6 +3,14 @@
 > One-page snapshot of where the platform actually is. Update weekly.
 > Last updated: **2026-10-12** by Claude Code (per-person MCP connector with a designer profile LIVE; Liam to reconnect). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
+## Local branch hardening, 2026-10-13
+
+Next-20 item 2 is implemented on fix/next20-items-2-7, using isolated Git
+metadata in this worktree. M1 proposal identity and task-update protections
+have SQLite scoped-seat coverage. This is local source work, pending normal
+repository integration and live verification. No deployment or production
+data operation is authorised for this batch.
+
 ## Live 2026-10-12: per-person MCP connector (Decision #070)
 
 LIVE on production 2026-10-12 (NZ): dashboard 0870fb71 (Deploy dashboard

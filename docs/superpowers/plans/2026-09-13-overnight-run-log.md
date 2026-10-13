@@ -778,3 +778,12 @@ was built in this batch. Vivaldi is saved as Liam's preferred browser.
 ## 2026-10-11, Opus review of the Codex batch and the next 20
 
 Liam asked for Codex's 9 to 11 October work to be checked. Three fresh-context Opus reviews (billing, CN.3 integration, permissions) passed it with notes; findings and the ranked next 20 are in docs/superpowers/plans/2026-10-11-next-20.md, built from the Sonnet inventory docs/superpowers/plans/2026-10-11-open-task-inventory.md (158 open items, 85 verify-only, 24 contradictions). The billing review found that the 15:00 UTC sync-stripe run, the first unattended pass on the corrected live key, would auto-create a new client for every unmatched Stripe customer (about 25 active orgs have no stripe_customer_id). Fixed by Opus in 962b184b (auto-create off unless opted in; unmatched money skipped as no_client_linked and listed in the cron log), checked by a fresh Opus review and the full suite (423 files, 7,534 tests), deployed green at 10:46 UTC. Working model agreed with Liam: Opus leads, Sonnet builds, Codex takes grunt work, reviews scale to stakes, fresh session per batch.
+
+
+## 2026-10-13, next-20 item 2 prepared on the local branch
+
+M1 rejects edited proposal client/request changes at the route and shared decision library, binds new tasks to the stored client, and strips task-update reassignment fields. Real SQLite scoped-seat tests prove refusal and safe edits.
+
+Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
+
+Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
