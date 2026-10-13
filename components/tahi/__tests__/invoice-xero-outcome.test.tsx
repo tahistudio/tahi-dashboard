@@ -187,13 +187,15 @@ describe('Xero contact dialog confirmation', () => {
     expect(fetch).not.toHaveBeenCalled()
     const confirmation = renderXeroDialog(updated, org)
     for (const text of ['Replace current Xero contact?', currentId, contactId, 'Replace Xero link']) expect(confirmation).toContain(text)
-    expect(captured.confirmReplacement).not.toBeNull()
-    await captured.confirmReplacement?.()
+    const replaceButton = captured.buttons.get('Replace Xero link')
+    expect(replaceButton).toBeDefined()
+    replaceButton?.()
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
 
     expect(fetch).toHaveBeenCalledWith('/api/admin/integrations/xero/match-contacts', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orgId: client.id, xeroContactId: contactId, replace: true }),
     })
-    expect(updated).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(updated).toHaveBeenCalledOnce())
     expect(renderXeroDialog(updated, org)).toContain('Xero contact linked')
   })
   it('leaves the current link unchanged when replacement confirmation is cancelled', () => {
@@ -205,7 +207,9 @@ describe('Xero contact dialog confirmation', () => {
     renderXeroDialog(updated, org)
     captured.submit?.({ preventDefault: () => undefined })
     renderXeroDialog(updated, org)
-    captured.cancelReplacement?.()
+    const cancelButton = captured.buttons.get('Cancel replacement')
+    expect(cancelButton).toBeDefined()
+    cancelButton?.()
     expect(renderXeroDialog(updated, org)).not.toContain('Replace current Xero contact?')
     expect(fetch).not.toHaveBeenCalled()
     expect(updated).not.toHaveBeenCalled()
