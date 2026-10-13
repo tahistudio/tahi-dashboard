@@ -14,15 +14,12 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { runSchemaWatchdog } from '@/lib/schema-watchdog-agent'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const cronHeader = req.headers.get('x-cron-secret') ?? ''
-  const authHeader = req.headers.get('authorization') ?? ''
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
     const { orgId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

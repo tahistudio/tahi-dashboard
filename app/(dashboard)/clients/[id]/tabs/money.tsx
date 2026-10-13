@@ -22,6 +22,7 @@ import { DollarSign } from 'lucide-react'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import { SubBar } from '../_kit/chrome'
+import { StripeCustomerLink } from '../_kit/stripe-customer-link'
 import { DealsTab } from './deals'
 import { ProfitabilityTab } from './profitability'
 import { RevenueTab } from './revenue'
@@ -48,10 +49,12 @@ export function MoneyTab({
   clientId,
   org,
   canMoney,
+  onUpdated,
 }: {
   clientId: string
   org: Organisation
   canMoney: boolean
+  onUpdated: () => void
 }) {
   const [section, setSection] = useState<MoneySection>('revenue')
 
@@ -68,6 +71,7 @@ export function MoneyTab({
 
   return (
     <div className="flex flex-col" style={{ gap: '0.75rem' }}>
+      <StripeCustomerLink org={org} onUpdated={onUpdated} />
       <SubBar>
         <SegmentedControl
           role="tablist"

@@ -16,7 +16,7 @@
  */
 
 import { schema } from '@/db/d1'
-import { eq, sql, gte, isNotNull } from 'drizzle-orm'
+import { eq, sql, gte, isNotNull, ne } from 'drizzle-orm'
 import { callXeroAPI, callXeroAPIOrThrow, XeroAPIError } from '@/lib/xero'
 import {
   mapXeroInvoiceStatus,
@@ -849,6 +849,7 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
     const allOrgs = await database
       .select({ id: schema.organisations.id, name: schema.organisations.name, xeroContactId: schema.organisations.xeroContactId })
       .from(schema.organisations)
+      .where(ne(schema.organisations.status, 'archived'))
 
     const now = new Date().toISOString()
     let imported = 0
@@ -936,7 +937,17 @@ export async function importXeroInvoices(database: D1, page: number): Promise<Sy
 
       // Only an explicitly linked Xero identity can select a billing client.
       const contactId = inv.Contact?.ContactID
-      const exactMatch = contactId ? allOrgs.find(o => o.xeroContactId === contactId) : undefined
+      const exactMatches = contactId ? allOrgs.filter(o => o.xeroContactId === contactId) : []
+      if (exactMatches.length > 1) {
+        skipped++
+        results.push({
+          invoiceNumber: inv.InvoiceNumber,
+          status: 'ambiguous',
+          orgMatch: `Xero contact ${contactId} is linked to more than one client`,
+        })
+        continue
+      }
+      const exactMatch = exactMatches[0]
       if (!exactMatch) {
         skipped++
         results.push({

@@ -158,6 +158,14 @@ describe('scoped invoice ledger and export', () => {
 })
 
 describe('draft-only invoice DELETE', () => {
+  it.each(['DRAFT', ' draft ', ' Draft '])('claims a normalised %s status consistently with the read guard', async status => {
+    fixture.sqlite.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, 'a')
+    const response = await remove(request('invoices/a', 'DELETE'), context('a'))
+    expect(response.status).toBe(200)
+    expect(fixture.rows(schema.invoices).map(row => row.id)).toEqual(['b'])
+    expect(fixture.rows(schema.invoiceItems).map(row => row.invoice_id)).toEqual(['b'])
+    expect(fixture.errors).toEqual([])
+  })
   it.each(['paid', 'sent', 'written_off'])('preserves the invoice, items and rails when draft becomes %s after the read', async status => {
     const beforeItems = fixture.rows(schema.invoiceItems)
     const deleteRecord = fixture.database.delete.bind(fixture.database)

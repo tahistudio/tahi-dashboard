@@ -222,7 +222,7 @@ export async function listOffTrackEngagements(
 ): Promise<OffTrackEngagement[]> {
   if (scope.kind === 'none') return []
   const owned = scope.kind === 'some'
-    ? sql`coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))`
+    ? sql`(coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IS NULL OR coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)})))`
     : undefined
   const schedules = await drizzle
     .select({

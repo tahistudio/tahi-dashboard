@@ -3,7 +3,8 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, desc } from 'drizzle-orm'
+import { eq, and, desc, inArray, sql } from 'drizzle-orm'
+import { resolveAccessScoping } from '@/lib/access-scoping'
 
 // -- GET /api/admin/export/requests --
 // Returns requests as CSV.
@@ -24,6 +25,10 @@ export async function GET(req: NextRequest) {
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   const conditions = []
+  const allowedOrgIds = await resolveAccessScoping(drizzle, userId)
+  if (allowedOrgIds !== null) {
+    conditions.push(allowedOrgIds.length ? inArray(schema.requests.orgId, allowedOrgIds) : sql`0 = 1`)
+  }
   if (statusFilter && statusFilter !== 'all') {
     conditions.push(eq(schema.requests.status, statusFilter))
   }

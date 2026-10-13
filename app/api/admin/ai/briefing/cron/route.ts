@@ -1,3 +1,4 @@
+import { hasCronSecretAuth } from '@/lib/cron-runs'
 /**
  * POST /api/admin/ai/briefing/cron
  *
@@ -53,12 +54,11 @@ function currentNzDayOfWeek(): number {
 }
 
 export async function POST(req: NextRequest) {
-  const expected = process.env.TAHI_CRON_SECRET
-  const provided = req.headers.get('x-cron-secret')
+  const expected = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
   if (!expected) {
     return NextResponse.json({ error: 'TAHI_CRON_SECRET not configured' }, { status: 500 })
   }
-  if (!provided || provided !== expected) {
+  if (!hasCronSecretAuth(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -148,9 +148,7 @@ export async function POST(req: NextRequest) {
 // cached briefing was last produced (timestamp only) so a forced test run's
 // background generation can be confirmed through this same secret-gated route.
 export async function GET(req: NextRequest) {
-  const expected = process.env.TAHI_CRON_SECRET
-  const provided = req.headers.get('x-cron-secret')
-  if (!expected || provided !== expected) {
+  if (!hasCronSecretAuth(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

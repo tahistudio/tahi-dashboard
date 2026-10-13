@@ -21,7 +21,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 import { listBalances, listTransactions, AirwallexNotConfiguredError, getAirwallexToken } from '@/lib/airwallex'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { recordYieldHeld, YIELD_HOLDINGS_KEY } from '@/lib/yield-history'
 
 export const dynamic = 'force-dynamic'
@@ -31,10 +31,7 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
   // Auth: admin session OR cron secret.
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)
     if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

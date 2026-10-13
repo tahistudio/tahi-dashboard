@@ -1212,7 +1212,7 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
   }, [focusedId, orderedIds])
 
   const initialDraft: TaskFields | null = tweakTarget && tweakTarget.kind === 'create_task'
-    ? createProposalToTaskFields(tweakTarget.proposal as CreateTaskProposal)
+    ? createProposalToTaskFields(tweakTarget.proposal as CreateTaskProposal, tweakTarget.orgId)
     : null
 
   const requestInitialDraft: RequestInitialDraft | null = tweakRequestTarget && tweakRequestTarget.kind === 'create_request'
@@ -1226,6 +1226,7 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
           open={!!tweakTarget}
           onClose={() => setTweakTarget(null)}
           initialDraft={initialDraft}
+          clientReadOnly
           clients={clients}
           peopleList={peopleList}
           requests={requests}
@@ -1257,6 +1258,7 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
           onClose={() => setTweakRequestTarget(null)}
           isAdmin
           initialDraft={requestInitialDraft}
+          clientReadOnly
           onSubmitOverride={async draft => {
             const target = tweakRequestTarget
             setTweakRequestTarget(null)

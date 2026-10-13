@@ -67,6 +67,7 @@ export interface Organisation {
   invoiceChannel?: string | null
   /** When it is due: 'card' | 'net_7' | 'net_14' | 'net_30', or null. */
   paymentTerms?: string | null
+  stripeCustomerId?: string | null
   /** invoiceChannel resolved against the studio default; always a real rail. */
   effectiveInvoiceChannel?: string | null
   /**

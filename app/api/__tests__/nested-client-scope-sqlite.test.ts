@@ -18,6 +18,9 @@ import * as tracks from '@/app/api/admin/clients/[id]/tracks/route'
 import * as pm from '@/app/api/admin/clients/[id]/pm/route'
 import * as derive from '@/app/api/admin/clients/[id]/auto-derive/route'
 import * as brands from '@/app/api/admin/brands/[id]/route'
+import { POST as createBrand } from '@/app/api/admin/brands/route'
+import { GET as exportRequests } from '@/app/api/admin/export/requests/route'
+import { GET as exportTime } from '@/app/api/admin/export/time/route'
 import * as activities from '@/app/api/admin/activities/route'
 import * as activity from '@/app/api/admin/activities/[id]/route'
 import { PUT as reorder } from '@/app/api/admin/tracks/[trackId]/reorder/route'
@@ -161,6 +164,30 @@ describe.each(CASES)('$name uses the authenticated scoped seat', scenario => {
 })
 
 describe('nested targets cannot override the permitted client', () => {
+  it('permits a brand for an assigned client', async () => {
+    const response = await createBrand(req('POST', { name: 'Allowed brand', orgId: A }))
+    expect(response.status).toBe(201)
+    expect(fixture.rows(schema.brands).filter(row => row.name === 'Allowed brand')).toMatchObject([{ org_id: A }])
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('refuses a foreign brand without writing, regardless of recorded actor', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValue({
+      userId: 'user_member', orgId: 'org_tahi', sessionId: 'test',
+      mcpActor: { teamMemberId: 'super', clerkUserId: 'user_super', profile: 'full' },
+    })
+    const before = dataState()
+    expect((await createBrand(req('POST', { name: 'Foreign brand', orgId: B }))).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('requires the clients feature and an existing brand client', async () => {
+    const before = fixture.rows(schema.brands)
+    expect((await createBrand(req('POST', { name: 'Missing brand', orgId: 'missing' }))).status).toBe(404)
+    denyFeature('clients')
+    expect((await createBrand(req('POST', { name: 'Denied brand', orgId: A }))).status).toBe(403)
+    expect(fixture.rows(schema.brands)).toEqual(before)
+  })
   it('does not provision tracks for another client subscription', async () => {
     const before = fixture.rows(schema.tracks)
     const response = await tracks.POST(req('POST', { subscriptionId: 'sub-b', planType: 'scale' }), { params: Promise.resolve({ id: A }) })
@@ -249,6 +276,20 @@ describe('track reorder fences the parent and every child', () => {
 })
 
 describe('engagements use schedule features and client scope', () => {
+  it('includes pre-client deal schedules only for a seat with some client scope', async () => {
+    fixture.insert(schema.deals, { id: 'pre-client-deal', org_id: null, title: 'Opportunity' })
+    fixture.insert(schema.projectSchedules, { id: 'pre-client-schedule', org_id: null, deal_id: 'pre-client-deal', title: 'Opportunity', status: 'published' })
+    fixture.insert(schema.scheduleRows, { id: 'pre-client-row', schedule_id: 'pre-client-schedule', label: 'Deliverable', row_type: 'deliverable' })
+    fixture.insert(schema.tasks, { id: 'pre-client-task', org_id: null, schedule_row_id: 'pre-client-row', status: 'blocked' })
+    fixture.insert(schema.projectSchedules, { id: 'foreign-pre-client-schedule', org_id: B, deal_id: 'pre-client-deal', title: 'Foreign', status: 'published' })
+    fixture.insert(schema.scheduleRows, { id: 'foreign-pre-client-row', schedule_id: 'foreign-pre-client-schedule', label: 'Foreign', row_type: 'deliverable' })
+    const response = await delivery(req('GET', undefined, '?dealId=pre-client-deal'))
+    expect(response.status).toBe(200)
+    expect((await response.json() as { perSchedule: Array<{ scheduleId: string }> }).perSchedule.map(item => item.scheduleId)).toEqual(['pre-client-schedule'])
+    await fixture.database.delete(schema.teamMemberAccessOrgs).where(eq(schema.teamMemberAccessOrgs.accessId, 'scope'))
+    expect((await delivery(req('GET', undefined, '?dealId=pre-client-deal'))).status).toBe(403)
+    expect(fixture.errors).toEqual([])
+  })
   it.each(['orgId', 'dealId'])('guards delivery status by %s', async filter => {
     const allowed = filter === 'orgId' ? A : 'deal-a'
     const foreign = filter === 'orgId' ? B : 'deal-b'
@@ -301,6 +342,36 @@ describe('engagements use schedule features and client scope', () => {
     expect(await response.json()).toMatchObject({ engagement: { status: 'done', rowsDone: 1, rowsTotal: 1 }, offTrackRows: [] })
     const offTrackResponse = await offTrack(req('GET'))
     expect(await offTrackResponse.json()).toEqual({ engagements: [] })
+    expect(fixture.errors).toEqual([])
+  })
+})
+
+describe('CSV exports use the authenticated seat client scope', () => {
+  beforeEach(async () => {
+    fixture.insert(schema.permissions, { id: 'time-view', resource: 'time_entries', action: 'view' })
+    fixture.insert(schema.rolePermissions, { id: 'time-view', role_id: 'role-member', permission_id: 'time-view' })
+    for (const suffix of ['a', 'b']) {
+      await fixture.database.update(schema.requests).set({ title: `Request ${suffix}` }).where(eq(schema.requests.id, `request-${suffix}`))
+      fixture.insert(schema.timeEntries, { id: `time-${suffix}`, org_id: `org-${suffix}`, request_id: `request-${suffix}`, team_member_id: 'member', date: '2026-10-13', hours: 1, notes: `Time ${suffix}` })
+    }
+  })
+
+  it.each([
+    { handler: exportRequests, allowed: 'Request a', foreign: 'Request b' },
+    { handler: exportTime, allowed: 'Time a', foreign: 'Time b' },
+  ])('exports only assigned rows, even with foreign filters or privileged attribution', async ({ handler, allowed, foreign }) => {
+    vi.mocked(getRequestAuth).mockResolvedValue({
+      userId: 'user_member', orgId: 'org_tahi', sessionId: 'test',
+      mcpActor: { teamMemberId: 'super', clerkUserId: 'user_super', profile: 'full' },
+    })
+    const response = await handler(req('GET'))
+    expect(response.status).toBe(200)
+    const csv = await response.text()
+    expect(csv).toContain(allowed)
+    expect(csv).not.toContain(foreign)
+    expect((await (await handler(req('GET', undefined, `?orgId=${B}`))).text()).split('\n')).toHaveLength(1)
+    await fixture.database.delete(schema.teamMemberAccessOrgs).where(eq(schema.teamMemberAccessOrgs.accessId, 'scope'))
+    expect((await (await handler(req('GET'))).text()).split('\n')).toHaveLength(1)
     expect(fixture.errors).toEqual([])
   })
 })

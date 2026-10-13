@@ -998,7 +998,7 @@ describe('runSuggestionSweep', () => {
     expect(inserts.find(i => i.table === schema.taskSuggestions)).toBeUndefined()
   })
 
-  it.each([429, 500, 529])('defers a transient provider %s without stamping the transcript', async status => {
+  it.each([429, 500, 502, 503, 504, 529])('defers a transient provider %s without stamping the transcript', async status => {
     const boom = vi.fn(async () => { throw Object.assign(new Error('provider unavailable'), { status }) })
     const { handle, updates } = makeDb([
       [TRANSCRIPT_ROW],
@@ -1014,6 +1014,41 @@ describe('runSuggestionSweep', () => {
     expect(summary.skipped[0]).toEqual({ transcriptId: 'ct-1', reason: 'suggester_failed: provider unavailable' })
     expect(summary.deferredIds).toEqual(['ct-1'])
     expect(updates.find(u => u.table === schema.callTranscripts)).toBeUndefined()
+  })
+
+  it.each([500, 502, 503, 504, 'connection', 'gateway_timeout', 'connection_timeout'])('continues the batch after a first-read %s failure', async failure => {
+    const error = failure === 'gateway_timeout'
+      ? Object.assign(new Error('504 gateway timed out'), { status: 504 })
+      : failure === 'connection_timeout'
+        ? Object.assign(new Error('Connection timed out.'), { name: 'APIConnectionTimeoutError' })
+        : failure === 'connection'
+      ? Object.assign(new Error('Connection error.'), { name: 'APIConnectionError' })
+      : Object.assign(new Error('provider unavailable'), { status: failure })
+    const empty: SuggestResult = { suggestions: [], dropped: [], usage: { model: 'fixture', inputTokens: 0, outputTokens: 0 } }
+    const suggest = vi.fn().mockRejectedValueOnce(error).mockResolvedValueOnce(empty)
+    const { handle, updates } = makeDb([
+      [TRANSCRIPT_ROW, { ...TRANSCRIPT_ROW, id: 'ct-2' }],
+      [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+      [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+      [], [],
+    ])
+    const summary = await runSuggestionSweep(handle, { suggest, secondPass: false, now: new Date('2026-09-19T00:00:00Z') })
+    expect(suggest).toHaveBeenCalledTimes(2)
+    expect(summary).toMatchObject({ looked: 2, deferred: 1, deferredIds: ['ct-1'] })
+    expect(updates.filter(update => update.table === schema.callTranscripts)).toHaveLength(1)
+  })
+
+  it.each([429, 529])('stops the batch after a first-read %s limit', async status => {
+    const suggest = vi.fn().mockRejectedValue(Object.assign(new Error('provider limited'), { status }))
+    const { handle, updates } = makeDb([
+      [TRANSCRIPT_ROW, { ...TRANSCRIPT_ROW, id: 'ct-2' }],
+      [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+      [], [],
+    ])
+    const summary = await runSuggestionSweep(handle, { suggest, secondPass: false, now: new Date('2026-09-19T00:00:00Z') })
+    expect(suggest).toHaveBeenCalledTimes(1)
+    expect(summary).toMatchObject({ looked: 1, deferred: 2, deferredIds: ['ct-1', 'ct-2'] })
+    expect(updates.filter(update => update.table === schema.callTranscripts)).toHaveLength(0)
   })
 
   it('returns snoozed suggestions to pending on its way out', async () => {
@@ -1313,7 +1348,7 @@ describe('runSuggestionSweep reads every call twice', () => {
     expect(updates.find(u => u.table === schema.callTranscripts)).toBeTruthy()
   })
 
-  it.each([429, 500, 529])('leaves the transcript unread when the second read returns %s', async status => {
+  it.each([429, 500, 502, 503, 504, 529])('leaves the transcript unread when the second read returns %s', async status => {
     const suggest = twoReads([FAQ], new Error(`${status} provider unavailable`))
     const { handle, updates } = makeDb(oneClientTranscript())
     const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
@@ -1321,6 +1356,25 @@ describe('runSuggestionSweep reads every call twice', () => {
     expect(summary.deferredIds).toEqual(['ct-1'])
     expect(summary.secondPass?.failed).toEqual([{ transcriptId: 'ct-1', reason: `suggester_failed: ${status} provider unavailable` }])
     expect(updates.find(u => u.table === schema.callTranscripts)).toBeUndefined()
+  })
+
+  it.each([500, 502, 503, 504, 'connection', 429, 529])('handles a second-read %s failure at the right batch scope', async failure => {
+    const error = failure === 'connection'
+      ? Object.assign(new Error('Connection error.'), { name: 'APIConnectionError' })
+      : Object.assign(new Error('provider unavailable'), { status: failure })
+    const empty: SuggestResult = { suggestions: [], dropped: [], usage: { model: 'fixture', inputTokens: 0, outputTokens: 0 } }
+    const suggest = vi.fn().mockResolvedValueOnce(empty).mockRejectedValueOnce(error).mockResolvedValue(empty)
+    const { handle, updates } = makeDb([
+      [TRANSCRIPT_ROW, { ...TRANSCRIPT_ROW, id: 'ct-2' }],
+      [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+      [{ orgId: 'org-a', meetingType: null }], ...contextSelects(), NO_REJECTIONS,
+      [], [],
+    ])
+    const summary = await runSuggestionSweep(handle, { suggest, now: NOW_CN1C })
+    const batchLimited = failure === 429 || failure === 529
+    expect(suggest).toHaveBeenCalledTimes(batchLimited ? 2 : 4)
+    expect(summary.deferredIds).toEqual(batchLimited ? ['ct-1', 'ct-2'] : ['ct-1'])
+    expect(updates.filter(update => update.table === schema.callTranscripts)).toHaveLength(batchLimited ? 0 : 1)
   })
 
   it('reads once, uncached, when the caller switches the second read off', async () => {

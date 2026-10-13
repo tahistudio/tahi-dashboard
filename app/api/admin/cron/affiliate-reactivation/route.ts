@@ -23,7 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, eq, isNotNull, sql } from 'drizzle-orm'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { createNotification, resolveOwnerSetting } from '@/lib/notifications'
 
 export const dynamic = 'force-dynamic'
@@ -37,10 +37,7 @@ interface AffiliateAggregate {
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
     const { orgId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) {

@@ -26,7 +26,7 @@
  * may only export HTTP methods and config.
  */
 
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type { NextResponse } from 'next/server'
 import { schema, type DB } from '@/db/d1'
 import { logAudit } from '@/lib/audit'
@@ -188,6 +188,32 @@ function auditActorType(actor: TaskWriteActor): 'team_member' | 'system' {
   return actor.actorType
 }
 
+/** Delivery links must belong to the same client as the task. */
+async function guardDeliveryLinks(
+  drizzle: Drizzle,
+  orgId: string | null,
+  trackId: string | null | undefined,
+  scheduleRowId: string | null | undefined,
+): Promise<TaskWriteFailure | null> {
+  if (trackId) {
+    const [track] = await drizzle.select({ orgId: schema.subscriptions.orgId })
+      .from(schema.tracks)
+      .innerJoin(schema.subscriptions, eq(schema.tracks.subscriptionId, schema.subscriptions.id))
+      .where(eq(schema.tracks.id, trackId)).limit(1)
+    if (!track || track.orgId !== orgId) return { status: 400, error: 'Track must belong to the task client' }
+  }
+  if (scheduleRowId) {
+    const [row] = await drizzle.select({
+      orgId: sql<string | null>`coalesce(${schema.projectSchedules.orgId}, ${schema.deals.orgId})`,
+    }).from(schema.scheduleRows)
+      .innerJoin(schema.projectSchedules, eq(schema.scheduleRows.scheduleId, schema.projectSchedules.id))
+      .leftJoin(schema.deals, eq(schema.projectSchedules.dealId, schema.deals.id))
+      .where(eq(schema.scheduleRows.id, scheduleRowId)).limit(1)
+    if (!row || row.orgId !== orgId) return { status: 400, error: 'Schedule row must belong to the task client' }
+  }
+  return null
+}
+
 /**
  * Tell the assignee a task was handed to them.
  *
@@ -267,6 +293,9 @@ export async function createTaskRecord(
     const denied = await guardTargetOrg(drizzle, actor, links.orgId)
     if (denied) return { ok: false, failure: denied }
   }
+
+  const deliveryDenied = await guardDeliveryLinks(drizzle, links.orgId, input.trackId, input.scheduleRowId)
+  if (deliveryDenied) return { ok: false, failure: deliveryDenied }
 
   // Who the assignee IS, settled once, BEFORE the write: reading it after
   // meant a D1 failure answered 500 for a request whose task row already
@@ -472,6 +501,18 @@ export async function updateTaskRecord(
     updates.type = links.level
     updates.orgId = links.orgId
     updates.requestId = links.requestId
+  }
+
+  if (touchesLinks || patch.trackId || patch.scheduleRowId) {
+    const current = updates.orgId === undefined ? await loadTaskLinks(drizzle, taskId) : null
+    if (updates.orgId === undefined && !current) return { ok: false, failure: { status: 404, error: 'Task not found' } }
+    const orgId = updates.orgId === undefined ? current!.orgId : updates.orgId as string | null
+    const [existing] = touchesLinks ? await drizzle.select({ trackId: schema.tasks.trackId, scheduleRowId: schema.tasks.scheduleRowId })
+      .from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1) : []
+    const trackId = patch.trackId !== undefined ? patch.trackId : existing?.trackId
+    const scheduleRowId = patch.scheduleRowId !== undefined ? patch.scheduleRowId : existing?.scheduleRowId
+    const deliveryDenied = await guardDeliveryLinks(drizzle, orgId, trackId, scheduleRowId)
+    if (deliveryDenied) return { ok: false, failure: deliveryDenied }
   }
 
   // The before-state for the Slack thread line (CN.3), read only when a line

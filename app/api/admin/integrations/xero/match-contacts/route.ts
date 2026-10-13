@@ -3,7 +3,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -86,10 +86,20 @@ export async function PATCH(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
-  await database.update(schema.organisations).set({
+  const [org] = await database.select({ id: schema.organisations.id })
+    .from(schema.organisations).where(eq(schema.organisations.id, body.orgId)).limit(1)
+  if (!org) return NextResponse.json({ error: 'Organisation not found' }, { status: 404 })
+
+  // Claim the contact in one statement so concurrent confirmations cannot
+  // link the same Xero identity to different clients.
+  const linked = await database.update(schema.organisations).set({
     xeroContactId: body.xeroContactId,
     updatedAt: new Date().toISOString(),
-  }).where(eq(schema.organisations.id, body.orgId))
+  }).where(and(
+    eq(schema.organisations.id, body.orgId),
+    sql`NOT EXISTS (SELECT 1 FROM organisations AS linked WHERE linked.xero_contact_id = ${body.xeroContactId} AND linked.id <> ${body.orgId})`,
+  )).returning({ id: schema.organisations.id })
+  if (!linked.length) return NextResponse.json({ error: 'This Xero contact is already linked to another client.' }, { status: 409 })
 
   return NextResponse.json({ ok: true })
 }

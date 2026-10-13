@@ -47,7 +47,7 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { getGoogleAccessToken, listDriveFiles, exportDriveDocAsText } from '@/lib/google'
 import { describeUnparsedDoc, parseGeminiTitle, parseGeminiTranscript } from '@/lib/gemini-transcript-parser'
-import { logCronRun } from '@/lib/cron-runs'
+import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { MATCH_WINDOW_MS, findCallMatch, findFiledTranscript, parseCallKind, upsertTranscript } from '@/lib/call-transcripts'
 
 export const dynamic = 'force-dynamic'
@@ -67,10 +67,7 @@ interface DocResult {
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
-  const cronHeader = req.headers.get('x-cron-secret')
-  const authHeader = req.headers.get('authorization')
-  const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
-  const hasCronAuth = !!cronSecret && (cronHeader === cronSecret || authHeader === `Bearer ${cronSecret}`)
+  const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
     const { userId, orgId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) {

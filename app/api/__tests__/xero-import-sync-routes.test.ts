@@ -33,7 +33,9 @@ vi.mock('@/lib/xero-sync', () => ({
 }))
 
 vi.mock('@/lib/xero', () => ({ getValidXeroToken: vi.fn() }))
-vi.mock('@/lib/cron-runs', () => ({ logCronRun: vi.fn() }))
+vi.mock('@/lib/cron-runs', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/cron-runs')>()), logCronRun: vi.fn(),
+}))
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/server-auth'

@@ -27,6 +27,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import {
   decideSuggestion,
+  EDITED_REQUEST_CLIENT_ERROR,
   guardSuggestion,
   loadSuggestion,
   normaliseRejectReason,
@@ -123,6 +124,7 @@ export async function POST(
 
   const result = await decideSuggestion(drizzle, id, decision, { actorId: userId ?? '', via })
   if (!result) return NextResponse.json({ error: 'Suggestion not found' }, { status: 404 })
+  if (result.error === EDITED_REQUEST_CLIENT_ERROR) return NextResponse.json({ error: result.error }, { status: 400 })
 
   return NextResponse.json({
     suggestion: result.suggestion,

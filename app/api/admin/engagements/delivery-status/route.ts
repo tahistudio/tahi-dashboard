@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   }
   const scope = await scopedOrgIds({ userId, orgId })
   const owned = scope.kind === 'all' ? undefined : scope.kind === 'none' ? sql`0 = 1`
-    : sql`coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))`
+    : sql`(coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IS NULL OR coalesce(${schema.projectSchedules.orgId}, (SELECT org_id FROM deals WHERE id = ${schema.projectSchedules.dealId})) IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)})))`
 
   const schedules = await drizzle
     .select({

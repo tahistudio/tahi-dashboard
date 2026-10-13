@@ -21,8 +21,8 @@ function invoice(contactId: string | null, name: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   fixture = permissionSqlite([schema.organisations, schema.invoices, schema.invoiceItems])
-  fixture.insert(schema.organisations, { id: 'unlinked', name: 'Kowhai', xero_contact_id: null })
-  fixture.insert(schema.organisations, { id: 'linked', name: 'Different display name', xero_contact_id: 'contact-linked' })
+  fixture.insert(schema.organisations, { id: 'unlinked', name: 'Kowhai', status: 'active', xero_contact_id: null })
+  fixture.insert(schema.organisations, { id: 'linked', name: 'Different display name', status: 'active', xero_contact_id: 'contact-linked' })
 })
 afterEach(() => fixture.close())
 
@@ -57,6 +57,42 @@ describe('Xero importer identity matching over SQLite', () => {
     expect(fixture.rows(schema.invoices)).toEqual([expect.objectContaining({ org_id: 'linked', xero_invoice_id: 'xero-invoice' })])
     expect(fixture.rows(schema.invoiceItems)).toHaveLength(1)
     expect(fixture.rows(schema.organisations)).toEqual(before)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('skips an archived client even when its contact id matches exactly', async () => {
+    fixture.sqlite.prepare("UPDATE organisations SET status = 'archived' WHERE id = 'linked'").run()
+    vi.mocked(callXeroAPI).mockResolvedValue({ Invoices: [invoice('contact-linked', 'Kowhai')] } as never)
+    const before = fixture.rows(schema.organisations)
+
+    expect(await importXeroInvoices(fixture.database, 1)).toMatchObject({ body: {
+      imported: 0, skipped: 1, results: [{ status: 'no_client_linked' }],
+    } })
+    expect(fixture.rows(schema.invoices)).toEqual([])
+    expect(fixture.rows(schema.invoiceItems)).toEqual([])
+    expect(fixture.rows(schema.organisations)).toEqual(before)
+  })
+
+  it('skips an ambiguous contact linked to more than one active client', async () => {
+    fixture.insert(schema.organisations, { id: 'duplicate', name: 'Duplicate link', status: 'active', xero_contact_id: 'contact-linked' })
+    vi.mocked(callXeroAPI).mockResolvedValue({ Invoices: [invoice('contact-linked', 'Kowhai')] } as never)
+    const before = fixture.rows(schema.organisations)
+
+    expect(await importXeroInvoices(fixture.database, 1)).toMatchObject({ body: {
+      imported: 0, skipped: 1, results: [{ status: 'ambiguous', orgMatch: expect.stringContaining('contact-linked') }],
+    } })
+    expect(fixture.rows(schema.invoices)).toEqual([])
+    expect(fixture.rows(schema.invoiceItems)).toEqual([])
+    expect(fixture.rows(schema.organisations)).toEqual(before)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('ignores an archived duplicate when resolving the active contact link', async () => {
+    fixture.insert(schema.organisations, { id: 'archived-duplicate', name: 'Archived client', status: 'archived', xero_contact_id: 'contact-linked' })
+    vi.mocked(callXeroAPI).mockResolvedValue({ Invoices: [invoice('contact-linked', 'Kowhai')] } as never)
+
+    expect(await importXeroInvoices(fixture.database, 1)).toMatchObject({ body: { imported: 1, skipped: 0 } })
+    expect(fixture.rows(schema.invoices)).toEqual([expect.objectContaining({ org_id: 'linked' })])
     expect(fixture.errors).toEqual([])
   })
 })

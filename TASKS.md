@@ -28,25 +28,31 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
 - An item only flips to `[x]` when the evidence names a commit AND a live
   observation. Merged with no live look stays `[~]` with the commit named.
 
-## Branch hardening, 2026-10-13
+## Next-20 items 2 to 7 hardening, 2026-10-13
 
-Next-20 item 2 (M1) is implemented locally on fix/next20-items-2-7:
-edited suggestions cannot change their client or request, and task-update
-fields cannot reassign either link. SQLite scoped-seat regressions cover
-refused and permitted edits. This follows up T1.6/T1.16; their live-proof
-states remain open. Source and commits use isolated Git metadata inside the
-worktree because the shared Git directory is outside the writable sandbox.
-Nothing in this batch is pushed or deployed.
+Suggestion decisions keep the stored client immutable, permit same-client
+request links, and allow only supported task fields with team-member assignees.
+Task writes validate track and schedule ownership. Brand creation and request
+and time exports enforce the caller's client scope. Delivery rollups include
+pre-client deal schedules for seats with client access.
 
-Next-20 item 3: M2 guards all named handlers and their secondary links. Audit requires permission-management access; activities and engagements filter before aggregate reads. Includes constant-time cron secret checks, literal LIKE ESCAPE and archived-deal exclusion. The SQLite harness now preserves duplicate joined columns and exposes its database for race injection.
+Schedule child writes are parent-fenced. Invoice deletion atomically claims a
+normalised draft status. Stripe recovery pins the selected client and refuses
+duplicate links. Super admins can preview and confirm a customer link from the
+client Money tab. The MCP link_stripe_customer tool retains its 403 by design:
+Decision #070 authorises api-service, whose admin role is not super_admin.
+Recorded actors never upgrade that access.
 
-Next-20 item 4: Schedule child writes are parent-fenced. Invoice deletion atomically requires draft status and uses the existing FK cascade. Recovery returns 409 on client drift, pins importer writes to the chosen org, and prevents duplicate customer-link races. Import conflicts retry once, then skip.
+Xero pushes require an explicitly confirmed contact link. Contact linking is
+unique across clients; imports use exact ids, exclude archived clients and
+skip ambiguous links. All cron secret checks use the shared constant-time
+helper. Transcript server and connection errors defer only the affected call;
+429 and 529 still defer the remaining batch. A durable retry cap remains open
+because call_transcripts has no suitable retry or metadata field and this
+batch permits no migration.
 
-Next-20 item 5: Adds caller/state-bound signed previews, refreshed live Stripe GET checks, conditional apply, conflict refusal and real-actor audit recording. MCP tool validates ids and explicitly blocks designers. The existing api-service is admin rather than super_admin, so MCP retains its 403; apply requires a super-admin browser session. No actor is promoted for authorization.
-
-Next-20 item 6: Xero imports use exact nonempty contact ids only. Unlinked contacts are skipped and recorded in cron output, with no name-based assignment or automatic organisation creation. Real SQLite tests cover exact, substring, missing-id and repeat-run cases.
-
-Next-20 item 7: Provider 429, 500 and 529 errors defer the current transcript and remaining batch without suggested_at stamping, for either read. Permanent errors and existing timeout handling keep their prior semantics. Tests cover SDK status properties and text fallback.
+Source regression coverage is recorded in the run log. Deployment and signed-in
+proof are still required before the existing task states can be completed.
 
 ## Execution update, 2026-10-11
 
@@ -854,6 +860,11 @@ fixed.
   handlers (205 new route tests). The local CN.3 integration additionally
   fences mixed suggestion reads/decisions/rebuild/counts, old Slack deliveries,
   scoped invoice export and migration access. Signed-in role proof is pending.
+  Review follow-ups (log only): P3-7, clients/[id]/pm PUT lets a seat with
+  clients access grant a project_manager rule without canManagePermissions.
+  The review also identifies 21 other admin routes accepting orgId without
+  a recognised scoping helper; attach the review route inventory before
+  the follow-up audit. Both findings remain open under T1.6.
 
 - [ ] T1.7 (C4.3/C4.4) - [Ops/BE] Portal noindex + robots; WAF rate rules
   (60/min `/api/portal/*`, 20/min `/api/uploads/*`) or KV limiter.

@@ -101,10 +101,19 @@ export class SuggesterTimeoutError extends Error {
   }
 }
 
-function transientModelError(error: unknown): boolean {
+function modelErrorStatus(error: unknown): number {
   const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : NaN
-  return [429, 500, 529].includes(status)
-    || (error instanceof Error && /^(?:error[:\s]*)?(429|500|529)\b/i.test(error.message))
+  if (Number.isFinite(status) && status > 0) return status
+  const matched = error instanceof Error ? /^(?:error[:\s]*)?(429|500|502|503|504|529)\b/i.exec(error.message) : null
+  return matched ? Number(matched[1]) : NaN
+}
+
+function transientModelError(error: unknown): boolean {
+  const status = modelErrorStatus(error)
+  if ([429, 500, 502, 503, 504, 529].includes(status)) return true
+  return !Number.isFinite(status) && error instanceof Error
+    && (/APIConnection(?:Timeout)?Error/i.test(error.name)
+      || /connection error|connection (?:reset|refused|closed)|network error|fetch failed|failed to fetch|socket hang up|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(error.message))
 }
 
 async function boundedRead<T>(read: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
@@ -1491,6 +1500,11 @@ export async function runSuggestionSweep(
     secondPass,
   }
 
+  const defer = (ids: string[]): void => {
+    summary.deferredIds = [...new Set([...(summary.deferredIds ?? []), ...ids])]
+    summary.deferred = summary.deferredIds.length
+  }
+
   if (targeted && targeted.length === 0) {
     // Asked for nothing by name: not a licence to read the oldest five.
     return summary
@@ -1525,8 +1539,7 @@ export async function runSuggestionSweep(
     // unstamped, and first in line for the next run, which also reads
     // oldest first.
     if (readTimeout() <= 0 || (started > 0 && !fits(readsPerCall))) {
-      summary.deferredIds = transcripts.slice(index).map(t => t.id)
-      summary.deferred = summary.deferredIds.length
+      defer(transcripts.slice(index).map(t => t.id))
       break
     }
 
@@ -1567,10 +1580,14 @@ export async function runSuggestionSweep(
       // contract does not have. Transient failures remain unread for retry.
       const message = err instanceof Error ? err.message : String(err)
       summary.skipped.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
-      if (transientModelError(err) || err instanceof SuggesterTimeoutError || (err instanceof Error && /timeout|timed out|aborted/i.test(err.message))) {
-        summary.deferredIds = transcripts.slice(index).map(t => t.id)
-        summary.deferred = summary.deferredIds.length
-        break
+      const transient = transientModelError(err)
+      if (transient || err instanceof SuggesterTimeoutError || (err instanceof Error && /timeout|timed out|aborted/i.test(err.message))) {
+        if ([429, 529].includes(modelErrorStatus(err)) || !transient) {
+          defer(transcripts.slice(index).map(t => t.id))
+          break
+        }
+        defer([transcript.id])
+        continue
       }
       await stamp(database, transcript.id, nowIso)
       continue
@@ -1614,9 +1631,12 @@ export async function runSuggestionSweep(
           const message = err instanceof Error ? err.message : String(err)
           secondPass.failed.push({ transcriptId: transcript.id, reason: `suggester_failed: ${message}` })
           if (transientModelError(err)) {
-            summary.deferredIds = transcripts.slice(index).map(t => t.id)
-            summary.deferred = summary.deferredIds.length
-            break
+            if ([429, 529].includes(modelErrorStatus(err))) {
+              defer(transcripts.slice(index).map(t => t.id))
+              break
+            }
+            defer([transcript.id])
+            continue
           }
         }
       }

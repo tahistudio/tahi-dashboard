@@ -216,6 +216,15 @@ describe('create_task proposal <-> TaskFields', () => {
     expect(fields.subtasks).toEqual(['Draft it', 'Send for signature'])
   })
 
+  it('prefills Tweak from the row client when the proposal has no client', () => {
+    expect(createProposalToTaskFields({ ...proposal, orgId: null }, 'org1').orgId).toBe('org1')
+  })
+
+  it('keeps the row client even when a stale proposal names another one', () => {
+    expect(createProposalToTaskFields(proposal, 'org2').orgId).toBe('org2')
+    expect(createProposalToTaskFields(proposal, null).orgId).toBeNull()
+  })
+
   it('Tweak\'s save round-trips the edited fields back into a proposal', () => {
     const fields = createProposalToTaskFields(proposal)
     const edited: TaskFields = { ...fields, title: 'Send the signed contract', priority: 'urgent' }

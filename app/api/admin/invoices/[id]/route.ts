@@ -4,7 +4,7 @@ import { stripeSecretKey } from '@/lib/stripe-key'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema, type DB } from '@/db/d1'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { callXeroAPI } from '@/lib/xero'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { dispatchDomainEvent } from '@/lib/events'
@@ -631,7 +631,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const deleted = await drizzle.delete(schema.invoices).where(and(
     eq(schema.invoices.id, id),
     eq(schema.invoices.orgId, invoice.orgId),
-    eq(schema.invoices.status, 'draft'),
+    sql`lower(trim(${schema.invoices.status})) = 'draft'`,
   )).returning({ id: schema.invoices.id })
   if (!deleted.length) {
     return NextResponse.json({ error: 'Only draft invoices can be deleted' }, { status: 409 })

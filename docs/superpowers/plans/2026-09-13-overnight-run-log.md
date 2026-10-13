@@ -832,3 +832,43 @@ Provider 429, 500 and 529 errors defer the current transcript and remaining batc
 Local working-tree validation passed type-check, lint (existing warnings), 444 Vitest files / 8,003 tests, production compilation and prerender, and worker tsc. Native subprocesses are refused in this sandbox, so tests use the ignored in-process TypeScript runner and build uses the ignored thread/JSON-IPC compatibility preload. No schema change, push, deploy, live QA, secret operation or production data operation.
 
 Branch fix/next20-items-2-7 is held in .claude/next20-git because the shared Git metadata is read-only here. The final Git bundle carries all six item commits for normal repository integration. Existing task states are retained until deployment and live proof.
+
+## 2026-10-13, review fixes for next-20 items 2 to 7
+
+Reviewed branch fix/next20-items-2-7 at 73ddff69, clean before edits. Applied
+M1 brand feature/client scope checks and scoped request/time exports. Xero
+pushes now require confirmed contact links; match confirmations atomically
+refuse duplicate identities, and imports exclude archived clients and skip
+ambiguous links. Suggestions use a task field allowlist and team assignees,
+keep the row client fixed, permit same-client request links, and validate
+track/schedule ownership in shared task writes, including retained links on
+client moves. Client Money now has a super-admin Stripe preview/confirm action.
+Decision #070 keeps MCP customer linking refused for api-service; attribution
+never becomes an access input.
+
+All 17 remaining cron secret handlers use hasCronSecretAuth. Invoice DELETE
+claims lower(trim(status)) = 'draft'. Scoped delivery reads include pre-client
+deal schedules. TASKS.md and STATUS.md state the behavior without sandbox/Git
+mechanics. T1.6 records P3-7 permission granting and the review's 21 other
+orgId routes as open, log-only follow-ups.
+
+Provider 500/502/503/504 and statusless connection errors defer only the
+transcript and continue. 429/529 and local timeout/budget handling retain
+batch-wide deferral. The durable retry cap remains open: neither schema nor
+migrations has a suitable call_transcripts retry or metadata field. Content,
+linkage and completion fields were preserved; this batch authorises no
+migration.
+
+Gate: type-check, lint (existing warnings), worker tsc and 17 Vitest files /
+628 tests pass. CI=1 avoids the existing remote dev proxy during lint; the
+existing native-loader sandbox runner avoids esbuild spawn EPERM. Initial
+fixture typing and a timeout-priority edge were corrected before the final
+gate. Fresh QA and UIUX source reviews have no remaining findings.
+
+Local browser fixture: real Stripe action/preview components rendered at 375
+and 768 in light and dark, no horizontal overflow, long customer ids wrap;
+controls compute to 44 CSS pixels (43.996 at browser scaling). The entry/footer
+fixture uses shared primitives, not the mounted dialog interaction flow.
+Signed-in Tweak and Stripe dialog interaction, full suite, build, integration
+and live verification remain for the main session. Changes are left
+uncommitted as requested; existing task states remain unchanged.

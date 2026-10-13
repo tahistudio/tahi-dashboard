@@ -9,10 +9,6 @@ import { invoiceReference } from '@/lib/invoice-billing'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-interface XeroContactResponse {
-  Contacts: Array<{ ContactID: string; Name: string; EmailAddress?: string }>
-}
-
 interface XeroInvoiceResponse {
   Invoices: Array<{
     InvoiceID: string
@@ -68,14 +64,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invoiceId, invoiceIds, or orgId required' }, { status: 400 })
   }
 
-  // Fetch branding themes from Xero (for currency matching)
-  const themesRes = await callXeroAPI<{ BrandingThemes: XeroBrandingTheme[] }>('GET', '/BrandingThemes')
-  const themes = themesRes?.BrandingThemes ?? []
+  // Only contact-linked invoices can reach Xero, including read-only calls.
+  let themes: XeroBrandingTheme[] | null = null
 
   // Match branding theme by currency in name (e.g. "NZD Invoice", "GBP Template")
   function findThemeForCurrency(currency: string): string | undefined {
     const cur = currency.toUpperCase()
-    const match = themes.find(t => t.Name.toUpperCase().includes(cur))
+    const match = themes?.find(t => t.Name.toUpperCase().includes(cur))
     return match?.BrandingThemeID
   }
 
@@ -87,6 +82,7 @@ export async function POST(req: NextRequest) {
     wouldCall?: string
     payload?: unknown
     error?: string
+    matchContactsUrl?: string
   }> = []
   const now = new Date().toISOString()
 
@@ -120,7 +116,6 @@ export async function POST(req: NextRequest) {
       const [org] = await database
         .select({
           id: schema.organisations.id,
-          name: schema.organisations.name,
           xeroContactId: schema.organisations.xeroContactId,
         })
         .from(schema.organisations)
@@ -132,50 +127,22 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      // Resolve Xero contact: use stored xeroContactId, or search/create
-      let contactId = org.xeroContactId ?? null
-
+      // Names are client editable. Only the confirmed contact link identifies
+      // a billing client, and the match-contacts flow owns that link.
+      const contactId = org.xeroContactId
       if (!contactId) {
-        // Search by name — use throwing variant so a real API failure
-        // surfaces as a clear error instead of a silent null -> "not found" loop.
-        const contactRes = await callXeroAPIOrThrow<XeroContactResponse>(
-          'GET',
-          `/Contacts?where=Name=="${encodeURIComponent(org.name)}"`,
-        )
-
-        if (contactRes?.Contacts?.length) {
-          contactId = contactRes.Contacts[0].ContactID
-        } else {
-          // Get real email from contacts table
-          const [contact] = await database
-            .select({ email: schema.contacts.email })
-            .from(schema.contacts)
-            .where(eq(schema.contacts.orgId, org.id))
-            .limit(1)
-
-          const createRes = await callXeroAPIOrThrow<XeroContactResponse>('POST', '/Contacts', {
-            Contacts: [{
-              Name: org.name,
-              EmailAddress: contact?.email ?? undefined,
-            }],
-          })
-          contactId = createRes?.Contacts?.[0]?.ContactID ?? null
-        }
-
-        // Store xeroContactId for future use
-        if (contactId) {
-          try {
-            await database.update(schema.organisations).set({
-              xeroContactId: contactId,
-              updatedAt: now,
-            }).where(eq(schema.organisations.id, org.id))
-          } catch { /* column may not exist */ }
-        }
+        results.push({
+          invoiceId: invId,
+          status: 'error',
+          error: 'Link this client to a Xero contact first',
+          matchContactsUrl: '/api/admin/integrations/xero/match-contacts',
+        })
+        continue
       }
 
-      if (!contactId) {
-        results.push({ invoiceId: invId, status: 'error', error: 'Failed to resolve Xero contact' })
-        continue
+      if (themes === null) {
+        const themesRes = await callXeroAPI<{ BrandingThemes: XeroBrandingTheme[] }>('GET', '/BrandingThemes')
+        themes = themesRes?.BrandingThemes ?? []
       }
 
       // Get line items
