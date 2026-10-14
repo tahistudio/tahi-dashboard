@@ -75,7 +75,7 @@ vi.mock('drizzle-orm', () => {
     eq: (col: unknown, val: unknown): Op => ({ __op: 'eq', col, val }),
     ne: (col: unknown, val: unknown): Op => ({ __op: 'ne', col, val }),
     gte: (col: unknown, val: unknown): Op => ({ __op: 'gte', col, val }),
-    and: (...parts: unknown[]): Op => ({ __op: 'and', parts }),
+    and: (...parts: unknown[]): Op => ({ __op: 'and', parts: parts.filter(part => part !== undefined) }),
     inArray: (col: unknown, vals: unknown): Op => ({ __op: 'in', col, vals }),
     isNull: (col: unknown): Op => ({ __op: 'isNull', col }),
     desc: (col: unknown): Op => ({ __op: 'desc', col }),
@@ -174,6 +174,8 @@ describe('loadInboxThreads - what a client may never see', () => {
     const messageWhere = whereFor(fake, 'messages')
     expect(has(messageWhere, 'eq', 'messages.is_internal', false)).toBe(true)
     expect(has(messageWhere, 'isNull', 'messages.deleted_at')).toBe(true)
+    expect(has(messageWhere, 'eq', 'messages.org_id')).toBe(false)
+    expect((messageWhere?.parts ?? []).some(part => (part as { __sql?: boolean }).__sql)).toBe(false)
   })
 
   it('reads internal notes for the studio, but still never a deleted row', async () => {

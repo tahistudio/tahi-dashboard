@@ -31,7 +31,7 @@ vi.mock('@/lib/server-auth', () => ({
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 
 vi.mock('@/lib/permissions', () => ({
-  resolvePermissions: vi.fn(async () => ({ isSuperAdmin: state.isSuperAdmin })),
+  resolvePermissions: vi.fn(async () => ({ isAdmin: true, isSuperAdmin: state.isSuperAdmin })),
 }))
 
 vi.mock('@/lib/email-gate', () => ({

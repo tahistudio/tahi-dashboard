@@ -100,7 +100,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     ? new Map((await drizzle.select({ id: schema.teamMembers.id, name: schema.teamMembers.name, avatar: schema.teamMembers.avatarUrl }).from(schema.teamMembers).where(inArray(schema.teamMembers.id, memberIds))).map(m => [m.id, m]))
     : new Map()
   const contactMap = contactIds.length
-    ? new Map((await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(and(inArray(schema.contacts.id, contactIds), eq(schema.contacts.orgId, request.orgId)))).map(c => [c.id, c]))
+    ? new Map((await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(inArray(schema.contacts.id, contactIds))).map(c => [c.id, c]))
     : new Map()
 
   const participants = participantRows.map(p => ({

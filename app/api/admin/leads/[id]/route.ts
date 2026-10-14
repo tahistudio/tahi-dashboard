@@ -3,8 +3,9 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { lookupOrCreatePerson } from '@/lib/people'
+import { listCallsForParent } from '@/lib/calls'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -81,11 +82,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   // Discovery calls (pre-call + post-call). Newest first.
-  const calls = await database
-    .select()
-    .from(schema.discoveryCalls)
-    .where(eq(schema.discoveryCalls.leadId, id))
-    .orderBy(desc(schema.discoveryCalls.scheduledAt))
+  const calls = await listCallsForParent(database, 'lead', id, { userId, orgId })
 
   // Latest pending AI reply draft (if any). Single row per lead via the
   // dismiss-pending-on-new-draft invariant in the draft route.

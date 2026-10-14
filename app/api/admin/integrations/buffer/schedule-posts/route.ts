@@ -19,7 +19,7 @@
  *         Spreads across N days, postsPerDay per day, starting at
  *         the local time of startAt.
  *     { mode: 'explicit', dates: [ISO, ISO, ...] }
- *         Per-post explicit times — dates.length must equal posts.length.
+ *         Per-post explicit times (dates.length must equal posts.length).
  *
  * Returns:
  *   { scheduled: N, results: [{ index, postId, scheduledAt, error? }] }
@@ -29,7 +29,7 @@
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
-import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { createPost, listChannels, listOrganizations } from '@/lib/buffer'
 
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const token = process.env.BUFFER_API_KEY

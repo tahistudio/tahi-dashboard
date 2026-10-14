@@ -14,7 +14,7 @@
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { schema } from '@/db/d1'
-import { scopedOrgIds } from '@/lib/access-scope'
+import { scopedOrgIds, type OrgScope } from '@/lib/access-scope'
 import { isOrgInScope } from '../_scoping/org-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -24,8 +24,9 @@ type Auth = { userId: string | null; orgId: string | null }
 export async function denyIfDealOrgOutOfScope(
   auth: Auth,
   dealOrgId: string | null,
+  preparedScope?: OrgScope,
 ): Promise<NextResponse | null> {
-  const scope = await scopedOrgIds(auth)
+  const scope = preparedScope ?? await scopedOrgIds(auth)
   if (!isOrgInScope(scope, dealOrgId, 'allow-if-any-scope')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -37,6 +38,7 @@ export async function requireDealAccess(
   database: D1,
   auth: Auth,
   dealId: string,
+  preparedScope?: OrgScope,
 ): Promise<NextResponse | null> {
   const [deal] = await database
     .select({ orgId: schema.deals.orgId })
@@ -46,5 +48,5 @@ export async function requireDealAccess(
 
   if (!deal) return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
 
-  return denyIfDealOrgOutOfScope(auth, deal.orgId)
+  return denyIfDealOrgOutOfScope(auth, deal.orgId, preparedScope)
 }

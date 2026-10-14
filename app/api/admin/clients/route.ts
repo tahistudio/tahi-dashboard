@@ -1,3 +1,5 @@
+import { clientProjection } from '@/lib/client-billing-access'
+import { resolvePermissions, can } from '@/lib/permissions'
 import { createElement } from 'react'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
@@ -23,7 +25,8 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  const access = await resolvePermissions(await db(), { userId, orgId })
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients', access)
   if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
@@ -118,7 +121,7 @@ export async function GET(req: NextRequest) {
   }
 
   const orgsWithCounts = orgs.map(o => ({
-    ...o,
+    ...clientProjection(o, can(access, 'clients.billing_card')),
     openRequestCount: requestCounts[o.id] ?? 0,
   }))
 

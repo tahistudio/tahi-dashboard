@@ -1,7 +1,7 @@
 import { scopedOrgIds } from '@/lib/access-scope'
 import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
 /**
- * Discovery call helpers , shared logic for the per-parent call routes
+ * Discovery call helpers. Shared logic for the per-parent call routes
  * (/api/admin/leads/[id]/calls, /api/admin/deals/[id]/calls, etc).
  *
  * Calls are polymorphic: any of leadId / dealId / requestId / taskId /
@@ -51,7 +51,7 @@ function parentColumns(parent: CallParentType): {
 
 /** Create a discovery call attached to the given parent. Writes an
  *  activity row when the parent type has a matching column on activities
- *  (lead / deal / org). request/task activities are skipped for now ,
+ *  (lead / deal / org). request/task activities are skipped for now.
  *  those tables get their own comment-stream model, not the unified
  *  activities table. */
 export async function createCallForParent(

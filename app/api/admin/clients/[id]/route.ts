@@ -1,3 +1,4 @@
+import { clientProjection, clientBillingField } from '@/lib/client-billing-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -15,7 +16,7 @@ import {
 } from '@/lib/invoice-channel'
 import { PAYMENT_TERMS, isPaymentTerms } from '@/lib/invoice-billing'
 import { PLAN_TYPE_ERROR, normalisePlanType } from '@/lib/plan-type'
-import { resolvePermissions } from '@/lib/permissions'
+import { resolvePermissions, can } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import type { DB } from '@/db/d1'
 import {
@@ -40,7 +41,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  const access = await resolvePermissions(await db(), { userId, orgId })
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients', access)
   if (featureDenied) return featureDenied
 
   const { id } = await params
@@ -64,7 +66,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   // respected (skipped) inside applyBillingDerivation. Wrapped in try/catch
   // so a derivation failure never breaks the page load.
   try {
-    await applyBillingDerivation(drizzle as unknown as BillingDb, id)
+    if (can(access, 'clients.billing_card')) {
+      await applyBillingDerivation(drizzle as unknown as BillingDb, id)
+    }
   } catch (err) {
     console.warn('[clients/[id] GET] auto-derive failed:', err instanceof Error ? err.message : err)
   }
@@ -253,15 +257,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   return NextResponse.json({
-    org: {
+    org: clientProjection({
       ...org,
       ...billingExtras,
       // invoiceChannel + paymentTerms are already on `org`; this is the value
       // an invoice would actually use once the studio default is applied.
       effectiveInvoiceChannel: resolveInvoiceChannel(org.invoiceChannel, studioDefaultChannel),
-    },
+    }, can(access, 'clients.billing_card')),
     contacts,
-    subscription,
+    subscription: subscription ? clientProjection(subscription, can(access, 'clients.billing_card')) : subscription,
     tracks,
     recentRequests,
   })
@@ -273,7 +277,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  const access = await resolvePermissions(await db(), { userId, orgId })
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients', access)
   if (featureDenied) return featureDenied
 
   const { id } = await params
@@ -304,6 +309,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     invoiceChannel: string | null
     paymentTerms: string | null
   }>
+
+  if (Object.keys(body).some(clientBillingField) && !can(access, 'clients.billing_card')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const now = new Date().toISOString()
   const patch: Record<string, unknown> = { updatedAt: now }

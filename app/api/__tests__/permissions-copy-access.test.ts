@@ -53,6 +53,11 @@ vi.mock('@/lib/require-feature', () => ({
   requireFeature: vi.fn().mockResolvedValue(null),
 }))
 
+vi.mock('@/lib/super-admin-safety', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/super-admin-safety')>(),
+  acquireOwnerMutationLock: vi.fn().mockResolvedValue({ denied: null, release: vi.fn().mockResolvedValue(undefined) }),
+}))
+
 vi.mock('@/lib/audit', () => ({
   logAudit: vi.fn().mockResolvedValue(undefined),
 }))
@@ -124,7 +129,10 @@ vi.mock('@/lib/db', () => {
   }))
 
   return {
-    db: vi.fn().mockResolvedValue({ select, insert, update, delete: del }),
+    db: vi.fn().mockResolvedValue({
+      select, insert, update, delete: del,
+      batch: vi.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
+    }),
     __mock: { state },
   }
 })
@@ -134,6 +142,7 @@ import { POST } from '@/app/api/admin/permissions/copy-access/route'
 import { NextRequest } from 'next/server'
 import * as dbModule from '@/lib/db'
 import { logAudit } from '@/lib/audit'
+import { requireManagePermissions } from '@/lib/require-permission'
 
 const dbMock = (dbModule as unknown as { __mock: DbMockHandles }).__mock
 
@@ -274,7 +283,16 @@ describe('POST /api/admin/permissions/copy-access', () => {
     }
   })
 
-  it('syncs the legacy role column to admin when copying an admin-level role', async () => {
+  it('syncs the legacy role column to admin when a super admin copies an admin-level role', async () => {
+    const management: Awaited<ReturnType<typeof requireManagePermissions>> = {
+      denied: null,
+      access: {
+        userId: 'user_admin', orgId: 'org_tahi', audience: 'team', level: 'super_admin',
+        isAdmin: true, isSuperAdmin: true, canManagePermissions: true,
+        viewableResources: null, overrides: new Map(),
+      },
+    }
+    vi.mocked(requireManagePermissions).mockResolvedValueOnce(management).mockResolvedValueOnce(management)
     dbMock.state.queues = {
       team_members: [[{ id: 'tm_src', name: 'Source Sam' }], [{ id: 'tm_tgt', name: 'Target Tess' }]],
       feature_visibility: [[]],

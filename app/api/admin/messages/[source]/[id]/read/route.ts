@@ -26,15 +26,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Unknown thread' }, { status: 404 })
   }
 
-  const gate = await gateAdminMessages(req)
+  const gate = await gateAdminMessages(req, source)
   if (!gate.ok) return gate.response
-  const { database, scope, viewer } = gate.ctx
+  const { database, scope, viewer, requireRequestFeature } = gate.ctx
 
   // The owning org is read from the row, then scope-checked, so a cursor can
   // never be stamped on a client the caller is not allowed to see.
   if (source === 'channel') {
     const [conversation] = await database
-      .select({ id: schema.conversations.id, orgId: schema.conversations.orgId })
+      .select({ id: schema.conversations.id, orgId: schema.conversations.orgId, requestId: schema.conversations.requestId })
       .from(schema.conversations)
       .where(and(
         eq(schema.conversations.id, id),
@@ -42,6 +42,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       ))
       .limit(1)
     if (!conversation) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (conversation.requestId) {
+      const requestDenied = await requireRequestFeature()
+      if (requestDenied) return requestDenied
+    }
     const denied = refuseOutOfScope(scope, conversation.orgId)
     if (denied) return denied
     const lastReadAt = await markThreadRead(database, { source: 'channel', id: conversation.id, viewer })

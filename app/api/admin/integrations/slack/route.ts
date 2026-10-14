@@ -1,5 +1,6 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -54,7 +55,7 @@ export async function PUT(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const body = await req.json() as {
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const body = await req.json() as {

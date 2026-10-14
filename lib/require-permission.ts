@@ -11,6 +11,7 @@
 
 import { NextResponse } from 'next/server'
 import { resolvePermissions, can, type ResolvedAccess } from '@/lib/permissions'
+import { isTahiAdmin } from '@/lib/server-auth'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -19,7 +20,7 @@ export async function requireManagePermissions(
   auth: { userId: string | null; orgId: string | null },
 ): Promise<{ denied: NextResponse | null; access: ResolvedAccess }> {
   const access = await resolvePermissions(drizzle, auth)
-  if (!access.canManagePermissions) {
+  if (!auth.userId || !isTahiAdmin(auth.orgId) || !access.canManagePermissions) {
     return { denied: NextResponse.json({ error: 'Forbidden' }, { status: 403 }), access }
   }
   return { denied: null, access }

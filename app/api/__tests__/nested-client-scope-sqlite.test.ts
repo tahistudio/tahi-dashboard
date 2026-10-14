@@ -121,6 +121,9 @@ beforeEach(() => {
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_member', orgId: 'org_tahi', sessionId: 'test' })
   fixture.insert(schema.roles, { id: 'role-member', name: 'project_manager' })
   fixture.insert(schema.roles, { id: 'role-super', name: 'super_admin' })
+  fixture.insert(schema.roles, { id: 'role-viewer', name: 'viewer', is_system: 1 })
+  fixture.insert(schema.teamMembers, { id: 'viewer', clerk_user_id: 'user_viewer', name: 'Scoped viewer', role: 'member' })
+  fixture.insert(schema.teamMemberRoles, { id: 'viewer-role', team_member_id: 'viewer', role_id: 'role-viewer', ended_at: null })
   fixture.insert(schema.teamMembers, { id: 'member', clerk_user_id: 'user_member', name: 'Scoped member', role: 'member' })
   fixture.insert(schema.teamMembers, { id: 'super', clerk_user_id: 'user_super', name: 'Super admin', role: 'admin' })
   fixture.insert(schema.teamMemberRoles, { id: 'member-role', team_member_id: 'member', role_id: 'role-member', ended_at: null })
@@ -129,6 +132,12 @@ beforeEach(() => {
     fixture.insert(schema.permissions, { id: resource, resource, action: 'view' })
     fixture.insert(schema.rolePermissions, { id: resource, role_id: 'role-member', permission_id: resource })
   }
+  // Migration 0041 grants the real viewer every catalogue view permission.
+  for (const permission of fixture.rows(schema.permissions)) {
+    if (permission.action === 'view') fixture.insert(schema.rolePermissions, { id: 'viewer-' + String(permission.id), role_id: 'role-viewer', permission_id: String(permission.id), scope_type: 'all' })
+  }
+  fixture.insert(schema.teamMemberAccess, { id: 'viewer-scope', team_member_id: 'viewer', role: 'viewer', scope_type: 'specific_clients' })
+  fixture.insert(schema.teamMemberAccessOrgs, { access_id: 'viewer-scope', org_id: A })
   fixture.insert(schema.teamMemberAccess, { id: 'scope', team_member_id: 'member', role: 'task_handler', scope_type: 'specific_clients' })
   fixture.insert(schema.teamMemberAccessOrgs, { access_id: 'scope', org_id: A })
   for (const [org, suffix] of [[A, 'a'], [B, 'b']] as const) {
@@ -671,14 +680,14 @@ describe('T1.6 permission-granted seats still require the target client', () => 
     expect(dataState()).toEqual(before)
   })
 
-  it('redacts foreign contact metadata and foreign parent/child request titles', async () => {
+  it('preserves existing attached contact metadata while redacting foreign parent/child request titles', async () => {
     fixture.insert(schema.requestParticipants, { id: 'foreign-contact', request_id: 'request-a', participant_id: 'contact-b', participant_type: 'contact', role: 'follower' })
     await fixture.database.update(schema.requests).set({ parentRequestId: 'request-b' }).where(eq(schema.requests.id, 'request-a'))
     await fixture.database.update(schema.requests).set({ parentRequestId: 'request-a', title: 'Foreign child title' }).where(eq(schema.requests.id, 'request-b'))
     const response = await requestDetail(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
     expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({ parent: null, subRequests: [], participants: [{ name: null, email: null }] })
-    expect(await (await requestParticipants.GET(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })).json()).toMatchObject({ participants: [{ name: null, email: null }] })
+    expect(await response.json()).toMatchObject({ parent: null, subRequests: [], participants: [{ name: 'b', email: 'b@example.test' }] })
+    expect(await (await requestParticipants.GET(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })).json()).toMatchObject({ participants: [{ name: 'b', email: 'b@example.test' }] })
     expect(await (await subRequests(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })).json()).toEqual({ subRequests: [] })
     expect(fixture.errors).toEqual([])
   })
@@ -689,14 +698,13 @@ describe('T1.6 permission-granted seats still require the target client', () => 
     expect(fixture.rows(schema.requests).find(row => row.id === 'request-b')?.sub_position).toBe(7)
   })
 
-  it('does not disclose a foreign contact name from a legacy handoff pointer', async () => {
-    await fixture.database.update(schema.contacts).set({ name: 'Hidden foreign contact' }).where(eq(schema.contacts.id, 'contact-b'))
+  it('preserves the name on an existing legacy handoff pointer', async () => {
+    await fixture.database.update(schema.contacts).set({ name: 'Existing attached contact' }).where(eq(schema.contacts.id, 'contact-b'))
     await fixture.database.update(schema.requests).set({ waitingOnContactId: 'contact-b', waitingReason: 'approval', waitingSince: '2026-10-14T00:00:00Z' }).where(eq(schema.requests.id, 'request-a'))
     const response = await requestDetail(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
     expect(response.status).toBe(200)
     const body = await response.json() as { request: { waitingOn: { contactName: string | null } } }
-    expect(body.request.waitingOn.contactName).toBeNull()
-    expect(JSON.stringify(body)).not.toContain('Hidden foreign contact')
+    expect(body.request.waitingOn.contactName).toBe('Existing attached contact')
   })
 
   it('refuses creating or moving a request step below another request parent', async () => {
@@ -885,7 +893,7 @@ describe('T1.6 permission-granted seats still require the target client', () => 
       const inbox = await loadInboxThreads(fixture.database, { viewer, scope: { orgIds: [A], brandIds: null, audience: 'studio', orgScope }, channelsByOrg: new Map(), orgNames: new Map([[A, A]]), now: new Date('2026-10-14T00:00:00Z') })
       expect(JSON.stringify(inbox)).toContain('Legacy foreign preview')
       const clientThread = await loadThreadMessages(fixture.database, { source: 'request', id: 'request-a', orgId: A, viewer: { clerkUserId: 'client-user', domainId: null, userType: 'contact' }, audience: 'client', orgScope })
-      expect(clientThread.map(item => item.id)).toEqual(['allowed-message'])
+      expect(clientThread.map(item => item.id).sort()).toEqual(['allowed-message', 'foreign-message'])
     })
   })
 })

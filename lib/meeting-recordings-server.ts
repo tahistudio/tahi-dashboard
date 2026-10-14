@@ -6,6 +6,7 @@ import { schema, type DB } from '@/db/d1'
 import { getRequestAuth, isTahiAdmin, type RequestAuthResult } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAccessToOrgOrPreClient } from '@/lib/require-access'
+import { discoveryCallScopeCondition, requireDiscoveryCallAccess } from '@/lib/discovery-call-access'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { IMPERSONATE_ORG_COOKIE, resolvePreviewOrgId } from '@/lib/preview-cookie'
 import { attributedUserId } from '@/lib/mcp-actor'
@@ -89,8 +90,8 @@ async function speakerNames(database: DB, row: Pick<RecordingRow, 'createdById' 
   return recordingSpeakerNames(row.createdById, team, attendees, clientName)
 }
 
-export async function recordingDetail(database: DB, id: string): Promise<MeetingRecordingDetail> {
-  const row = await readRecording(database, id)
+export async function recordingDetail(database: DB, id: string, preparedRow?: RecordingRow): Promise<MeetingRecordingDetail> {
+  const row = preparedRow ?? await readRecording(database, id)
   const chunkRows = (await readChunks(database, id)).map(publicChunk)
   let text = mergeRecordingTranscript(chunkRows, await speakerNames(database, row))
   if (row.transcriptId) {
@@ -103,10 +104,19 @@ export async function recordingDetail(database: DB, id: string): Promise<Meeting
 
 export async function scopedRecordingDetail(context: RecordingContext, id: string): Promise<MeetingRecordingDetail> {
   if (context.auth.recorderDevice) throw new RecordingError('Unauthorised', 401)
-  const detail = await recordingDetail(context.database, id)
+  const row = await readRecording(context.database, id)
+  const parentDenied = await recordingCallAccess(context.database, context.auth, row)
+  if (parentDenied) throw new RecordingError('Forbidden', parentDenied.status)
+  const detail = await recordingDetail(context.database, id, row)
   const denied = await requireAccessToOrgOrPreClient(context.database, context.auth.userId, detail.recording.orgId)
   if (denied) throw new RecordingError('Forbidden', denied.status)
   return detail
+}
+
+async function recordingCallAccess(database: DB, auth: RequestAuthResult, row: Pick<RecordingRow, 'callKind' | 'callId'>) {
+  return row.callKind === 'discovery' && row.callId
+    ? requireDiscoveryCallAccess(database, auth, row.callId)
+    : null
 }
 
 /** Device responses never load transcript text, segments or chunk text. */
@@ -138,6 +148,8 @@ export async function withRecordingContext(
     if (id && auth.recorderDevice) await assertRecorderOwnership(database, auth as RecorderDeviceAuth, recordingId(id))
     const row = id ? await readRecording(database, recordingId(id)) : undefined
     if (row) {
+      const parentDenied = await recordingCallAccess(database, auth, row)
+      if (parentDenied) return parentDenied
       const denied = await requireAccessToOrgOrPreClient(database, auth.userId, row.orgId)
       if (denied) return denied
     }
@@ -193,6 +205,8 @@ export async function withRecordingLease<T>(context: RecordingContext, work: (ro
   }
   startHeartbeat()
   try {
+    const parentDenied = await recordingCallAccess(context.database, context.auth, claimed[0])
+    if (parentDenied) throw new RecordingError('Forbidden', parentDenied.status)
     const denied = await requireAccessToOrgOrPreClient(context.database, context.auth.userId, claimed[0].orgId)
     if (denied) throw new RecordingError('Forbidden', denied.status)
     const result = await work(claimed[0], token, extendLease)
@@ -225,6 +239,10 @@ async function choice(context: RecordingContext, value: unknown): Promise<{ orgI
     const kind = parseCallKind(body.callKind)
     if (!kind) throw new RecordingError('Choose a discovery or scheduled call.')
     const id = recordingId(body.callId)
+    if (kind === 'discovery') {
+      const parentDenied = await requireDiscoveryCallAccess(context.database, context.auth, id)
+      if (parentDenied) throw new RecordingError('Forbidden', parentDenied.status)
+    }
     const target = await resolveCallOrgId(context.database, kind, id)
     if (!target.found) throw new RecordingError('Call not found.', 404)
     const denied = await requireAccessToOrgOrPreClient(context.database, context.auth.userId, target.orgId)
@@ -352,8 +370,14 @@ export async function listRecordings(context: RecordingContext): Promise<Meeting
   }
   const scope = await scopedOrgIds(context.auth)
   if (scope.kind === 'none') return []
+  const callScope = discoveryCallScopeCondition(scope)
   const rows = await context.database.select().from(recordings)
-    .where(scope.kind === 'some' ? or(isNull(recordings.orgId), inArray(recordings.orgId, scope.orgIds)) : undefined)
+    .where(scope.kind === 'some' ? and(
+      or(isNull(recordings.orgId), inArray(recordings.orgId, scope.orgIds)),
+      sql`(${recordings.callKind} IS NULL OR ${recordings.callKind} <> 'discovery' OR ${recordings.callId} IS NULL OR EXISTS (
+        SELECT 1 FROM ${schema.discoveryCalls} WHERE ${schema.discoveryCalls.id} = ${recordings.callId} AND ${callScope}
+      ))`,
+    ) : undefined)
     .orderBy(desc(recordings.createdAt)).limit(100)
   const trayRows = rows.length ? await context.database.select({ id: schema.recorderRecordings.recordingId }).from(schema.recorderRecordings)
     .where(inArray(schema.recorderRecordings.recordingId, rows.map(row => row.id))) : []

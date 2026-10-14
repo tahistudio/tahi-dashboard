@@ -1581,3 +1581,31 @@ legacy business fixtures updated to state their intended admin/feature scope.
 Independent source review cleared the final diff. No commit, push, build,
 deploy or live production/browser proof is claimed. Integrating batch still
 owns merge/deploy and real scoped-seat proof; this work remains uncommitted.
+
+## 2026-10-14, T1.6 review repairs after FAILED 67594c29 (uncommitted)
+
+Started clean on chore/next20-n20d at 67594c29. Corrected the audit's original
+commit state and recorded all 24 requested items in
+docs/superpowers/audits/2026-10-14-t1-6-route-audit.md. Preserved scoped
+counts-only cron runs, existing attached contact names and client message
+visibility. Added privileged configuration/role gates, parent fences, time
+ownership/rate guards and billing projections, including read-side derivation
+permission. Deleted the Airwallex debug route; secrets never return in lists.
+
+Owner safety protects the last role and usable login, serialises mutations
+using existing settings, refreshes authority after locking and batches role
+replacement atomically. Real SQLite tests prove concurrency, rollback and
+revocation. The method walker verifies studio identity/alternate credentials
+and actual auth provenance, with negative cases for all six reviewer bypass
+reproductions. Independent source rechecks passed. H3 and remaining Low
+findings remain open, with the three explicitly requested Low fixes applied.
+
+Final fail-closed local gate: type-check zero errors, CI=1 lint zero errors
+(79 existing warnings), both MCP and cron-trigger worker tsc zero errors,
+sandbox Vitest 163 files / 3591 tests passed in 61.24 seconds, added-code rule
+scan and git diff --check passed. The 56 tests in the three named cron files
+pass with original assertions. Current inventory: 418 route files / 592
+handlers. Raw checks and exact test selection are under .claude/t1-6-review.
+
+No commit, push, deploy, build, migration, production-data operation, TASKS.md
+or STATUS.md edit. HEAD remains 67594c29. No live QA is claimed.

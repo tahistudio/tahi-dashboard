@@ -42,19 +42,25 @@ export interface AdminMessagesContext {
   userId: string
   scope: OrgScope
   viewer: InboxViewer
+  requireRequestFeature: () => Promise<NextResponse | null>
 }
 
 export type AdminMessagesGate =
   | { ok: false; response: NextResponse }
   | { ok: true; ctx: AdminMessagesContext }
 
-export async function gateAdminMessages(req: NextRequest): Promise<AdminMessagesGate> {
+export async function gateAdminMessages(req: NextRequest, source?: string): Promise<AdminMessagesGate> {
   const auth = await getRequestAuth(req)
   if (!isTahiAdmin(auth.orgId) || !auth.userId) {
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   }
-  const denied = await requireFeature(auth, MESSAGES_FEATURE_KEY)
+  const denied = await requireFeature(auth, source === 'request' ? [MESSAGES_FEATURE_KEY, 'requests'] : MESSAGES_FEATURE_KEY)
   if (denied) return { ok: false, response: denied }
+  let requestFeatureResult: Promise<NextResponse | null> | undefined
+  const requireRequestFeature = () => {
+    if (source === 'request') return Promise.resolve(null)
+    return requestFeatureResult ??= requireFeature(auth, 'requests')
+  }
 
   const database = (await db()) as DrizzleDB
   const scope = await scopedOrgIds({ userId: auth.userId, orgId: auth.orgId })
@@ -79,6 +85,7 @@ export async function gateAdminMessages(req: NextRequest): Promise<AdminMessages
       database,
       userId: auth.userId,
       scope,
+      requireRequestFeature,
       viewer: {
         clerkUserId: viewerUserId,
         domainId: member?.id ?? null,

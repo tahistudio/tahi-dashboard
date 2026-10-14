@@ -1,3 +1,5 @@
+import { NextRequest } from 'next/server'
+import { requireManualCronAdmin } from '@/lib/cron-admin-access'
 import { schema } from '@/db/d1'
 import { eq, and, sql } from 'drizzle-orm'
 import { withCronRun } from '@/lib/cron-runs'
@@ -18,7 +20,7 @@ import { nudgeStalledHandoffs } from '@/lib/request-handoff-nudge'
 // lib/request-handoff-nudge.ts, because a route.ts may only export HTTP verbs
 // and a scheduled mailer whose windows cannot be unit tested is a scheduled
 // mailer that spams a client.
-export const POST = withCronRun('delivery-watch', async (_req, database) => {
+const runCron = withCronRun('delivery-watch', async (_req, database) => {
   const engagements = await listOffTrackEngagements(database, new Date().toISOString())
 
   // Recipient = the configured default owner (same convention as other
@@ -80,3 +82,9 @@ export const POST = withCronRun('delivery-watch', async (_req, database) => {
     handoffsNudged: handoffs.nudged,
   }
 })
+
+export async function POST(req: NextRequest) {
+  const denied = await requireManualCronAdmin(req, 'requests')
+  if (denied) return denied
+  return runCron(req)
+}

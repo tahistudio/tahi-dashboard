@@ -1,5 +1,6 @@
 // Mint/delivery business fixtures have permission-management capability.
 vi.mock('@/lib/require-permission', () => ({ requireManagePermissions: vi.fn().mockResolvedValue({ denied: null }) }))
+vi.mock('@/lib/require-admin', () => ({ requireAdmin: vi.fn().mockResolvedValue(null) }))
 /**
  * POST /api/admin/onboarding-invites - minting and delivering a client invite.
  *

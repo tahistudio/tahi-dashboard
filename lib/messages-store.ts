@@ -106,6 +106,7 @@ function channelCursorId(viewer: InboxViewer): string {
 }
 
 export interface InboxRequestScope {
+  requestsEnabled?: boolean
   orgIds: readonly string[]
   /** Client only, and only when they have brand links. Null means no narrowing. */
   brandIds: readonly string[] | null
@@ -255,6 +256,7 @@ export async function loadInboxThreads(
 
   // ── requests in scope ──────────────────────────────────────────────────────
   const requestConditions = [inArray(schema.requests.orgId, orgIds)]
+  if (!isClient && scope.requestsEnabled === false) requestConditions.push(sql`0 = 1`)
   if (isClient) {
     // A client never sees a Tahi-internal request, and when they carry brand
     // links they only see their own brands. IN never matches NULL, so a
@@ -284,7 +286,7 @@ export async function loadInboxThreads(
   const requestIds = requestRows.map(r => r.id)
   const windowMessages: WindowMessage[] = []
   const unrestricted = !isClient && scope.orgScope?.kind === 'all'
-  const messageOrgFilter = unrestricted ? undefined : sql`${schema.messages.orgId} IN (SELECT value FROM json_each(${JSON.stringify(orgIds)}))`
+  const messageOrgFilter = isClient || unrestricted ? undefined : sql`${schema.messages.orgId} IN (SELECT value FROM json_each(${JSON.stringify(orgIds)}))`
 
   for (const slice of chunkThreadIds(requestIds)) {
     const conditions = [
@@ -489,7 +491,7 @@ export async function loadThreadMessages(
     input.source === 'request'
       ? eq(schema.messages.requestId, input.id)
       : eq(schema.messages.conversationId, input.id),
-    unrestricted ? undefined : !isClient && input.orgScope?.kind === 'none' ? sql`0 = 1`
+    isClient || unrestricted ? undefined : input.orgScope?.kind === 'none' ? sql`0 = 1`
       : !isClient && input.orgScope?.kind === 'some'
       ? sql`${schema.messages.orgId} IN (SELECT value FROM json_each(${JSON.stringify(input.orgScope.orgIds)}))`
       : eq(schema.messages.orgId, input.orgId),

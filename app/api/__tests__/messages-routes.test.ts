@@ -85,7 +85,7 @@ vi.mock('@/db/d1', () => ({
     contacts: { _table: 'contacts', id: 'id', orgId: 'org_id', clerkUserId: 'clerk_user_id', name: 'name' },
     teamMembers: { _table: 'team_members', id: 'id', clerkUserId: 'clerk_user_id', name: 'name' },
     organisations: { _table: 'organisations', id: 'id', name: 'name', status: 'status' },
-    conversations: { _table: 'conversations', id: 'id', orgId: 'org_id', type: 'type' },
+    conversations: { _table: 'conversations', id: 'id', orgId: 'org_id', type: 'type', requestId: 'request_id' },
     requests: { _table: 'requests', id: 'id', orgId: 'org_id', title: 'title', requestNumber: 'request_number', status: 'status', assigneeId: 'assignee_id', brandId: 'brand_id', isInternal: 'is_internal' },
     messages: { _table: 'messages' },
     voiceNotes: { _table: 'voice_notes' },
@@ -133,6 +133,7 @@ import { GET as portalThread, POST as portalSend } from '@/app/api/portal/messag
 import { POST as portalRead } from '@/app/api/portal/messages/[source]/[id]/read/route'
 import { GET as adminList } from '@/app/api/admin/messages/route'
 import { GET as adminThread, POST as adminSend } from '@/app/api/admin/messages/[source]/[id]/route'
+import { POST as adminRead } from '@/app/api/admin/messages/[source]/[id]/read/route'
 
 const mock = (dbModule as unknown as { __mock: { state: { queues: Record<string, Row[][]>; inserts: Array<{ table: string; row: Row }> } } }).__mock
 
@@ -413,6 +414,29 @@ describe('/api/admin/messages/<source>/<id>', () => {
     id: 'r1', orgId: 'org_a', title: 'Palette', requestNumber: 1049,
     status: 'in_progress', assigneeId: 'tm_other', brandId: 'brand_a', isInternal: false,
   }
+
+  it.each(['GET', 'POST', 'read'] as const)('requires requests as well as messages for request %s', async method => {
+    vi.mocked(requireFeature).mockImplementation(async (_auth, keys) => {
+      if (Array.isArray(keys) && keys.includes('requests')) return Response.json({ error: 'Forbidden' }, { status: 403 }) as never
+      return null
+    })
+    const request = method === 'GET' ? get('/api/admin/messages/request/r1') : post('/api/admin/messages/request/r1', { body: 'Denied' })
+    const handler = method === 'GET' ? adminThread : method === 'POST' ? adminSend : adminRead
+    expect((await handler(request, params('request', 'r1'))).status).toBe(403)
+    expect(requireFeature).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user_liam' }), ['messages', 'requests'])
+    expect(mock.state.inserts).toHaveLength(0)
+  })
+
+  it.each(['GET', 'POST', 'read'] as const)('requires requests for a request-linked channel %s', async method => {
+    vi.mocked(requireFeature).mockImplementation(async (_auth, key) => key === 'requests'
+      ? Response.json({ error: 'Forbidden' }, { status: 403 }) as never : null)
+    mock.state.queues = { conversations: [[{ id: 'conv_1', orgId: 'org_a', type: 'org_channel', requestId: 'r1' }]] }
+    const request = method === 'GET' ? get('/api/admin/messages/channel/conv_1') : post('/api/admin/messages/channel/conv_1', { body: 'Denied' })
+    const handler = method === 'GET' ? adminThread : method === 'POST' ? adminSend : adminRead
+    expect((await handler(request, params('channel', 'conv_1'))).status).toBe(403)
+    expect(requireFeature).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user_liam' }), 'requests')
+    expect(mock.state.inserts).toHaveLength(0)
+  })
 
   it('refuses a request outside the caller scope before reading a message', async () => {
     vi.mocked(scopedOrgIds).mockResolvedValue({ kind: 'some', orgIds: ['org_b'] })

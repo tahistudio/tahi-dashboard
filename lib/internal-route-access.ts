@@ -2,20 +2,26 @@ import { NextResponse } from 'next/server'
 import { sql, type SQL, type SQLWrapper } from 'drizzle-orm'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
-import { can, type ResolvedAccess } from '@/lib/permissions'
+import { can, resolvePermissions, type ResolvedAccess } from '@/lib/permissions'
+import { db } from '@/lib/db'
 import { safeIds } from '@/app/api/admin/_scoping/org-scope'
 import { schema } from '@/db/d1'
 import type { OrgScope } from '@/lib/access-scope'
-import type { RequestAuthResult } from '@/lib/server-auth'
+import { isTahiAdmin, type RequestAuthResult } from '@/lib/server-auth'
 
 /** Workspace-wide operations require an admin role, not just studio membership. */
 export async function requireStudioAdmin(
   auth: Pick<RequestAuthResult, 'userId' | 'orgId'>,
   feature: string,
 ): Promise<NextResponse | null> {
-  const denied = await requireFeature(auth, feature)
+  if (!auth.userId || !isTahiAdmin(auth.orgId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (auth.userId === 'api-service') return null
+  const access = await resolvePermissions(await db(), auth)
+  const denied = await requireFeature(auth, feature, access)
   if (denied) return denied
-  return requireAdmin(auth)
+  return requireAdmin(auth, access)
 }
 
 /** SQL fence suitable for Drizzle columns and raw-SQL aliases, before LIMIT. */

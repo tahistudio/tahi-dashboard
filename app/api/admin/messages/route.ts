@@ -31,7 +31,7 @@ import { gateAdminMessages, inboxOrgIds } from './_shared'
 export async function GET(req: NextRequest) {
   const gate = await gateAdminMessages(req)
   if (!gate.ok) return gate.response
-  const { database, scope, viewer } = gate.ctx
+  const { database, scope, viewer, requireRequestFeature } = gate.ctx
 
   const only = new URL(req.url).searchParams.get('orgId')
   const orgIds = await inboxOrgIds(database, scope, only)
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
   const { threads } = await loadInboxThreads(database, {
     viewer,
-    scope: { orgIds, brandIds: null, audience: 'studio', orgScope: scope },
+    scope: { orgIds, brandIds: null, audience: 'studio', orgScope: scope, requestsEnabled: !(await requireRequestFeature()) },
     channelsByOrg: channels,
     orgNames,
   })

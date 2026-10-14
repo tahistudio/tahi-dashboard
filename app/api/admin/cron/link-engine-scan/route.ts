@@ -1,3 +1,4 @@
+import { requireManualCronAdmin } from '@/lib/cron-admin-access'
 /**
  * POST /api/admin/cron/link-engine-scan
  *
@@ -98,6 +99,8 @@ export async function POST(req: NextRequest) {
   const t0 = Date.now()
   const auth = await assertCronAuth(req)
   if (!auth.ok) return auth.response!
+  const roleDenied = await requireManualCronAdmin(req, 'content_studio')
+  if (roleDenied) return roleDenied
 
   const url = new URL(req.url)
   const force = url.searchParams.get('force') === '1'

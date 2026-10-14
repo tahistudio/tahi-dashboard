@@ -19,10 +19,11 @@ type Row = Record<string, unknown>
 
 const state: {
   requestRows: Row[]
+  contactRows: Row[]
   updates: Array<{ table: string | undefined; patch: Row }>
   inserts: number
   selects: number
-} = { requestRows: [], updates: [], inserts: 0, selects: 0 }
+} = { requestRows: [], contactRows: [{ orgId: 'org_c' }], updates: [], inserts: 0, selects: 0 }
 
 // The Slack thread line (CN.3): armed only when the token is set, with the
 // queue recorded rather than deferred.
@@ -74,7 +75,7 @@ vi.mock('drizzle-orm', () => ({
 
 vi.mock('@/lib/db', () => {
   function chainFor(name: string | undefined) {
-    const rows = name === 'requests' ? state.requestRows : name === 'contacts' ? [{ orgId: 'org_c' }] : []
+    const rows = name === 'requests' ? state.requestRows : name === 'contacts' ? state.contactRows : []
     const chain = Promise.resolve(rows) as Promise<Row[]> & {
       where: () => typeof chain
       limit: () => typeof chain
@@ -127,6 +128,7 @@ describe('POST /api/admin/requests/bulk-assign', () => {
     state.requestRows = [{ id: 'req1', orgId: 'org_c', title: 'New homepage', requestNumber: 4 }]
     state.updates = []
     state.inserts = 0
+    state.contactRows = [{ orgId: 'org_c' }]
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
   })
 
@@ -152,6 +154,24 @@ describe('POST /api/admin/requests/bulk-assign', () => {
     expect(res.status).toBe(200)
     expect(state.updates.filter(u => u.table === 'requests')).toHaveLength(0)
   })
+
+  it('skips a missing contact with a reason and still applies valid items', async () => {
+    state.contactRows = []
+    const res = await POST(makePost({
+      requestIds: ['req1'],
+      participants: [
+        { participantId: 'missing-contact', participantType: 'contact', role: 'follower' },
+        { participantId: 'tm1', participantType: 'team_member', role: 'assignee' },
+      ],
+    }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      added: 1, skipped: 1, invalid: 0,
+      skippedItems: [{ requestId: 'req1', participantId: 'missing-contact', reason: 'Contact not found' }],
+    })
+    expect(state.inserts).toBe(1)
+    expect(state.updates.filter(update => update.table === 'requests')[0].patch.assigneeId).toBe('tm1')
+  })
 })
 
 describe('POST /api/admin/requests/bulk-assign, telling the people', () => {
@@ -160,6 +180,7 @@ describe('POST /api/admin/requests/bulk-assign, telling the people', () => {
     state.requestRows = [{ id: 'req1', orgId: 'org_c', title: 'New homepage', requestNumber: 4 }]
     state.updates = []
     state.inserts = 0
+    state.contactRows = [{ orgId: 'org_c' }]
     process.env.NEXT_PUBLIC_TAHI_ORG_ID = 'org_tahi'
   })
 

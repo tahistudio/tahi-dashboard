@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import type { DB } from '@/db/d1'
 import { getRequestAuth, isTahiAdmin, type RequestAuthResult } from '@/lib/server-auth'
 import { resolvePermissions } from '@/lib/permissions'
-import { attributedTeamMemberId, attributedUserId } from '@/lib/mcp-actor'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { hashRecorderSecret, isRecorderDeviceRequest, RECORDER_TOKEN_PREFIX, RecorderDeviceAuthError } from '@/lib/recorder-device-auth'
 import { isClerkUserInTahiOrg } from '@/lib/mcp-profile-server'
 import { logAudit } from '@/lib/audit'
@@ -21,7 +21,7 @@ export class RecorderDevicesError extends Error {
 
 interface DevicesContext { database: DB; auth: RequestAuthResult; teamMemberId: string }
 
-/** Authorize the caller first. A verified MCP actor only scopes their own rows. */
+/** Authorize the caller first, then select their own device account. */
 export async function withRecorderDevicesContext(
   req: NextRequest,
   work: (context: DevicesContext) => Promise<NextResponse>,
@@ -38,10 +38,11 @@ export async function withRecorderDevicesContext(
     }
     const database = await db()
     if (!(await resolvePermissions(database, auth)).isAdmin) throw new RecorderDevicesError('Forbidden', 403)
-    const actorMemberId = attributedTeamMemberId(auth)
-    const [member] = actorMemberId
-      ? await database.all<{ id: string }>(sql`SELECT id FROM team_members WHERE id = ${actorMemberId} LIMIT 1`)
-      : await database.all<{ id: string }>(sql`SELECT id FROM team_members WHERE clerk_user_id = ${auth.userId} LIMIT 1`)
+    // Only a verified service call selects the MCP person's device account.
+    // A browser caller always owns the account linked to the authenticated user.
+    const ownerUserId = auth.userId === 'api-service' && auth.mcpActor
+      ? auth.mcpActor.clerkUserId : auth.userId
+    const [member] = await database.all<{ id: string }>(sql`SELECT id FROM team_members WHERE clerk_user_id = ${ownerUserId} LIMIT 1`)
     if (!member) throw new RecorderDevicesError('A linked team member is required.', 403)
     return work({ database, auth, teamMemberId: member.id })
   })

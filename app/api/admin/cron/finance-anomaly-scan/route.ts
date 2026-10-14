@@ -1,3 +1,4 @@
+import { requireManualCronAdmin } from '@/lib/cron-admin-access'
 /**
  * POST /api/admin/cron/finance-anomaly-scan
  *
@@ -38,6 +39,8 @@ export async function POST(req: NextRequest) {
   const t0 = Date.now()
   const auth = await assertCronAuth(req)
   if (!auth.ok) return auth.response!
+  const roleDenied = await requireManualCronAdmin(req, 'financial_reports')
+  if (roleDenied) return roleDenied
 
   const database = await db() as unknown as D1
 

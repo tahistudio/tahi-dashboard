@@ -7,7 +7,6 @@ import { requireStudioAdmin } from '@/lib/internal-route-access'
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
-import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -150,8 +149,6 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const roleDenied = await requireStudioAdmin({ userId, orgId }, 'settings')
   if (roleDenied) return roleDenied
-  const denied = await requireFeature({ userId, orgId }, 'settings')
-  if (denied) return denied
 
   const database = await db() as unknown as D1
 

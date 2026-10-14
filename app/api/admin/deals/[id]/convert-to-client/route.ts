@@ -1,5 +1,7 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireAdmin } from '@/lib/require-admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -112,6 +114,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       .limit(1)
 
     if (contactOrg) {
+      const contactOrgDenied = await requireAccessToOrg(database, userId, contactOrg.id)
+      if (contactOrgDenied) return contactOrgDenied
       const now = new Date().toISOString()
       // Activate the org if not already active
       if (contactOrg.status !== 'active') {
@@ -134,6 +138,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
     }
   }
+
+  const createDenied = await requireAdmin({ userId, orgId })
+  if (createDenied) return createDenied
 
   // The plan is whatever the caller names, and nothing otherwise. This used to
   // read a retainer deal as a Maintain plan and mint an active subscription

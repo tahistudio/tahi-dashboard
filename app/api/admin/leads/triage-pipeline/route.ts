@@ -21,7 +21,7 @@ import { lookupOrCreatePerson } from '@/lib/people'
  *     deal contact (or fall back to the deal title parsed as a name)
  *   - Insert an activity stamped "Demoted from pipeline" on the lead
  *   - Delete the deal (cascades dealContacts + activities tied to
- *     the dealId , note: activities can be lead OR deal scoped, so
+ *     the dealId. note: activities can be lead OR deal scoped, so
  *     deleting a deal only nukes activities that weren't also lead
  *     activities by definition)
  *
@@ -251,8 +251,8 @@ export async function POST(req: NextRequest) {
         type: 'lead_demoted',
         title: `Demoted from pipeline (was in ${c.stageName} stage)`,
         description: c.reason === 'stalled_no_engagement'
-          ? 'No proposal, no contract, no real engagement , moved to leads for nurture.'
-          : 'Was sitting at the top of the funnel , moved to leads where it belongs.',
+          ? 'No proposal, no contract, no real engagement. Moved to leads for nurture.'
+          : 'Was sitting at the top of the funnel. Moved to leads where it belongs.',
         leadId,
         orgId: c.orgId,
         createdById: callerTeamMemberId ?? userId,

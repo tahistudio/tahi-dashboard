@@ -12,6 +12,7 @@ import { parseMentions } from '@/lib/parse-mentions'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { attributedUserId } from '@/lib/mcp-actor'
 import { chunkThreadIds, pickThreadConversationId } from '@/lib/request-thread'
+import { requireConversationAccess } from '@/app/api/admin/conversations/_access'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -208,8 +209,16 @@ export async function POST(req: NextRequest, { params }: Params) {
         const conversationDenied = await requireAccessToOrg(drizzle, userId, conversation.orgId)
         if (conversationDenied) return conversationDenied
       }
-      if (conversation.orgId && conversation.orgId !== request.orgId || conversation.requestId && conversation.requestId !== id) {
+      if (conversation.requestId && conversation.requestId !== id || conversation.orgId && conversation.orgId !== request.orgId) {
         return NextResponse.json({ error: 'Conversation must belong to this request client' }, { status: 400 })
+      }
+      if (conversation.requestId !== id) {
+        if (conversation.orgId !== request.orgId) {
+          return NextResponse.json({ error: 'Conversation must belong to this request client' }, { status: 400 })
+        }
+        if (!userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const conversationAccess = await requireConversationAccess(drizzle, { userId, orgId }, body.conversationId)
+        if (!conversationAccess.ok) return conversationAccess.response
       }
     }
 

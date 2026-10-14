@@ -114,7 +114,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const contactRows = clerkIds.length > 0 ? await drizzle
     .select({ clerkUserId: schema.contacts.clerkUserId, name: schema.contacts.name })
     .from(schema.contacts)
-    .where(and(inArray(schema.contacts.clerkUserId, clerkIds), eq(schema.contacts.orgId, request.orgId))) : []
+    .where(inArray(schema.contacts.clerkUserId, clerkIds)) : []
   const memberRows = clerkIds.length > 0 ? await drizzle
     .select({ clerkUserId: schema.teamMembers.clerkUserId, name: schema.teamMembers.name })
     .from(schema.teamMembers)

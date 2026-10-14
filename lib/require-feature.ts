@@ -38,7 +38,7 @@
 
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { resolvePermissions, can, clientCanSeeFeature } from '@/lib/permissions'
+import { resolvePermissions, can, clientCanSeeFeature, type ResolvedAccess } from '@/lib/permissions'
 import type { RequestAuthResult } from '@/lib/server-auth'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -57,6 +57,7 @@ type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function requireFeature(
   auth: Pick<RequestAuthResult, 'userId' | 'orgId'>,
   featureKey: string | readonly string[],
+  preparedAccess?: ResolvedAccess,
 ): Promise<NextResponse | null> {
   // INVARIANT: MCP / service-to-service token ALWAYS passes. `getRequestAuth`
   // mints userId 'api-service' ONLY for a verified TAHI_API_TOKEN, and MCP
@@ -64,8 +65,7 @@ export async function requireFeature(
   // before any DB read so it holds even if the permission tables are empty.
   if (auth.userId === 'api-service') return null
 
-  const database = await db()
-  const access = await resolvePermissions(database as DrizzleDB, {
+  const access = preparedAccess ?? await resolvePermissions(await db() as DrizzleDB, {
     userId: auth.userId,
     orgId: auth.orgId,
   })

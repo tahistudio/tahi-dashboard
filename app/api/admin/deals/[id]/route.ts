@@ -341,7 +341,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.stageId !== undefined) updates.stageId = body.stageId
   if (body.currency !== undefined) updates.currency = body.currency
 
-  // Upfront range handling , range now applies only to the upfront portion.
+  // Upfront range handling. Range now applies only to the upfront portion.
   let nextValueMin: number | null = existingRange.valueMin
   let nextValueMax: number | null = existingRange.valueMax
   let rangeTouched = false
@@ -525,9 +525,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     // stage_change activity (or deal creation) to compute dwell time.
     let daysInPrevStage: number | null = null
     try {
-      const res = await database.all(sql.raw(
-        `SELECT created_at FROM activities WHERE deal_id = '${id}' AND type IN ('stage_change','deal_created') ORDER BY created_at DESC LIMIT 1`,
-      )) as unknown as Array<{ created_at: string }> | { results?: Array<{ created_at: string }> }
+      const res = await database.all(sql`SELECT created_at FROM activities WHERE deal_id = ${id}
+        AND type IN ('stage_change','deal_created') ORDER BY created_at DESC LIMIT 1`) as unknown as Array<{ created_at: string }> | { results?: Array<{ created_at: string }> }
       const rows = Array.isArray(res) ? res : (res?.results ?? [])
       if (rows[0]?.created_at) {
         const ms = new Date(now).getTime() - new Date(rows[0].created_at).getTime()

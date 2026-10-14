@@ -1,4 +1,3 @@
-import { requireAccessToOrg } from '@/lib/require-access'
 /**
  * app/api/admin/conversations/_access.ts
  *
@@ -16,6 +15,7 @@ import { NextResponse } from 'next/server'
 import { and, eq } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { isOrgInScope } from '../_scoping/org-scope'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -69,9 +69,12 @@ export async function requireConversationAccess(
   }
 
   if (conversation.requestId) {
+    const featureDenied = await requireFeature(auth, 'requests')
+    if (featureDenied) return { ok: false, response: featureDenied }
     const [request] = await database.select({ orgId: schema.requests.orgId }).from(schema.requests).where(eq(schema.requests.id, conversation.requestId)).limit(1)
-    const denied = await requireAccessToOrg(database, auth.userId, request?.orgId)
-    if (denied) return { ok: false, response: denied }
+    if (request && !isOrgInScope(scope, request.orgId, 'deny')) {
+      return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+    }
   }
 
   return { ok: true, participantId, conversation }

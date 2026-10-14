@@ -103,8 +103,8 @@ export async function POST(req: NextRequest) {
     if (participant.participantType !== 'contact' || !participant.participantId) continue
     const [contact] = await drizzle.select({ orgId: schema.contacts.orgId }).from(schema.contacts)
       .where(eq(schema.contacts.id, participant.participantId)).limit(1)
-    if (!contact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 })
-    const contactDenied = await requireAccessToOrg(drizzle, userId, contact?.orgId)
+    if (!contact) continue
+    const contactDenied = await requireAccessToOrg(drizzle, userId, contact.orgId)
     if (contactDenied) return contactDenied
     contactOrgs.set(participant.participantId, contact.orgId)
   }
@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
   let added = 0
   let skipped = 0
   let invalid = 0
+  const skippedItems: Array<{ requestId: string; participantId: string; reason: string }> = []
   const now = new Date().toISOString()
 
   /**
@@ -128,6 +129,11 @@ export async function POST(req: NextRequest) {
     for (const p of body!.participants!) {
       if (!p.participantId || !p.participantType || !p.role) { invalid++; continue }
       if (p.participantType === 'contact' && p.role !== 'follower') { invalid++; continue }
+      if (p.participantType === 'contact' && !contactOrgs.has(p.participantId)) {
+        skipped++
+        skippedItems.push({ requestId, participantId: p.participantId, reason: 'Contact not found' })
+        continue
+      }
       if (p.participantType === 'contact' && contactOrgs.get(p.participantId) !== request.orgId) { invalid++; continue }
 
       if (p.role === 'pm') {
@@ -246,5 +252,5 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, added, skipped, invalid, notFound })
+  return NextResponse.json({ ok: true, added, skipped, invalid, notFound, skippedItems })
 }

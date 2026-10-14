@@ -16,6 +16,18 @@ export function permissionSqlite(tables: AnySQLiteTable[], migrationSql: readonl
   }
   for (const statement of migrationSql) sqlite.exec(statement)
   const adapter = {
+    async batch(statements: Array<{ all: () => Promise<{ results: unknown[] }> }>) {
+      sqlite.exec('BEGIN')
+      try {
+        const results = []
+        for (const statement of statements) results.push(await statement.all())
+        sqlite.exec('COMMIT')
+        return results
+      } catch (error) {
+        sqlite.exec('ROLLBACK')
+        throw error
+      }
+    },
     prepare(query: string) {
       queries.push(query)
       try {

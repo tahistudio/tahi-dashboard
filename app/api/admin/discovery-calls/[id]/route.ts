@@ -30,7 +30,7 @@ import { requireFeature } from '@/lib/require-feature'
  * orgId/leadId/dealId/requestId/meetingType/title also writes an
  * audit_log row (see lib/audit.ts) so a relink is traceable.
  *
- * DELETE /api/admin/discovery-calls/[id] , hard delete.
+ * DELETE /api/admin/discovery-calls/[id]. hard delete.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -46,7 +46,7 @@ import { logAudit } from '@/lib/audit'
 type Params = { params: Promise<{ id: string }> }
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-// Transcripts can run long , a 60-minute Meet call easily produces
+// Transcripts can run long. a 60-minute Meet call easily produces
 // 100k+ chars of Gemini transcript. Cap is here to stop a runaway paste
 // blowing the D1 row size budget (~1MB hard limit), not to be miserly.
 // 250k is roughly a 3-hour call at typical transcript density.

@@ -61,7 +61,9 @@ export async function GET(req: NextRequest) {
   }
 
   const scope = await scopedOrgIds({ userId, orgId })
+  const requestDenied = await requireFeature({ userId, orgId }, 'requests')
   const conversationConditions = [sql`${schema.conversations.id} IN (SELECT value FROM json_each(${JSON.stringify(convIds)}))`]
+  if (requestDenied) conversationConditions.push(sql`${schema.conversations.requestId} IS NULL`)
   if (scope.kind !== 'all') {
     const allowed = scope.kind === 'some' ? JSON.stringify(scope.orgIds) : '[]'
     conversationConditions.push(sql`(${schema.conversations.orgId} IS NULL OR ${schema.conversations.orgId} IN (SELECT value FROM json_each(${allowed})))`)
@@ -315,6 +317,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     if (requestId) {
+      const requestDenied = await requireFeature({ userId, orgId }, 'requests')
+      if (requestDenied) return requestDenied
       const [linkedRequest] = await (database as unknown as D1)
         .select({ orgId: schema.requests.orgId })
         .from(schema.requests)

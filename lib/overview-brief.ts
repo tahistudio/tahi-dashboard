@@ -7,6 +7,9 @@ import { overnightCutoff, daysPastDue } from '@/lib/overview-aggregates'
 import { owedStatusList } from '@/lib/invoice-status'
 import { formatCallPrepBriefRow } from '@/lib/call-brief-item'
 import { formatCurrency } from '@/lib/currency'
+import type { OrgScope } from '@/lib/access-scope'
+import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
+import { internalMessageFilter } from '@/lib/internal-route-access'
 
 
 export type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -81,6 +84,8 @@ export async function computeBrief(
   // otherwise the allowed org ids. Client/request/invoice rows are filtered.
   const allowedOrgs = prepared ? prepared.allowedOrgs : await resolveAccessScoping(drizzle, auth.userId)
   const denyAll = Array.isArray(allowedOrgs) && allowedOrgs.length === 0
+  const scope: OrgScope = allowedOrgs === null ? { kind: 'all' }
+    : denyAll ? { kind: 'none' } : { kind: 'some', orgIds: allowedOrgs }
 
   const rateMap: RateMap = await (async () => {
     try {
@@ -136,12 +141,12 @@ export async function computeBrief(
         })
       }
     } catch {
-      // Invoices table missing , skip this source.
+      // Invoices table missing. Skip this source.
     }
   }
 
   // ── URGENT: today's discovery calls, prep note status (gated on calls) ──────
-  if (canSeeCalls) {
+  if (canSeeCalls && !denyAll) {
     try {
       // NZ studio day, so a "2:30pm today" call is grouped correctly regardless
       // of the UTC offset baked into scheduledAt by the calendar sync.
@@ -155,7 +160,7 @@ export async function computeBrief(
           status: schema.discoveryCalls.status,
         })
         .from(schema.discoveryCalls)
-        .where(eq(schema.discoveryCalls.status, 'scheduled'))
+        .where(and(eq(schema.discoveryCalls.status, 'scheduled'), discoveryCallScopeCondition(scope)))
         .orderBy(asc(schema.discoveryCalls.scheduledAt))
         .limit(60)
 
@@ -178,7 +183,7 @@ export async function computeBrief(
         urgent.push(formatCallPrepBriefRow(c, time))
       }
     } catch {
-      // Discovery calls table missing , skip this source.
+      // Discovery calls table missing. Skip this source.
     }
   }
 
@@ -216,7 +221,7 @@ export async function computeBrief(
         urgentContractText(week, r.orgName, r.name, days)
       }
     } catch {
-      // Contract documents table missing , skip this source.
+      // Contract documents table missing. Skip this source.
     }
   }
 
@@ -247,7 +252,7 @@ export async function computeBrief(
         .slice(0, 3)
 
       for (const r of overdue) {
-        const lead = r.orgName ? `${r.orgName} , ` : ''
+        const lead = r.orgName ? `${r.orgName}. ` : ''
         week.push({
           tone: 'warn',
           verb: 'Open',
@@ -256,7 +261,7 @@ export async function computeBrief(
         })
       }
     } catch {
-      // Requests table missing , skip this source.
+      // Requests table missing. Skip this source.
     }
   }
 
@@ -287,7 +292,7 @@ export async function computeBrief(
         })
       }
     } catch {
-      // Invoices table missing , skip this source.
+      // Invoices table missing. Skip this source.
     }
   }
 
@@ -309,7 +314,7 @@ export async function computeBrief(
         .limit(4)
 
       for (const r of rows) {
-        const lead = r.orgName ? `${r.orgName} , ` : ''
+        const lead = r.orgName ? `${r.orgName}. ` : ''
         slept.push({
           tone: '',
           verb: null,
@@ -318,12 +323,12 @@ export async function computeBrief(
         })
       }
     } catch {
-      // Requests table missing , skip this source.
+      // Requests table missing. Skip this source.
     }
   }
 
   // ── SLEPT: client replies overnight (summary row) ───────────────────────────
-  if (canSeeMessages) {
+  if (canSeeMessages && !denyAll) {
     try {
       const replies = await drizzle
         .select({ id: schema.messages.id })
@@ -331,6 +336,7 @@ export async function computeBrief(
         .where(and(
           inArray(schema.messages.authorType, ['contact', 'client']),
           gte(schema.messages.createdAt, since),
+          internalMessageFilter(access, scope),
         ))
       const n = replies.length
       if (n > 0) {
@@ -342,7 +348,7 @@ export async function computeBrief(
         })
       }
     } catch {
-      // Messages table missing , skip this source.
+      // Messages table missing. Skip this source.
     }
   }
 
@@ -443,7 +449,7 @@ function urgentContractText(
   name: string,
   days: number,
 ): void {
-  const lead = orgName ? `${orgName} , ` : ''
+  const lead = orgName ? `${orgName}. ` : ''
   const when = days === 0 ? 'expires today' : `expires in ${days} ${plural(days, 'day', 'days')}`
   target.push({
     tone: 'warn',

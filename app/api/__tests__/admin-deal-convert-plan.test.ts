@@ -31,6 +31,10 @@ vi.mock('@/lib/require-feature', () => ({
   requireFeature: vi.fn().mockResolvedValue(null),
 }))
 
+// This fixture exercises plan provisioning as an already-authorized admin.
+// Real-role conversion denial and privileged controls run in sales-review-sqlite.
+vi.mock('@/lib/require-admin', () => ({ requireAdmin: vi.fn().mockResolvedValue(null) }))
+
 vi.mock('@/lib/events', () => ({
   dispatchDomainEvent: vi.fn().mockResolvedValue(undefined),
 }))

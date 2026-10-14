@@ -5,11 +5,21 @@ import { NextRequest, NextResponse } from 'next/server'
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 vi.mock('@/lib/server-auth', () => ({ getRequestAuth: vi.fn(), isTahiAdmin: (orgId: string | null) => orgId === 'org_tahi' }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn() }))
+vi.mock('@/lib/permissions', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/permissions')>(), resolvePermissions: vi.fn(),
+}))
 vi.mock('@clerk/nextjs/server', () => ({ clerkClient: vi.fn(), auth: vi.fn(), currentUser: vi.fn() }))
 
 import { db } from '@/lib/db'
 import { getRequestAuth } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { resolvePermissions, type ResolvedAccess } from '@/lib/permissions'
+
+const deniedAccess: ResolvedAccess = {
+  userId: 'scoped-seat', orgId: 'org_tahi', level: 'team_member', audience: 'team',
+  isAdmin: false, isSuperAdmin: false, canManagePermissions: false,
+  viewableResources: new Set(), overrides: new Map(),
+}
 
 const modules = import.meta.glob('../admin/**/route.ts')
 const CASES = [
@@ -324,18 +334,36 @@ beforeEach(() => {
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'scoped-seat', orgId: 'org_tahi', sessionId: 'test', mcpActor: { teamMemberId: 'owner', clerkUserId: 'owner-user', profile: 'full' } })
   vi.mocked(requireFeature).mockResolvedValue(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
   vi.mocked(db).mockRejectedValue(new Error('A denied feature must not reach business data'))
+  vi.mocked(resolvePermissions).mockResolvedValue(deniedAccess)
 })
 
 describe.each(CASES)('$method $file refuses a denied scoped seat', scenario => {
-  it('returns 403 before opening the business database, regardless of recorded attribution', async () => {
+  it('returns 403 before business queries, regardless of recorded attribution', async () => {
     const route = await modules['../' + scenario.file]() as Record<string, Handler>
+    const preparesAccess = (scenario.file === 'admin/clients/route.ts' && scenario.method === 'GET')
+      || (scenario.method === 'POST' && ['admin/time/route.ts', 'admin/time-entries/route.ts', 'admin/requests/[id]/time-entries/route.ts'].includes(scenario.file))
+    // These handlers share resolved permissions across guards. Their first DB
+    // handle is permission-only; a second opening or a business query throws.
+    const permissionDatabase = new Proxy({}, { get(_target, key) {
+      if (['select', 'insert', 'update', 'delete', 'all', 'run', 'batch'].includes(String(key))) {
+        throw new Error('A denied feature must not execute business queries')
+      }
+      return undefined
+    } })
+    if (preparesAccess) vi.mocked(db).mockResolvedValueOnce(permissionDatabase as never)
     const request = new NextRequest('http://localhost/api/' + scenario.file.replace('/route.ts', '').replaceAll(/\[[^/]+\]/g, 'foreign-id'), {
       method: scenario.method,
       ...(scenario.method === 'GET' ? {} : { body: '{}', headers: { 'content-type': 'application/json' } }),
     })
     const response = await route[scenario.method](request, { params: Promise.resolve({ id: 'foreign-id', stepId: 'foreign-step', linkId: 'foreign-link', participantId: 'foreign-person' }) })
     expect(response.status).toBe(403)
-    expect(db).not.toHaveBeenCalled()
-    expect(requireFeature).toHaveBeenCalledWith({ userId: 'scoped-seat', orgId: 'org_tahi' }, expect.anything())
+    if (preparesAccess) {
+      expect(db).toHaveBeenCalledTimes(1)
+      expect(resolvePermissions).toHaveBeenCalledWith(permissionDatabase, expect.objectContaining({ userId: 'scoped-seat', orgId: 'org_tahi' }))
+      expect(requireFeature).toHaveBeenCalledWith({ userId: 'scoped-seat', orgId: 'org_tahi' }, expect.anything(), deniedAccess)
+    } else {
+      expect(db).not.toHaveBeenCalled()
+      expect(requireFeature).toHaveBeenCalledWith({ userId: 'scoped-seat', orgId: 'org_tahi' }, expect.anything())
+    }
   })
 })

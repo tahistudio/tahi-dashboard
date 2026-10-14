@@ -26,6 +26,16 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 
+// Explicit admin fixture for billing business rules; scoped seats are exercised in SQLite.
+vi.mock('@/lib/permissions', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/permissions')>(),
+  resolvePermissions: vi.fn(async () => ({
+    userId: 'user_admin', orgId: 'org_tahi', level: 'admin', audience: 'team',
+    isAdmin: true, isSuperAdmin: false, canManagePermissions: true,
+    viewableResources: null, overrides: new Map(),
+  })),
+}))
+
 vi.mock('@/lib/require-feature', () => ({
   requireFeature: vi.fn().mockResolvedValue(null),
 }))

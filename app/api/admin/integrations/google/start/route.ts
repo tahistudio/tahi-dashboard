@@ -10,18 +10,18 @@
  *   - calendar.events           (sync upcoming + past meetings, write the kickoff event)
  *   - calendar.freebusy         (kickoff slot picker hides busy times)
  *   - drive.readonly            (pull "Notes by Gemini" docs)
- *   - analytics.readonly        (GA4 Data API — for /content-studio ideation)
- *   - webmasters.readonly       (Search Console — query gaps + index coverage)
+ *   - analytics.readonly        (GA4 Data API for /content-studio ideation)
+ *   - webmasters.readonly       (Search Console query gaps + index coverage)
  *   - userinfo.email            (display connected account)
  *
  * Required env vars (set in Webflow Cloud or wrangler):
  *   GOOGLE_CLIENT_ID
  *   GOOGLE_CLIENT_SECRET   (only used on callback)
- *   GOOGLE_REDIRECT_URI    (optional — defaults to host + /api/admin/integrations/google/callback)
+ *   GOOGLE_REDIRECT_URI    (optional, defaults to host + /api/admin/integrations/google/callback)
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
-import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const clientId = process.env.GOOGLE_CLIENT_ID

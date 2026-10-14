@@ -120,6 +120,16 @@ export async function POST(req: NextRequest, { params }: Params) {
   const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
   if (denied) return denied
 
+  const [keyOrgId] = body.storageKey.split('/', 1)
+  if (keyOrgId !== request.orgId) {
+    return NextResponse.json({ error: 'Storage key does not match the target org' }, { status: 403 })
+  }
+  const [existing] = await drizzle.select({ id: schema.files.id }).from(schema.files)
+    .where(eq(schema.files.storageKey, body.storageKey)).limit(1)
+  if (existing) {
+    return NextResponse.json({ error: 'File already exists for this storage key' }, { status: 409 })
+  }
+
   // Resolve team member ID from Clerk userId
   let uploaderId = userId ?? 'unknown'
   if (userId) {

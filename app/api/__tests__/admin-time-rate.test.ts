@@ -32,6 +32,15 @@ vi.mock('@/lib/require-access', () => ({
 }))
 
 // A permitted admin fixture keeps the assertions on persisted billing rates.
+// Business fixtures exercise an authenticated admin; scoped ownership uses real SQLite tests.
+vi.mock('@/lib/permissions', () => ({
+  resolvePermissions: vi.fn(async () => ({
+    userId: 'clerk_admin', orgId: 'org_tahi', level: 'admin', audience: 'team',
+    isAdmin: true, isSuperAdmin: false, canManagePermissions: true,
+    viewableResources: new Set<string>(), overrides: new Map(),
+  })),
+}))
+
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 
 // The GET half of /api/admin/time pulls the scoping tree in. POST never calls
@@ -262,6 +271,7 @@ describe('POST /api/admin/time', () => {
   })
 
   it('still returns { id } and writes every other field it always wrote', async () => {
+    state.rows.requests = [{ id: 'req_1', orgId: 'org_client_a' }]
     state.rows.organisations = [{ defaultHourlyRate: null }]
     const res = await timePost(post('/api/admin/time', {
       ...BASE, requestId: 'req_1', notes: 'Homepage build', billable: false,

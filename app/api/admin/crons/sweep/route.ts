@@ -1,3 +1,5 @@
+import { NextRequest } from 'next/server'
+import { requireManualCronAdmin } from '@/lib/cron-admin-access'
 /**
  * POST /api/admin/crons/sweep - the automation time sweep.
  *
@@ -31,7 +33,7 @@ const TERMINAL_REQUEST_STATUSES = ['draft', 'delivered', 'archived', 'cancelled'
 const INACTIVE_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
 
-export const POST = withCronRun('automation-sweep', async (_req, database) => {
+const runCron = withCronRun('automation-sweep', async (_req, database) => {
   const now = new Date()
   const nowIso = now.toISOString()
   const today = nowIso.slice(0, 10)
@@ -120,3 +122,9 @@ export const POST = withCronRun('automation-sweep', async (_req, database) => {
     inactiveFired,
   }
 })
+
+export async function POST(req: NextRequest) {
+  const denied = await requireManualCronAdmin(req, 'settings')
+  if (denied) return denied
+  return runCron(req)
+}

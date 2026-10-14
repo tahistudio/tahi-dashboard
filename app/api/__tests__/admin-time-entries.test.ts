@@ -30,6 +30,15 @@ vi.mock('@/lib/require-access', () => ({
 }))
 
 // These manual billing cases exercise a permitted admin's target resolution.
+// Business fixtures exercise an authenticated admin; scoped ownership uses real SQLite tests.
+vi.mock('@/lib/permissions', () => ({
+  resolvePermissions: vi.fn(async () => ({
+    userId: 'clerk_admin', orgId: 'org_tahi', level: 'admin', audience: 'team',
+    isAdmin: true, isSuperAdmin: false, canManagePermissions: true,
+    viewableResources: new Set<string>(), overrides: new Map(),
+  })),
+}))
+
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 
 vi.mock('@/lib/internal-org', () => ({

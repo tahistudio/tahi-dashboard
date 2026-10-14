@@ -1,5 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
-import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const database = await db()
@@ -49,7 +49,10 @@ export async function GET(req: NextRequest) {
     })
     .filter((e): e is WebhookEndpoint => e !== null)
 
-  return NextResponse.json({ endpoints })
+  return NextResponse.json({ endpoints: endpoints.map(endpoint => ({
+    id: endpoint.id, url: endpoint.url, events: endpoint.events,
+    active: endpoint.active, createdAt: endpoint.createdAt,
+  })) })
 }
 
 /**
@@ -61,7 +64,7 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const body = await req.json() as {
@@ -118,7 +121,7 @@ export async function PATCH(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const body = await req.json() as {
@@ -175,7 +178,10 @@ export async function PATCH(req: NextRequest) {
     .set({ value: JSON.stringify(endpoint), updatedAt: new Date().toISOString() })
     .where(eq(schema.settings.key, key))
 
-  return NextResponse.json({ success: true, endpoint })
+  return NextResponse.json({ success: true, endpoint: {
+    id: endpoint.id, url: endpoint.url, events: endpoint.events,
+    active: endpoint.active, createdAt: endpoint.createdAt,
+  } })
 }
 
 /**
@@ -187,7 +193,7 @@ export async function DELETE(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const url = new URL(req.url)

@@ -12,7 +12,7 @@
 
 import { clerkClient } from '@clerk/nextjs/server'
 import type { NextRequest } from 'next/server'
-import { getRequestAuth, getServerAuth } from '@/lib/server-auth'
+import { getRequestAuth, getServerAuth, isTahiAdmin } from '@/lib/server-auth'
 
 const ALLOWLIST = new Set([
   'business@tahi.studio',
@@ -38,9 +38,10 @@ export async function hasSitemapAccess(userId: string | null | undefined): Promi
  *  and is trusted by definition: anyone holding the token already controls
  *  the whole dashboard, so gating by email would just block legitimate MCP. */
 export async function assertSitemapApiAccess(req: NextRequest): Promise<string | null> {
-  const { userId } = await getRequestAuth(req)
+  const { userId, orgId } = await getRequestAuth(req)
   if (!userId) return null
   if (userId === 'api-service') return userId
+  if (!isTahiAdmin(orgId)) return null
   const allowed = await hasSitemapAccess(userId)
   return allowed ? userId : null
 }

@@ -15,6 +15,7 @@ import {
 } from '@/lib/onboarding-invites'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { requireFeature } from '@/lib/require-feature'
+import { requireAdmin } from '@/lib/require-admin'
 import { sendEmail } from '@/lib/email'
 import { ClientInviteEmail } from '@/emails/client-invite'
 
@@ -68,12 +69,19 @@ export async function GET(req: NextRequest) {
     .where(eq(schema.onboardingInvites.orgId, target))
     .orderBy(desc(schema.onboardingInvites.createdAt))
 
-  return NextResponse.json({ invites })
+  return NextResponse.json({ invites: invites.map(invite => ({
+    id: invite.id, flow: invite.flow, persona: invite.persona, orgId: invite.orgId,
+    contractId: invite.contractId, scheduleId: invite.scheduleId, proposalId: invite.proposalId,
+    contactEmail: invite.contactEmail, contactName: invite.contactName,
+    expiresAt: invite.expiresAt, usedAt: invite.usedAt, createdAt: invite.createdAt,
+  })) })
 }
 
 export async function POST(req: NextRequest) {
   const auth = await getRequestAuth(req)
   if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const adminDenied = await requireAdmin(auth)
+  if (adminDenied) return adminDenied
 
   const body = (await req.json().catch(() => ({}))) as {
     orgId?: string

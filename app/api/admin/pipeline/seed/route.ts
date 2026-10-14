@@ -1,4 +1,4 @@
-import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  const featureDenied = await requireStudioAdmin({ userId, orgId: orgId }, 'deals')
   if (featureDenied) return featureDenied
 
 

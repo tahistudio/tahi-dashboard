@@ -27,9 +27,27 @@ vi.mock('@/lib/permissions', async (importOriginal) => ({
 import { db } from '@/lib/db'
 import { resolvePermissions, holdsNoGrant, type ResolvedAccess } from '@/lib/permissions'
 import { requireFeature, requirePortalFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 
 const TAHI_ORG = 'org_tahi'
 const CLIENT_ORG = 'org-client-1'
+
+describe('prepared studio access', () => {
+  it('resolves once while enforcing both feature and actual admin role', async () => {
+    vi.mocked(resolvePermissions).mockResolvedValue(owner())
+    expect(await requireStudioAdmin({ userId: 'user_1', orgId: TAHI_ORG }, 'settings')).toBeNull()
+    expect(resolvePermissions).toHaveBeenCalledTimes(1)
+    vi.mocked(resolvePermissions).mockClear()
+    vi.mocked(resolvePermissions).mockResolvedValue({ ...base(), viewableResources: new Set(['settings']) })
+    expect(await requireStudioAdmin({ userId: 'user_1', orgId: TAHI_ORG }, 'settings')).toHaveProperty('status', 403)
+    expect(resolvePermissions).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps verified service access independent of the permission tables', async () => {
+    expect(await requireStudioAdmin({ userId: 'api-service', orgId: TAHI_ORG }, 'settings')).toBeNull()
+    expect(resolvePermissions).not.toHaveBeenCalled()
+  })
+})
 
 // ── access fixtures ──────────────────────────────────────────────────────────
 

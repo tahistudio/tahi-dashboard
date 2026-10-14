@@ -109,12 +109,12 @@ export async function GET(
   const row = await loadTranscript(database, id)
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  const denied = await guardTranscript(database, { userId, orgId }, row)
+  if (denied) return denied
+
   if (row.source === 'manual' && row.externalId.startsWith('recording:')) {
     return withRecordingContext(req, row.externalId.slice('recording:'.length), async () => NextResponse.json({ transcript: row }))
   }
-
-  const denied = await guardTranscript(database, { userId, orgId }, row)
-  if (denied) return denied
 
   return NextResponse.json({ transcript: row })
 }
@@ -151,6 +151,11 @@ export async function PATCH(
   const deniedSource = await guardTranscript(database, { userId, orgId }, row)
   if (deniedSource) return deniedSource
 
+  if (callKind === 'discovery') {
+    const targetDenied = await requireDiscoveryCallAccess(database, { userId, orgId }, callId)
+    if (targetDenied) return targetDenied
+  }
+
   // Recorder transcripts keep durable client scope and links in one lease,
   // including links made through the existing unlinked transcript picker.
   if (row.source === 'manual' && row.externalId.startsWith('recording:')) {
@@ -161,10 +166,6 @@ export async function PATCH(
     })
   }
 
-  if (callKind === 'discovery') {
-    const targetDenied = await requireDiscoveryCallAccess(database, { userId, orgId }, callId)
-    if (targetDenied) return targetDenied
-  }
   const target = await resolveCallOrgId(database, callKind, callId)
   if (!target.found) {
     return NextResponse.json({ error: 'Call not found' }, { status: 404 })

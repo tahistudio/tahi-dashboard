@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
 /**
  * Estimate hours booked between [startDate, startDate + durationWeeks)
  * across all active schedules. Each schedule_rows row contributes
- * (endWeek - startWeek + 1) * 8 hours (rough heuristic , 8h per
+ * (endWeek - startWeek + 1) * 8 hours (rough heuristic. 8h per
  * gantt-week for a row marked by the team). Section header rows are
  * skipped (rowType !== 'section').
  */
@@ -146,7 +146,7 @@ async function estimateBookedHours(
     const weeks = Math.max(1, r.endWeek - r.startWeek + 1)
     hours += weeks * 8
   }
-  // Voice of caution , only count a fraction since most schedules
+  // Voice of caution. only count a fraction since most schedules
   // span many months. The math wants "competing for THIS calc's
   // window" hours, and we don't know per-row dates yet.
   const calcWeeks = Math.max(1, inputs.timeline.durationWeeks)

@@ -1,3 +1,4 @@
+import { resolvePermissions } from '@/lib/permissions'
 import { requireFeature } from '@/lib/require-feature'
 /**
  * Time logged against one request.
@@ -55,7 +56,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  const featureDenied = await requireFeature({ userId, orgId }, ['requests', 'time'])
   if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
@@ -95,11 +96,14 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  const access = await resolvePermissions(await db(), auth)
+  const featureDenied = await requireFeature({ userId, orgId }, ['requests', 'time'], access)
   if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
   const body = await req.json() as {
+    orgId?: string
+    requestId?: string
     hours?: number
     description?: string
     billable?: boolean
@@ -125,14 +129,18 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Request not found' }, { status: 404 })
   }
 
+  if ((body.orgId && body.orgId !== request.orgId) || (body.requestId && body.requestId !== requestId)) {
+    return NextResponse.json({ error: 'Body target must match the request' }, { status: 400 })
+  }
+
   const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
   if (denied) return denied
 
   // A body teamMemberId wins (the MCP tool and the service token have no
   // Clerk identity of their own); otherwise the caller's own row.
   const logger = await resolveLoggingTeamMemberId(drizzle, {
-    userId: attributedUserId(auth),
-    supplied: body.teamMemberId,
+    userId: access.isAdmin ? attributedUserId(auth) : userId,
+    supplied: access.isAdmin ? body.teamMemberId : null,
   })
   if (!logger.ok) return timeEntryFailureResponse(logger.failure)
 
@@ -148,7 +156,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     date: new Date().toISOString().slice(0, 10),
     notes: body.description ?? null,
     billable: body.billable,
-    hourlyRate: body.hourlyRate,
+    hourlyRate: access.isAdmin ? body.hourlyRate : undefined,
     source: 'manual',
   })
   if (!result.ok) return timeEntryFailureResponse(result.failure)

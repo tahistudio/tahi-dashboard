@@ -405,6 +405,19 @@ describe('recorder pairing', () => {
 })
 
 describe('own device management', () => {
+  it('ignores a recorded MCP actor on a nonservice caller for device ownership', async () => {
+    await seedDevice()
+    await seedDevice({ id: 'device-2', team_member_id: 'member-staci', token_hash: 'different' })
+    h.auth = { userId: 'staci', orgId: 'tahi', sessionId: 'sess_staci', mcpActor: { teamMemberId: 'member-liam', clerkUserId: 'liam', profile: 'full' } }
+    const response = await listDevices(request('/api/admin/recorder-devices'))
+    expect(response.status).toBe(200)
+    expect((await response.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toEqual(['device-2'])
+    expect((await revokeDevice(request('/', {}), { params: Promise.resolve({ id: 'device-1' }) })).status).toBe(404)
+    h.isAdmin = false
+    expect((await listDevices(request('/api/admin/recorder-devices'))).status).toBe(403)
+    expect(h.permissions).toHaveBeenCalledWith(database, expect.objectContaining({ userId: 'staci' }))
+  })
+
   it('lists only the caller devices and never the token hash', async () => {
     await seedDevice()
     await seedDevice({ id: 'device-2', team_member_id: 'member-staci', token_hash: 'different' })

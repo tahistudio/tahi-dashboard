@@ -1,3 +1,4 @@
+import { resolvePermissions } from '@/lib/permissions'
 import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
@@ -9,6 +10,7 @@ import { requireAccessToOrg } from '@/lib/require-access'
 import { attributedTeamMemberId } from '@/lib/mcp-actor'
 import {
   createTimeEntry,
+  resolveLoggingTeamMemberId,
   timeEntryFailureResponse,
   timeEntryLoggerJoin,
   validateTimeEntryDraft,
@@ -157,7 +159,8 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(authOrgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature({ userId, orgId: authOrgId }, 'time')
+  const access = await resolvePermissions(await db(), auth)
+  const featureDenied = await requireFeature({ userId, orgId: authOrgId }, 'time', access)
   if (featureDenied) return featureDenied
 
   const body = await req.json().catch(() => null) as {
@@ -172,16 +175,29 @@ export async function POST(req: NextRequest) {
   } | null
   if (!body) return NextResponse.json({ error: 'Body required' }, { status: 400 })
 
+  const drizzle = await db() as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  let entryOrgId = body.orgId
+  if (body.requestId) {
+    const [request] = await drizzle.select({ orgId: schema.requests.orgId })
+      .from(schema.requests).where(eq(schema.requests.id, body.requestId)).limit(1)
+    if (!request) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+    if (body.orgId && body.orgId !== request.orgId) {
+      return NextResponse.json({ error: 'orgId must match the request' }, { status: 400 })
+    }
+    entryOrgId = request.orgId
+  }
+  const logger = access.isAdmin ? null : await resolveLoggingTeamMemberId(drizzle, { userId, supplied: null })
+  if (logger && !logger.ok) return timeEntryFailureResponse(logger.failure)
   const draft: TimeEntryDraft = {
-    orgId: body.orgId,
+    orgId: entryOrgId,
     // A worker MCP call that names no member logs for the person behind it.
-    teamMemberId: body.teamMemberId || (attributedTeamMemberId(auth) ?? undefined),
+    teamMemberId: logger?.ok ? logger.teamMemberId : body.teamMemberId || (attributedTeamMemberId(auth) ?? undefined),
     requestId: body.requestId ?? null,
     hours: body.hours,
     date: body.date,
     notes: body.notes ?? null,
     billable: body.billable,
-    hourlyRate: body.hourlyRate,
+    hourlyRate: access.isAdmin ? body.hourlyRate : undefined,
     source: 'manual',
   }
 
@@ -191,10 +207,8 @@ export async function POST(req: NextRequest) {
   const invalid = validateTimeEntryDraft(draft)
   if (invalid) return timeEntryFailureResponse(invalid)
 
-  const database = await db()
-  const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-  const denied = await requireAccessToOrg(drizzle, userId, body.orgId)
+  const denied = await requireAccessToOrg(drizzle, userId, entryOrgId)
   if (denied) return denied
 
   const result = await createTimeEntry(drizzle, draft)

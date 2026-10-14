@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   const dealId = calc.dealId
   const orgIdForArtefact = calc.orgId
 
-  // Resolve client + deal context for nicer naming. Best-effort , we
+  // Resolve client + deal context for nicer naming. Best-effort. we
   // don't fail the draft if the lookup misses.
   let dealTitle: string | null = null
   if (dealId) {
@@ -109,7 +109,7 @@ async function draftProposal(
     updatedAt: now,
   })
 
-  // Three variants , Standard, Standard + Care (featured if retainer
+  // Three variants. Standard, Standard + Care (featured if retainer
   // applies), Premium. Pulled from outputs.recommendation tiers.
   const ccy = inputs.client.currency
   const target = outputs.recommendation.target

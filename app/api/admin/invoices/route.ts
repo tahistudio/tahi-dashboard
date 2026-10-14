@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
     notes?: string
     // Source captures the user's intent at creation time. Even if the
     // downstream Stripe/Xero call fails, source remembers what they
-    // were trying to do so the FE can show "Stripe link failed , retry".
+    // were trying to do so the FE can show "Stripe link failed. retry".
     source?: 'manual' | 'stripe' | 'xero'
   }
 

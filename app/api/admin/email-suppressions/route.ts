@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 import { resolvePermissions } from '@/lib/permissions'
 import { db } from '@/lib/db'
 import { clearEmailSuppressions, listEmailSuppressions } from '@/lib/email-gate'
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const featureDenied = await requireFeature(auth, 'settings')
+  const featureDenied = await requireStudioAdmin(auth, 'settings')
   if (featureDenied) return featureDenied
 
   // A database that has not had migration 0094 applied yet answers "no such

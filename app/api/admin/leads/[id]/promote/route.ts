@@ -15,17 +15,17 @@ type Params = { params: Promise<{ id: string }> }
 // Turn a qualified lead into a deal.
 //
 // Body (all optional):
-//   orgId         , attach the deal to an existing organisation. If
+//   orgId        . attach the deal to an existing organisation. If
 //                   omitted and `createOrg` is true, a new org is
 //                   spun up from the lead's company name.
-//   createOrg     , boolean. Default true when no orgId supplied.
-//   dealTitle     , override; defaults to "<lead.company> · <lead.name>"
+//   createOrg    . boolean. Default true when no orgId supplied.
+//   dealTitle    . override; defaults to "<lead.company> · <lead.name>"
 //                   or "<lead.name>" when no company is set
-//   stageId       , landing stage. Defaults to the first non-closed
+//   stageId      . landing stage. Defaults to the first non-closed
 //                   pipeline stage by position.
 //   upfrontValue
 //   monthlyValue
-//   currency      , defaults to the lead's currency
+//   currency     . defaults to the lead's currency
 //
 // Side effects:
 //   - Optional org create (when createOrg + no orgId)
@@ -216,7 +216,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         .set({ dealId, updatedAt: now })
         .where(eq(schema.discoveryCalls.id, body.sourceCallId))
     } catch {
-      // best-effort , promotion still succeeds even if the link fails
+      // best-effort. promotion still succeeds even if the link fails
     }
   }
 

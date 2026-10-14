@@ -80,7 +80,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     ? await drizzle.select({ id: schema.teamMembers.id, name: schema.teamMembers.name, avatar: schema.teamMembers.avatarUrl }).from(schema.teamMembers).where(inList(schema.teamMembers.id, memberIds))
     : []
   const contacts = contactIds.length
-    ? await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(and(inList(schema.contacts.id, contactIds), eq(schema.contacts.orgId, request.orgId)))
+    ? await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(inList(schema.contacts.id, contactIds))
     : []
 
   const memberMap = new Map(members.map(m => [m.id, m]))

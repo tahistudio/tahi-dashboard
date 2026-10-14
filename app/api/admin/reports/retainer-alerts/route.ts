@@ -1,3 +1,4 @@
+import { resolvePermissions, can } from '@/lib/permissions'
 import { internalOrgFilter } from '@/lib/internal-route-access'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -30,11 +31,12 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const featureDenied = await requireFeature({ userId, orgId }, 'reports')
+  const access = await resolvePermissions(await db(), { userId, orgId })
+  const featureDenied = await requireFeature({ userId, orgId }, 'reports', access)
   if (featureDenied) return featureDenied
 
   const drizzle = (await db()) as D1
-  const orgScope = await scopedOrgIds({ userId, orgId })
+  const orgScope = await scopedOrgIds({ userId, orgId }, access)
 
   // Find admin recipients (Tahi team members with role='admin')
   const admins = await drizzle
@@ -183,11 +185,15 @@ export async function POST(req: NextRequest) {
     fired.push(a)
   }
 
+  const project = (alert: typeof alerts[number]) => {
+    const { mrrNzd, ...details } = alert
+    return can(access, 'financial_reports') ? { ...details, mrrNzd } : details
+  }
   return NextResponse.json({
     fired: fired.length,
     skipped: skipped.length,
-    alerts: fired,
-    skippedAlerts: skipped,
+    alerts: fired.map(project),
+    skippedAlerts: skipped.map(project),
     recipients: recipients.length,
   })
 }

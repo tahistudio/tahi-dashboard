@@ -44,11 +44,9 @@ import {
   toPlainText,
   truncate,
 } from '@/lib/notification-email'
-import { gateAdminMessages, refuseOutOfScope } from '../../_shared'
-import type { OrgScope } from '@/lib/access-scope'
+import { gateAdminMessages, refuseOutOfScope, type AdminMessagesContext } from '../../_shared'
 
 type Params = { params: Promise<{ source: string; id: string }> }
-type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 interface ResolvedThread {
   source: InboxSource
@@ -78,10 +76,10 @@ function channelThread(id: string, orgId: string): ResolvedThread {
 }
 
 async function resolveThread(
-  database: DrizzleDB,
-  scope: OrgScope,
+  ctx: AdminMessagesContext,
   input: { source: InboxSource; id: string; createdById: string; create: boolean },
 ): Promise<{ ok: false; response: NextResponse } | { ok: true; thread: ResolvedThread }> {
+  const { database, scope, requireRequestFeature } = ctx
   if (input.source === 'channel') {
     // An org id in the path is a request to open (or open up) that client's
     // standing line; a conversation id is the room itself. Both land on the
@@ -91,6 +89,7 @@ async function resolveThread(
         id: schema.conversations.id,
         orgId: schema.conversations.orgId,
         type: schema.conversations.type,
+        requestId: schema.conversations.requestId,
       })
       .from(schema.conversations)
       .where(and(
@@ -100,6 +99,10 @@ async function resolveThread(
       .limit(1)
 
     if (conversation?.orgId) {
+      if (conversation.requestId) {
+        const requestDenied = await requireRequestFeature()
+        if (requestDenied) return { ok: false, response: requestDenied }
+      }
       const denied = refuseOutOfScope(scope, conversation.orgId)
       if (denied) return { ok: false, response: denied }
       return { ok: true, thread: channelThread(conversation.id, conversation.orgId) }
@@ -164,11 +167,11 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { source, id } = await params
   if (!isInboxSource(source)) return NextResponse.json({ error: 'Unknown thread' }, { status: 404 })
 
-  const gate = await gateAdminMessages(req)
+  const gate = await gateAdminMessages(req, source)
   if (!gate.ok) return gate.response
   const { database, scope, viewer } = gate.ctx
 
-  const resolved = await resolveThread(database, scope, {
+  const resolved = await resolveThread(gate.ctx, {
     source, id, createdById: viewer.clerkUserId, create: false,
   })
   if (!resolved.ok) return resolved.response
@@ -233,9 +236,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const gate = await gateAdminMessages(req)
+  const gate = await gateAdminMessages(req, source)
   if (!gate.ok) return gate.response
-  const { database, scope, viewer } = gate.ctx
+  const { database, viewer } = gate.ctx
 
   const safeBody = sanitizeRichText(body.body ?? '')
   const attachmentIds = (body.attachmentFileIds ?? []).filter(Boolean)
@@ -247,7 +250,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     )
   }
 
-  const resolved = await resolveThread(database, scope, {
+  const resolved = await resolveThread(gate.ctx, {
     source, id, createdById: viewer.clerkUserId, create: true,
   })
   if (!resolved.ok) return resolved.response

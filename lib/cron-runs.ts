@@ -22,7 +22,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { createNotification } from '@/lib/notifications'
-import { requireStudioAdmin } from '@/lib/internal-route-access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -125,8 +124,6 @@ export async function assertCronAuth(req: NextRequest): Promise<CronAuthResult> 
   if (!auth.userId) {
     return { ok: false, userId: '', response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
-  const denied = await requireStudioAdmin(auth, 'settings')
-  if (denied) return { ok: false, userId: '', response: denied }
   return { ok: true, userId: auth.userId }
 }
 

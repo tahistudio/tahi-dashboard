@@ -9,7 +9,7 @@ import { requireReplyDraftAccess } from '@/lib/reply-draft-access'
  *
  * DELETE /api/admin/ai-reply-drafts/[id]
  *   Dismiss the draft. Status flips to 'dismissed' (kept for the
- *   tone-learning corpus , "what Liam rejected" is also information).
+ *   tone-learning corpus. "what Liam rejected" is also information).
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'

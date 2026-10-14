@@ -1,3 +1,4 @@
+import { resolvePermissions, can } from '@/lib/permissions'
 import { internalOrgFilter } from '@/lib/internal-route-access'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -31,11 +32,12 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const featureDenied = await requireFeature({ userId, orgId }, 'reports')
+  const access = await resolvePermissions(await db(), { userId, orgId })
+  const featureDenied = await requireFeature({ userId, orgId }, 'reports', access)
   if (featureDenied) return featureDenied
 
   const drizzle = (await db()) as D1
-  const orgScope = await scopedOrgIds({ userId, orgId })
+  const orgScope = await scopedOrgIds({ userId, orgId }, access)
 
   // Apply team-member scoping so a restricted PM only sees their clients here
   const scope = await getOrgScope(drizzle, userId)
@@ -218,7 +220,7 @@ export async function GET(req: NextRequest) {
       status: o.status,
       healthStatus: o.health_status,
       planType: o.plan_type,
-      mrrNzd,
+      ...(can(access, 'financial_reports') ? { mrrNzd } : {}),
       currency: o.preferred_currency ?? 'NZD',
       monthsActive,
       openRequests,

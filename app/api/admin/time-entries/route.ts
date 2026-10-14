@@ -1,3 +1,4 @@
+import { resolvePermissions } from '@/lib/permissions'
 import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/time-entries
@@ -133,11 +134,13 @@ export async function POST(req: NextRequest) {
   const auth = await getRequestAuth(req)
   const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const featureDenied = await requireFeature({ userId, orgId }, 'time')
+  const access = await resolvePermissions(await db(), auth)
+  const featureDenied = await requireFeature({ userId, orgId }, 'time', access)
   if (featureDenied) return featureDenied
   if (!userId) return NextResponse.json({ error: 'No user' }, { status: 400 })
 
   const body = await req.json().catch(() => null) as {
+    orgId?: string | null
     requestId?: string | null
     taskId?: string | null
     hours?: number
@@ -203,6 +206,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Cannot log time on this target (no org attached)' }, { status: 400 })
   }
 
+  if (body.orgId && body.orgId !== entryOrgId) {
+    return NextResponse.json({ error: 'orgId must match the target' }, { status: 400 })
+  }
+
   // Gate on the target's OWN client, which is what the caller is reaching
   // into. The hidden internal studio org is not a client: nobody is ever
   // scoped to it, so gating there 403'd every scoped team member out of
@@ -222,8 +229,8 @@ export async function POST(req: NextRequest) {
   // resolution for both now, and a caller who cannot be resolved is refused
   // rather than written as an orphan.
   const logger = await resolveLoggingTeamMemberId(drizzle, {
-    userId: attributedUserId(auth),
-    supplied: body.teamMemberId,
+    userId: access.isAdmin ? attributedUserId(auth) : userId,
+    supplied: access.isAdmin ? body.teamMemberId : null,
   })
   if (!logger.ok) return timeEntryFailureResponse(logger.failure)
 
@@ -239,7 +246,7 @@ export async function POST(req: NextRequest) {
     date,
     notes: body.notes ?? null,
     billable: body.billable,
-    hourlyRate: body.hourlyRate,
+    hourlyRate: access.isAdmin ? body.hourlyRate : undefined,
     startedAt,
     endedAt,
     source: 'manual',

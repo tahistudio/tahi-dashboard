@@ -29,6 +29,7 @@ import { eq, inArray, isNull, or, type SQL } from 'drizzle-orm'
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core'
 import { scopedOrgIds, type OrgScope } from '@/lib/access-scope'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { requireDealAccess } from '@/app/api/admin/deals/_access'
 
 type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -162,6 +163,14 @@ async function decideArtifactAccess(
   if (scope.kind === 'all') return null
   if (scope.kind === 'none') return forbidden()
   if (!artifact) return notFound()
+
+  if (artifact.dealId) {
+    const dealDenied = await requireDealAccess(database, auth, artifact.dealId, scope)
+    if (dealDenied) return dealDenied
+    const [deal] = await database.select({ orgId: schema.deals.orgId }).from(schema.deals)
+      .where(eq(schema.deals.id, artifact.dealId)).limit(1)
+    if (artifact.orgId && deal?.orgId !== artifact.orgId) return forbidden()
+  }
 
   const targetOrgId = await resolveArtifactOrgId(database, artifact)
   if (!targetOrgId) return forbidden()

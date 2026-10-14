@@ -1,14 +1,268 @@
 # T1.6 admin route access audit, 2026-10-14
 
-Batch D on chore/next20-n20d, baseline main 749b56b4. The first git status was clean. Changes are intentionally uncommitted. No migration, push, deployment, production data operation, TASKS.md edit or STATUS.md edit was performed.
+Batch D on chore/next20-n20d, baseline main 749b56b4. The first git status was clean. The original audit and repairs were committed as 67594c29. Both the regression and security reviews FAILED that commit. The follow-up repairs below are uncommitted. No migration, push, deployment, production data operation, TASKS.md edit or STATUS.md edit was performed.
 
-## Result and classification
+## Review repairs after FAILED 67594c29
+
+Started clean at 67594c29 on chore/next20-n20d. No commit, push, deploy, migration, production-data write, TASKS.md or STATUS.md edit in this follow-up. Both current seats are super_admin; these repairs prevent scoped-seat access failures and do not claim an exploit today.
+
+| Brief item | Current file:line | Change |
+| --- | --- | --- |
+| 1 | [lib/cron-runs.ts:118](../../../lib/cron-runs.ts#L118), [lib/cron-admin-access.ts:7](../../../lib/cron-admin-access.ts#L7) | Removed admin from shared cron auth. Manual workspace jobs alone retain admin checks. Scheduler secrets, transcript sweep guards and scoped counts-only digest behavior remain. |
+| 2 | [lib/messages-store.ts:289](../../../lib/messages-store.ts#L289), [lib/messages-store.ts:494](../../../lib/messages-store.ts#L494) | Removed new client-audience message-row organisation filters; studio scoping remains. |
+| 3 | [app/api/admin/requests/[id]/participants/route.ts:83](../../../app/api/admin/requests/[id]/participants/route.ts#L83), [app/api/admin/requests/[id]/route.ts:103](../../../app/api/admin/requests/[id]/route.ts#L103), [app/api/admin/requests/[id]/reads/route.ts:117](../../../app/api/admin/requests/[id]/reads/route.ts#L117), [lib/request-handoff.ts:116](../../../lib/request-handoff.ts#L116), [app/api/admin/requests/bulk-assign/route.ts:134](../../../app/api/admin/requests/bulk-assign/route.ts#L134) | Existing attached contact names, read receipts and handoff pointers remain visible. New foreign contacts remain rejected. Missing bulk contacts skip only that item with a reason. |
+| 4 | [app/api/admin/conversations/_access.ts:71](../../../app/api/admin/conversations/_access.ts#L71) | Orphaned request parents skip the request check. Existing org fences remain, and unrestricted scope passes. |
+| 5 | [app/api/admin/leads/triage-pipeline/route.ts:254](../../../app/api/admin/leads/triage-pipeline/route.ts#L254) | Fixed both visible triage messages, affected route/helper comments and brief labels with full stops or parentheses. No malformed comma spacing remains in app/api/admin or lib. |
+| 6 | [lib/internal-route-access.ts:21](../../../lib/internal-route-access.ts#L21), [lib/require-feature.ts:60](../../../lib/require-feature.ts#L60), [lib/require-admin.ts:9](../../../lib/require-admin.ts#L9) | Studio feature and admin checks share one access object. Time, clients, retainer reports, permission mutations and artifact deal scope reuse resolved access. Intentional boundary rechecks are noted below. |
+| 7 | [app/api/admin/webhooks/route.ts:24](../../../app/api/admin/webhooks/route.ts#L24) | H1: named integration/configuration handlers require settings.integrations and studio admin. Webhook secrets appear only at creation, never GET/PATCH. Airwallex debug deleted. Every handler anchor follows this table. |
+| 8 | [app/api/admin/onboarding-invites/route.ts:72](../../../app/api/admin/onboarding-invites/route.ts#L72), [app/api/admin/onboarding-invites/route.ts:83](../../../app/api/admin/onboarding-invites/route.ts#L83) | H2: POST requires admin; GET explicitly projects safe fields without token/link. |
+| 9 | [lib/meeting-recordings-server.ts:116](../../../lib/meeting-recordings-server.ts#L116), [lib/meeting-recordings-server.ts:373](../../../lib/meeting-recordings-server.ts#L373), [app/api/admin/call-transcripts/[id]/route.ts:97](../../../app/api/admin/call-transcripts/[id]/route.ts#L97), [app/api/admin/call-transcripts/[id]/route.ts:122](../../../app/api/admin/call-transcripts/[id]/route.ts#L122) | M1: discovery recordings check every parent, including reads, creation, linking and leases. List EXISTS scope precedes LIMIT. Recorder transcript GET/PATCH no longer bypass guardTranscript. |
+| 10 | [app/api/admin/deals/[id]/convert-to-client/route.ts:117](../../../app/api/admin/deals/[id]/convert-to-client/route.ts#L117), [app/api/admin/deals/[id]/convert-to-client/route.ts:142](../../../app/api/admin/deals/[id]/convert-to-client/route.ts#L142) | M2: contact-org relink checks actual org access before mutation; create-new-org requires admin. |
+| 11 | [app/api/admin/leads/[id]/route.ts:85](../../../app/api/admin/leads/[id]/route.ts#L85) | M3: lead detail uses the authenticated parent-call list, matching its calls sibling. |
+| 12 | [lib/overview-brief.ts:163](../../../lib/overview-brief.ts#L163), [lib/overview-brief.ts:339](../../../lib/overview-brief.ts#L339) | M4: discovery calls apply parent fences and denyAll; overnight replies fence both stored message org and request parent. |
+| 13 | [app/api/admin/_sales-access/artifact-scope.ts:168](../../../app/api/admin/_sales-access/artifact-scope.ts#L168) | M5: restricted artifacts check deal access and matching org parents. Earned unrestricted admin/service behavior remains, including legacy mixed links. |
+| 14 | [app/api/admin/messages/_shared.ts:57](../../../app/api/admin/messages/_shared.ts#L57), [app/api/admin/conversations/_access.ts:72](../../../app/api/admin/conversations/_access.ts#L72), [app/api/admin/conversations/route.ts:64](../../../app/api/admin/conversations/route.ts#L64), [app/api/admin/conversations/route.ts:320](../../../app/api/admin/conversations/route.ts#L320) | M6: request-source threads and request-linked conversations require requests. Inbox/list SQL, conversation creation and legacy request-linked org channels also enforce it. |
+| 15 | [app/api/admin/requests/[id]/files/route.ts:123](../../../app/api/admin/requests/[id]/files/route.ts#L123) | M7: storage-key prefix must equal request.orgId, matching uploads/confirm. Existing keys return 409 before insertion. |
+| 16 | [app/api/admin/requests/[id]/messages/route.ts:212](../../../app/api/admin/requests/[id]/messages/route.ts#L212) | M8: accepts the same request thread, or matching org plus conversation access. Private direct/group conversations with neither are refused. |
+| 17 | [app/api/admin/time/route.ts:179](../../../app/api/admin/time/route.ts#L179), [app/api/admin/time-entries/route.ts:233](../../../app/api/admin/time-entries/route.ts#L233), [app/api/admin/requests/[id]/time-entries/route.ts:59](../../../app/api/admin/requests/[id]/time-entries/route.ts#L59) | M9: derive request org and reject mismatches. Non-admin logger is the authenticated member, ignoring supplied member, attributed actor and hourly rate. Request time GET/POST require requests and time. Privileged body and actor behavior remains. |
+| 18 | [app/api/admin/pipeline/stages/route.ts:150](../../../app/api/admin/pipeline/stages/route.ts#L150), [app/api/admin/pipeline/stages/[id]/route.ts:23](../../../app/api/admin/pipeline/stages/[id]/route.ts#L23), [app/api/admin/pipeline/seed/route.ts:22](../../../app/api/admin/pipeline/seed/route.ts#L22) | M10: stage POST/PUT/DELETE and seed POST require studio admin plus deals. |
+| 19 | [lib/client-billing-access.ts:11](../../../lib/client-billing-access.ts#L11), [app/api/admin/clients/[id]/route.ts:69](../../../app/api/admin/clients/[id]/route.ts#L69), [app/api/admin/clients/[id]/route.ts:313](../../../app/api/admin/clients/[id]/route.ts#L313), [app/api/admin/reports/retainer-health/route.ts:223](../../../app/api/admin/reports/retainer-health/route.ts#L223), [app/api/admin/reports/retainer-alerts/route.ts:188](../../../app/api/admin/reports/retainer-alerts/route.ts#L188) | M11: clients list/detail and subscription projection redact billing/processor/internal fields without clients.billing_card; PATCH refuses protected writes and GET skips billing auto-derivation without that feature. Retainer responses omit mrrNzd without financial_reports. |
+| 20 | [app/api/admin/email-suppressions/route.ts:42](../../../app/api/admin/email-suppressions/route.ts#L42) | M12: email suppressions GET requires admin. |
+| 21 | [lib/super-admin-safety.ts:28](../../../lib/super-admin-safety.ts#L28), [lib/super-admin-safety.ts:57](../../../lib/super-admin-safety.ts#L57), [app/api/admin/permissions/assign-role/route.ts:54](../../../app/api/admin/permissions/assign-role/route.ts#L54), [app/api/admin/permissions/copy-access/route.ts:87](../../../app/api/admin/permissions/copy-access/route.ts#L87), [app/api/admin/team/[id]/route.ts:73](../../../app/api/admin/team/[id]/route.ts#L73) | M13: super-only owner grants, privileged copies, login/legacy-role edits and owner deletion. Protect last role and last usable login. Serialise mutations, refresh authority after lock, atomically batch replacements and test rollback. |
+| 22 | [app/api/__tests__/admin-route-guard-walk.test.ts:1044](../../../app/api/__tests__/admin-route-guard-walk.test.ts#L1044), [lib/sitemap-auth.ts:40](../../../lib/sitemap-auth.ts#L40), [lib/require-permission.ts:18](../../../lib/require-permission.ts#L18) | Require real studio identity or verified alternate credentials, reject allow-by-default-only gates and prove getRequestAuth provenance. Permission management and sitemap API helpers now check studio identity. Exact mixed-source and alternate-identity proofs inspect their real guard bodies. |
+| 23 | [app/api/__tests__/privileged-route-access-sqlite.test.ts:56](../../../app/api/__tests__/privileged-route-access-sqlite.test.ts#L56), [app/api/__tests__/sales-review-sqlite.test.ts:94](../../../app/api/__tests__/sales-review-sqlite.test.ts#L94), [app/api/__tests__/nested-client-scope-sqlite.test.ts:124](../../../app/api/__tests__/nested-client-scope-sqlite.test.ts#L124) | Real viewer view grants and project_manager fixtures cover every named privileged handler and foreign conversion/relink/artifact parent scenarios. Admin/super_admin/api-service controls preserve permitted operations; service remains admin, not super_admin. |
+| 24 | [lib/recorder-devices.ts:43](../../../lib/recorder-devices.ts#L43), [app/api/admin/forms/resolve/route.ts:21](../../../app/api/admin/forms/resolve/route.ts#L21), [app/api/admin/deals/[id]/route.ts:528](../../../app/api/admin/deals/[id]/route.ts#L528) | Only requested Low fixes: authenticated device owner with explicit verified-service branch; requests-gated intake; parameterised deal stage-dwell SQL. |
+
+### H1 handler anchors
+
+- GET [app/api/admin/webhooks/route.ts:29](../../../app/api/admin/webhooks/route.ts#L29); POST [app/api/admin/webhooks/route.ts:67](../../../app/api/admin/webhooks/route.ts#L67); PATCH [app/api/admin/webhooks/route.ts:124](../../../app/api/admin/webhooks/route.ts#L124); DELETE [app/api/admin/webhooks/route.ts:196](../../../app/api/admin/webhooks/route.ts#L196)
+- GET [app/api/admin/integrations/google/start/route.ts:62](../../../app/api/admin/integrations/google/start/route.ts#L62)
+- GET [app/api/admin/integrations/xero/connect/route.ts:24](../../../app/api/admin/integrations/xero/connect/route.ts#L24)
+- PUT [app/api/admin/integrations/slack/route.ts:58](../../../app/api/admin/integrations/slack/route.ts#L58); POST [app/api/admin/integrations/slack/route.ts:120](../../../app/api/admin/integrations/slack/route.ts#L120)
+- POST [app/api/admin/integrations/stripe/provision/route.ts:35](../../../app/api/admin/integrations/stripe/provision/route.ts#L35); GET [app/api/admin/integrations/stripe/provision/route.ts:121](../../../app/api/admin/integrations/stripe/provision/route.ts#L121)
+- POST [app/api/admin/integrations/stripe/setup-plans/route.ts:65](../../../app/api/admin/integrations/stripe/setup-plans/route.ts#L65); GET [app/api/admin/integrations/stripe/setup-plans/route.ts:81](../../../app/api/admin/integrations/stripe/setup-plans/route.ts#L81)
+- GET [app/api/admin/integrations/zapier/route.ts:19](../../../app/api/admin/integrations/zapier/route.ts#L19); POST [app/api/admin/integrations/zapier/route.ts:67](../../../app/api/admin/integrations/zapier/route.ts#L67)
+- GET [app/api/admin/integrations/mailerlite/route.ts:17](../../../app/api/admin/integrations/mailerlite/route.ts#L17); PUT [app/api/admin/integrations/mailerlite/route.ts:48](../../../app/api/admin/integrations/mailerlite/route.ts#L48); POST [app/api/admin/integrations/mailerlite/route.ts:73](../../../app/api/admin/integrations/mailerlite/route.ts#L73)
+- GET [app/api/admin/integrations/rewardful/route.ts:15](../../../app/api/admin/integrations/rewardful/route.ts#L15); POST [app/api/admin/integrations/rewardful/route.ts:44](../../../app/api/admin/integrations/rewardful/route.ts#L44)
+- POST [app/api/admin/integrations/buffer/schedule-posts/route.ts:63](../../../app/api/admin/integrations/buffer/schedule-posts/route.ts#L63)
+- GET [app/api/admin/integrations/xero/profit-loss/route.ts:10](../../../app/api/admin/integrations/xero/profit-loss/route.ts#L10)
+- GET [app/api/admin/integrations/xero/balance-sheet/route.ts:10](../../../app/api/admin/integrations/xero/balance-sheet/route.ts#L10)
+- GET [app/api/admin/integrations/xero/bank-summary/route.ts:34](../../../app/api/admin/integrations/xero/bank-summary/route.ts#L34)
+
+Deleted app/api/admin/integrations/airwallex/debug/route.ts (former GET at 67594c29). Webhook PATCH/DELETE also require the same admin gate; GET/PATCH explicitly project fields without the signing secret.
+
+### Performance and compatibility notes
+
+requireStudioAdmin resolves once and shares access with feature/role checks. Time, client and retainer report handlers share resolved feature access; retainer scope receives the same access. Conversation parent checks reuse resolved org scope; artifacts pass prepared scope to the deal guard. The new guards have admin, super_admin and verified api-service controls. API-service never becomes super_admin through recorded attribution.
+
+Owner mutation permission checks intentionally repeat after the shared lock: another worker may revoke the caller while it waits. Recording leases deliberately recheck current parent access. Existing transcript/recording helper boundaries and conversion's independent feature/admin boundary still resolve separately. Modern request messages combine messages/requests in one resolution. Mixed inbox, conversation list and legacy request-linked channels separately check requests because denial selectively hides those rows; lazy checks are cached per handler. These retained reads are documented P3 follow-ups.
+
+The owner lock uses the existing settings table, with an atomic upsert, value-matched release in finally and five-minute expiry for an aborted worker. Replacement roles and legacy synchronisation use D1 batches. The SQLite harness now models batch transaction/rollback and the production settings unique key locally. No migration was added or applied.
+
+### Open review items
+
+H3, the systemic action-level permission model, remains OPEN as a separate planned batch. A viewer's seeded view grants must eventually be distinct from create/edit/delete privileges across the dashboard. This batch blocks the explicitly named privileged operations and parent escapes, without claiming that a scoped viewer can no longer perform every unrelated mutation.
+
+All remaining Low findings stay OPEN, except the three fixes in item 24. Existing MCP audit/copy author attribution in permissions/team writes still records api-service in places; it is documented for that remaining batch. Invoice channel/payment-term action permissions also remain part of H3. Earned unrestricted artifact access and established counts-only cron behavior are deliberate compatibility conventions.
+
+### Follow-up test and gate evidence
+
+Final fail-closed checks passed, exit 0 at every stage. Type-check, lint, MCP worker tsc, cron-trigger worker tsc and then the touched/related sandbox Vitest run completed against the final code. No build, push, deploy or live QA is claimed.
+
+| Check | Final follow-up result |
+| --- | --- |
+| npm run type-check | tsc --noEmit, zero errors |
+| CI=1 npm run lint | Zero errors, 79 existing warnings |
+| MCP worker tsc | tsc --noEmit -p workers/mcp-server/tsconfig.json, zero errors |
+| Cron-trigger worker tsc | tsc --noEmit -p workers/cron-trigger/tsconfig.json, zero errors |
+| Sandbox Vitest | Test Files 163 passed (163); Tests 3591 passed (3591), 61.24 seconds |
+| Added-code rule scan | Zero any types, console.log, em or en dash additions, including new files |
+| git diff --check | Passed |
+| Protected files and HEAD | TASKS.md and STATUS.md unchanged; HEAD remains 67594c29 |
+| Current handler walk | 418 route files, 592 HTTP exports (one debug GET deleted), all visited |
+
+New files: privileged-route-access-sqlite.test.ts (197 tests), route-review-messaging-sqlite.test.ts (22), sales-review-sqlite.test.ts (17), t1-6-time-billing-sqlite.test.ts (33), lib/__tests__/sitemap-auth.test.ts (4). The guard walker now has 20 tests, including actual auth provenance, lexical shadowing, auth/access mutation, forged prepared permissions, early success exits, consumed OAuth nonce/expiry and OR-tautology scope. Its 22 feature exceptions remain exact; 19 mixed-source and 10 alternate-identity methods have checked AST proofs. A separate reviewer reproduced all six reported false passes and verified their rejection.
+
+Expanded existing tests cover missing bulk contacts, request message feature denials, forged recorder attribution and one-resolution studio guards. Business mocks now explicitly state authorized admin roles. Permission-only test handles permit exactly the resolver opening and throw on business queries. Original contact visibility assertions were corrected per the regression review while independent studio-row fences remain tested. Last-owner tests cover unusable login links, concurrent demotions, contention/expiry, batch failure rollback and caller revocation while waiting for a claim.
+
+The three named cron suites pass with their original assertions: 17 digest, 14 transcript wiring and 25 transcript SQLite tests. Independent owner-safety and guard-walker rechecks passed. Full final test selection and raw local outputs are retained in .claude/t1-6-review/ (gitignored); the selected files are listed below for reproduction.
+
+<details>
+<summary>Final 163 touched and related Vitest files</summary>
+
+- app/api/__tests__/admin-audit-prefix.test.ts
+- app/api/__tests__/admin-client-invoice-channel.test.ts
+- app/api/__tests__/admin-client-lifecycle.test.ts
+- app/api/__tests__/admin-client-plan-type.test.ts
+- app/api/__tests__/admin-clients-default-pm.test.ts
+- app/api/__tests__/admin-clients-invite.test.ts
+- app/api/__tests__/admin-clients-plan-default.test.ts
+- app/api/__tests__/admin-clients.test.ts
+- app/api/__tests__/admin-contacts-manage.test.ts
+- app/api/__tests__/admin-conversation-message-mentions.test.ts
+- app/api/__tests__/admin-crons-list.test.ts
+- app/api/__tests__/admin-deal-convert-plan.test.ts
+- app/api/__tests__/admin-email-suppressions.test.ts
+- app/api/__tests__/admin-feedback-delete.test.ts
+- app/api/__tests__/admin-feedback-get.test.ts
+- app/api/__tests__/admin-import-cleanup.test.ts
+- app/api/__tests__/admin-import-manyrequests-snapshot-key.test.ts
+- app/api/__tests__/admin-import-manyrequests-snapshot.test.ts
+- app/api/__tests__/admin-import-manyrequests.test.ts
+- app/api/__tests__/admin-invoice-dedupe-manyrequests.test.ts
+- app/api/__tests__/admin-invoice-dedupe-stripe.test.ts
+- app/api/__tests__/admin-invoice-detail.test.ts
+- app/api/__tests__/admin-invoice-numbers.test.ts
+- app/api/__tests__/admin-invoice-xero-email-mode.test.ts
+- app/api/__tests__/admin-invoice-xero-push.test.ts
+- app/api/__tests__/admin-recording-chunks.test.ts
+- app/api/__tests__/admin-request-message-gates.test.ts
+- app/api/__tests__/admin-request-thread.test.ts
+- app/api/__tests__/admin-requests-create-status.test.ts
+- app/api/__tests__/admin-requests-scoping.test.ts
+- app/api/__tests__/admin-requests.test.ts
+- app/api/__tests__/admin-route-guard-walk.test.ts
+- app/api/__tests__/admin-scoping-routes.test.ts
+- app/api/__tests__/admin-settings-default-pm.test.ts
+- app/api/__tests__/admin-settings-email-delivery.test.ts
+- app/api/__tests__/admin-settings-invoice-channel.test.ts
+- app/api/__tests__/admin-settings-studio-pm.test.ts
+- app/api/__tests__/admin-stripe-link-customer.test.ts
+- app/api/__tests__/admin-stripe-recover-invoice.test.ts
+- app/api/__tests__/admin-subscription-delete.test.ts
+- app/api/__tests__/admin-time-entries.test.ts
+- app/api/__tests__/admin-time-entry-owner.test.ts
+- app/api/__tests__/admin-time-rate.test.ts
+- app/api/__tests__/admin-timers.test.ts
+- app/api/__tests__/admin-welcome-invite.test.ts
+- app/api/__tests__/ai-predict-fields.test.ts
+- app/api/__tests__/ai-request-wizard-routes.test.ts
+- app/api/__tests__/airwallex-sync-yield-marker.test.ts
+- app/api/__tests__/billing-hourly-export.test.ts
+- app/api/__tests__/billing-invoice-flow.test.ts
+- app/api/__tests__/bulk-assign-assignee.test.ts
+- app/api/__tests__/clerk-invite-allowlist.test.ts
+- app/api/__tests__/contract-body-lock.test.ts
+- app/api/__tests__/contract-expiry-admin.test.ts
+- app/api/__tests__/contract-marked-signed.test.ts
+- app/api/__tests__/contract-revoke-reset.test.ts
+- app/api/__tests__/contract-signed-pdf-routes.test.ts
+- app/api/__tests__/cron-suggest-from-transcripts-sqlite.test.ts
+- app/api/__tests__/dashboard-guide.test.ts
+- app/api/__tests__/developer-handoff-route.test.ts
+- app/api/__tests__/docs-proposal-permissions.test.ts
+- app/api/__tests__/invoice-aging-buckets.test.ts
+- app/api/__tests__/invoice-drafts-not-owed.test.ts
+- app/api/__tests__/invoice-email-allowlist.test.ts
+- app/api/__tests__/invoice-ledger-routes.test.ts
+- app/api/__tests__/mcp-actor-attribution-routes.test.ts
+- app/api/__tests__/mcp-calls-meeting-type-parity.test.ts
+- app/api/__tests__/messages-routes.test.ts
+- app/api/__tests__/nested-client-scope-sqlite.test.ts
+- app/api/__tests__/onboarding-invites-mint.test.ts
+- app/api/__tests__/overview-replies-waiting.test.ts
+- app/api/__tests__/permission-write-guards.test.ts
+- app/api/__tests__/permissions-copy-access.test.ts
+- app/api/__tests__/permissions-matrix.test.ts
+- app/api/__tests__/permissions-route-guards.test.ts
+- app/api/__tests__/pipeline-capacity.test.ts
+- app/api/__tests__/pipeline-stages-put.test.ts
+- app/api/__tests__/portal-acting-as.test.ts
+- app/api/__tests__/portal-invoice-denials.test.ts
+- app/api/__tests__/portal-invoice-drafts-hidden.test.ts
+- app/api/__tests__/portal-invoice-pay-path.test.ts
+- app/api/__tests__/portal-plan-truth.test.ts
+- app/api/__tests__/portal-project-published-schedule.test.ts
+- app/api/__tests__/portal-request-acting-submit.test.ts
+- app/api/__tests__/portal-request-created-notify.test.ts
+- app/api/__tests__/portal-request-numbering.test.ts
+- app/api/__tests__/portal-request-patch.test.ts
+- app/api/__tests__/portal-request-projection.test.ts
+- app/api/__tests__/portal-request-reads.test.ts
+- app/api/__tests__/portal-request-team-fanout.test.ts
+- app/api/__tests__/portal-tracks-reorder-synthetic.test.ts
+- app/api/__tests__/privileged-route-access-sqlite.test.ts
+- app/api/__tests__/proposal-share-snapshot.test.ts
+- app/api/__tests__/public-lead-secret.test.ts
+- app/api/__tests__/recorder-device-auth-pairing.test.ts
+- app/api/__tests__/recorder-recordings.test.ts
+- app/api/__tests__/request-assignment-ping.test.ts
+- app/api/__tests__/request-auto-handback.test.ts
+- app/api/__tests__/request-status-fanout.test.ts
+- app/api/__tests__/route-review-messaging-sqlite.test.ts
+- app/api/__tests__/sales-artifact-feature-guards.test.ts
+- app/api/__tests__/sales-artifact-scope.test.ts
+- app/api/__tests__/sales-email-publish-guard.test.ts
+- app/api/__tests__/sales-review-sqlite.test.ts
+- app/api/__tests__/schedule-section-boundaries.test.ts
+- app/api/__tests__/schedule-share-snapshot.test.ts
+- app/api/__tests__/scoped-reports-permissions.test.ts
+- app/api/__tests__/services-org-scope.test.ts
+- app/api/__tests__/share-suppression-reporting.test.ts
+- app/api/__tests__/snapshot-metrics-route.test.ts
+- app/api/__tests__/stripe-create-allowlist.test.ts
+- app/api/__tests__/t1-6-internal-routes.test.ts
+- app/api/__tests__/t1-6-org-routes.test.ts
+- app/api/__tests__/t1-6-support-routes.test.ts
+- app/api/__tests__/t1-6-time-billing-sqlite.test.ts
+- app/api/__tests__/time-stamp-invoiced.test.ts
+- app/api/__tests__/xero-contact-identity-sqlite.test.ts
+- app/api/__tests__/xero-import-sync-routes.test.ts
+- app/api/admin/call-transcripts/__tests__/list-scope.test.ts
+- app/api/admin/call-transcripts/__tests__/patch-link.test.ts
+- app/api/admin/calls/__tests__/patch-link-fields.test.ts
+- app/api/admin/calls/__tests__/prep-note.test.ts
+- app/api/admin/calls/__tests__/reminder-window.test.ts
+- app/api/admin/db/migrate/__tests__/migrate-authorization-sqlite.test.ts
+- app/api/admin/discovery-calls/__tests__/patch-link-fields.test.ts
+- app/api/admin/discovery-calls/__tests__/prep-note.test.ts
+- app/api/admin/integrations/google/__tests__/sync-calendar-meeting-type.test.ts
+- app/api/admin/integrations/google/__tests__/sync-drive-transcripts.test.ts
+- app/api/admin/requests/[id]/__tests__/handoff.test.ts
+- app/api/admin/requests/[id]/__tests__/participants.test.ts
+- app/api/admin/requests/__tests__/waiting-on.test.ts
+- app/api/admin/task-suggestions/__tests__/rebuild-route.test.ts
+- app/api/admin/task-suggestions/__tests__/suggestion-edited-proposal-sqlite.test.ts
+- app/api/admin/task-suggestions/__tests__/suggestion-feature-guards.test.ts
+- app/api/admin/task-suggestions/__tests__/suggestion-release-guards-sqlite.test.ts
+- app/api/admin/task-suggestions/__tests__/suggestion-zero-scope-sqlite.test.ts
+- app/api/admin/task-suggestions/__tests__/task-suggestions-routes.test.ts
+- app/api/admin/tasks/__tests__/tasks-bulk.test.ts
+- app/api/admin/tasks/__tests__/tasks-comments.test.ts
+- app/api/admin/tasks/__tests__/tasks-create.test.ts
+- app/api/admin/tasks/__tests__/tasks-enrichment.test.ts
+- app/api/admin/tasks/__tests__/tasks-from-template.test.ts
+- app/api/admin/tasks/__tests__/tasks-patch.test.ts
+- app/api/admin/tasks/__tests__/tasks-promote.test.ts
+- app/api/portal/requests/[id]/__tests__/handback.test.ts
+- app/api/portal/requests/__tests__/waiting-on.test.ts
+- lib/__tests__/calls-meeting-type.test.ts
+- lib/__tests__/cron-secret.test.ts
+- lib/__tests__/messages-store.test.ts
+- lib/__tests__/request-handoff-nudge.test.ts
+- lib/__tests__/request-handoff.test.ts
+- lib/__tests__/require-feature-guards.test.ts
+- lib/__tests__/route-org-filter.test.ts
+- lib/__tests__/sitemap-auth.test.ts
+- lib/__tests__/tahi-bot.test.ts
+- lib/__tests__/task-suggester-retry-sqlite.test.ts
+- lib/__tests__/xero-import-identity-sqlite.test.ts
+- lib/calls.test.ts
+- lib/overview-brief.test.ts
+- lib/recording-transcript-client.test.ts
+- lib/slack/__tests__/client-dm-safety.test.ts
+- lib/slack/__tests__/recipient-permissions-sqlite.test.ts
+- lib/task-suggester.test.ts
+
+</details>
+
+## Original inventory and classification at 67594c29
 
 The inventory covers every explicit HTTP export in all 419 app/api/admin route.ts files: 593 handlers. Each method has its own classification. Framework-generated unsupported-method/OPTIONS responses carry no application data and are not separate exports.
 
 - A: owning feature gate plus client scope for org-owned reads/writes. Minimal owner/link metadata may be looked up to decide access; business content is guarded or SQL-filtered before pagination.
 - B: intentional studio-global, admin, service or personal-account surface, with an owning feature/role/verified-service guard. Exact intentional self-service and callback exceptions are documented below.
-- C: a feature/role or client-scope gap at the baseline. All baseline C handlers are repaired.
+- C: a feature/role or client-scope gap at the baseline. The original inventory classified all baseline C handlers as repaired. The failed reviews showed that this was insufficient proof; H3 remains a separate planned batch.
 
 | Method class | Baseline | After repairs |
 | --- | ---: | ---: |
@@ -351,7 +605,7 @@ Every repaired handler is listed here. Locations anchor the handler containing t
 | --- | --- |
 | [lib/require-admin.ts:1](../../../lib/require-admin.ts#L1) | Full-workspace role guard, verified service first. |
 | [lib/internal-route-access.ts:1](../../../lib/internal-route-access.ts#L1) | Mixed-source feature/owner SQL fences, including messages and current timer parents. |
-| [lib/cron-runs.ts:1](../../../lib/cron-runs.ts#L1) | Manual cron calls require settings/admin; scheduler-secret auth remains. |
+| [lib/cron-runs.ts:1](../../../lib/cron-runs.ts#L1) | Shared auth accepts authenticated studio sessions and verified scheduler secrets. Manual workspace routes retain admin guards; scoped counts-only digest runs remain allowed. |
 | [lib/require-admin-resource.ts:1](../../../lib/require-admin-resource.ts#L1) | View analytics inherit contract/proposal/schedule feature and owner. |
 | [lib/timer-access.ts:1](../../../lib/timer-access.ts#L1) | Current timer targets checked independently of recorded ownership; admins/service keep orphan disposal. |
 | [lib/discovery-call-access.ts:1](../../../lib/discovery-call-access.ts#L1) | All polymorphic call parents checked before LIMIT and content. |
@@ -361,10 +615,10 @@ Every repaired handler is listed here. Locations anchor the handler containing t
 | [lib/route-org-filter.ts:1](../../../lib/route-org-filter.ts#L1) | Validated literal scopes avoid accumulated binds and SQL input injection. |
 | [lib/calls.ts:1](../../../lib/calls.ts#L1) | Nested call listing takes authenticated scope. |
 | [lib/blockers-server.ts:1](../../../lib/blockers-server.ts#L1) | Far-end blockers redact denied features and foreign owners. |
-| [lib/request-handoff.ts:1](../../../lib/request-handoff.ts#L1) | Waiting-on contact metadata must belong to the request org. |
-| [lib/messages-store.ts:1](../../../lib/messages-store.ts#L1) | Inbox/thread rows and contact metadata follow client/scoped studio ownership, with unrestricted studio behavior retained. |
+| [lib/request-handoff.ts:1](../../../lib/request-handoff.ts#L1) | New contact attachments must match the request org. Existing attached contact names and handoff pointers remain visible. |
+| [lib/messages-store.ts:1](../../../lib/messages-store.ts#L1) | Studio row scoping remains. The client-audience message-row filters were reverted, preserving established thread visibility. |
 
-## Tests and gate evidence
+## Original tests and gate evidence at 67594c29 (reviews failed)
 
 - admin-route-guard-walk.test.ts: AST-based walk of every explicit admin HTTP method, checked denial propagation, delegated handlers, valid feature keys, wrapper configuration and resolved role checks. Imports/comments/unchecked guards do not count. New sibling handlers cannot borrow a gate. Exact exceptions must not become stale.
 - t1-6-org-routes.test.ts: every repaired org handler is invoked as a denied-feature scoped seat.
@@ -385,7 +639,7 @@ Final fail-closed gate passed with exit 0 for every stage:
 | Inventory/export reconciliation | 593 exports, no missing or duplicate method rows |
 | git diff --check | Passed |
 
-The related run includes all touched test files and tests importing affected routes/helpers. It is not the repository-wide suite or a build/deploy claim. Independent review cleared the repaired access paths after checking malformed links and privileged preservation.
+The related run includes all touched test files and tests importing affected routes/helpers. It is not the repository-wide suite or a build/deploy claim. The subsequent regression and security reviews both failed 67594c29. Their repairs are recorded above.
 
 Reproduce the local checks with CI=1 for npm run lint and node scripts/run-vitest-sandbox.mjs followed by the test files listed below. Type-check runs before lint, and a failure stops the remaining stages. The normal esbuild runner and non-CI Next lint attempted child processes blocked by sandbox EPERM. The tracked scripts/run-vitest-sandbox.mjs runs the same Vitest assertions through worker threads and TypeScript transforms; CI=1 skips the Cloudflare dev proxy for npm run lint. No test assertion or production guard is disabled to make the gate pass.
 

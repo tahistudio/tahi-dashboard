@@ -1,5 +1,5 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
-import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
 import { getStripe, STRIPE_PLANS, STRIPE_CURRENCY, allLookupKeys, currencyOptionsFor, type PlanConfig } from '@/lib/stripe-plans'
@@ -62,7 +62,7 @@ async function ensurePlan(stripe: Stripe, plan: PlanConfig) {
 export async function POST(req: NextRequest) {
   const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const stripe = getStripe()
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 
   const stripe = getStripe()

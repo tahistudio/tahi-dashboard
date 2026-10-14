@@ -6,6 +6,7 @@ import type { DB } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireManagePermissions } from '@/lib/require-permission'
 import { requireFeature } from '@/lib/require-feature'
+import { acquireOwnerMutationLock, requireSuperAdminRetention, revalidateOwnerMutationAccess } from '@/lib/super-admin-safety'
 import { logAudit } from '@/lib/audit'
 
 type Params = { params: Promise<{ id: string }> }
@@ -26,9 +27,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  const { denied } = await requireManagePermissions(drizzle, auth)
+  const { denied, access } = await requireManagePermissions(drizzle, auth)
   if (denied) return denied
-  const featureDenied = await requireFeature(auth, 'team')
+  const featureDenied = await requireFeature(auth, 'team', access)
   if (featureDenied) return featureDenied
 
   const { id } = await params
@@ -47,50 +48,74 @@ export async function PUT(req: NextRequest, { params }: Params) {
     roles?: string[]
   }
 
-  // Verify team member exists
-  const [existing] = await drizzle
-    .select({ id: schema.teamMembers.id, clerkUserId: schema.teamMembers.clerkUserId })
-    .from(schema.teamMembers)
-    .where(eq(schema.teamMembers.id, id))
-    .limit(1)
+  const mutation = body.clerkUserId !== undefined || body.role !== undefined
+    ? await acquireOwnerMutationLock(drizzle)
+    : { denied: null, release: async () => {} }
+  if (mutation.denied) return mutation.denied
+  try {
+    const current = body.clerkUserId !== undefined || body.role !== undefined
+      ? await revalidateOwnerMutationAccess(drizzle, auth, 'team')
+      : { denied: null, access }
+    if (current.denied) return current.denied
+    const currentAccess = current.access
+    // Verify team member exists
+    const [existing] = await drizzle
+      .select({ id: schema.teamMembers.id, clerkUserId: schema.teamMembers.clerkUserId, role: schema.teamMembers.role })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.id, id))
+      .limit(1)
 
-  if (!existing) {
-    return NextResponse.json({ error: 'Team member not found' }, { status: 404 })
+    if (!existing) {
+      return NextResponse.json({ error: 'Team member not found' }, { status: 404 })
+    }
+
+    const nextClerkUserId = body.clerkUserId?.trim() || null
+    const changesLogin = body.clerkUserId !== undefined && nextClerkUserId !== existing.clerkUserId
+    const changesLegacyRole = body.role !== undefined && body.role !== existing.role
+    if ((changesLogin || changesLegacyRole) && !currentAccess.isSuperAdmin) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if ((changesLogin && !nextClerkUserId) || (changesLegacyRole && body.role !== 'admin')) {
+      const retentionDenied = await requireSuperAdminRetention(drizzle, currentAccess, id)
+      if (retentionDenied) return retentionDenied
+    }
+
+    const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
+
+    if (body.name !== undefined) updates.name = body.name.trim()
+    if (body.email !== undefined) updates.email = body.email.trim()
+    if (body.title !== undefined) updates.title = body.title?.trim() ?? null
+    if (body.role !== undefined) updates.role = body.role
+    if (body.skills !== undefined) updates.skills = JSON.stringify(body.skills)
+    if (body.avatarUrl !== undefined) updates.avatarUrl = body.avatarUrl
+    if (body.weeklyCapacityHours !== undefined) updates.weeklyCapacityHours = body.weeklyCapacityHours
+    if (body.isContractor !== undefined) updates.isContractor = body.isContractor
+    if (body.clerkUserId !== undefined) updates.clerkUserId = nextClerkUserId
+    if (body.department !== undefined) updates.department = body.department
+    if (body.reportsToId !== undefined) updates.reportsToId = body.reportsToId
+    if (body.roles !== undefined) updates.roles = JSON.stringify(body.roles)
+
+    await drizzle
+      .update(schema.teamMembers)
+      .set(updates)
+      .where(eq(schema.teamMembers.id, id))
+
+    // Re-pointing a login is the single highest-impact edit on this row, so it
+    // gets its own audit entry rather than being buried in a generic update.
+    if (changesLogin) {
+      await logAudit(drizzle as unknown as DB, {
+        action: 'team_member.login_relinked',
+        userId: auth.userId,
+        entityType: 'team_member',
+        entityId: id,
+        metadata: { before: existing.clerkUserId, after: nextClerkUserId },
+      })
+    }
+
+    return NextResponse.json({ success: true })
+  } finally {
+    await mutation.release()
   }
-
-  const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
-
-  if (body.name !== undefined) updates.name = body.name.trim()
-  if (body.email !== undefined) updates.email = body.email.trim()
-  if (body.title !== undefined) updates.title = body.title?.trim() ?? null
-  if (body.role !== undefined) updates.role = body.role
-  if (body.skills !== undefined) updates.skills = JSON.stringify(body.skills)
-  if (body.avatarUrl !== undefined) updates.avatarUrl = body.avatarUrl
-  if (body.weeklyCapacityHours !== undefined) updates.weeklyCapacityHours = body.weeklyCapacityHours
-  if (body.isContractor !== undefined) updates.isContractor = body.isContractor
-  if (body.clerkUserId !== undefined) updates.clerkUserId = body.clerkUserId
-  if (body.department !== undefined) updates.department = body.department
-  if (body.reportsToId !== undefined) updates.reportsToId = body.reportsToId
-  if (body.roles !== undefined) updates.roles = JSON.stringify(body.roles)
-
-  await drizzle
-    .update(schema.teamMembers)
-    .set(updates)
-    .where(eq(schema.teamMembers.id, id))
-
-  // Re-pointing a login is the single highest-impact edit on this row, so it
-  // gets its own audit entry rather than being buried in a generic update.
-  if (body.clerkUserId !== undefined && body.clerkUserId !== existing.clerkUserId) {
-    await logAudit(drizzle as unknown as DB, {
-      action: 'team_member.login_relinked',
-      userId: auth.userId,
-      entityType: 'team_member',
-      entityId: id,
-      metadata: { before: existing.clerkUserId, after: body.clerkUserId },
-    })
-  }
-
-  return NextResponse.json({ success: true })
 }
 
 // -- DELETE /api/admin/team/[id] --
@@ -106,38 +131,50 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  const { denied } = await requireManagePermissions(drizzle, auth)
+  const { denied, access } = await requireManagePermissions(drizzle, auth)
   if (denied) return denied
-  const featureDenied = await requireFeature(auth, 'team')
+  const featureDenied = await requireFeature(auth, 'team', access)
   if (featureDenied) return featureDenied
 
   const { id } = await params
 
-  const [existing] = await drizzle
-    .select({ name: schema.teamMembers.name, email: schema.teamMembers.email })
-    .from(schema.teamMembers)
-    .where(eq(schema.teamMembers.id, id))
-    .limit(1)
+  const mutation = await acquireOwnerMutationLock(drizzle)
+  if (mutation.denied) return mutation.denied
+  try {
+    const current = await revalidateOwnerMutationAccess(drizzle, auth, 'team')
+    if (current.denied) return current.denied
+    const access = current.access
+    const [existing] = await drizzle
+      .select({ name: schema.teamMembers.name, email: schema.teamMembers.email })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.id, id))
+      .limit(1)
 
-  // Delete access rules first, then the team member
-  const accessRules = await drizzle
-    .select({ id: schema.teamMemberAccess.id })
-    .from(schema.teamMemberAccess)
-    .where(eq(schema.teamMemberAccess.teamMemberId, id))
+    const retentionDenied = await requireSuperAdminRetention(drizzle, access, id)
+    if (retentionDenied) return retentionDenied
 
-  for (const rule of accessRules) {
-    await drizzle.delete(schema.teamMemberAccessOrgs).where(eq(schema.teamMemberAccessOrgs.accessId, rule.id))
+    // Delete access rules first, then the team member
+    const accessRules = await drizzle
+      .select({ id: schema.teamMemberAccess.id })
+      .from(schema.teamMemberAccess)
+      .where(eq(schema.teamMemberAccess.teamMemberId, id))
+
+    for (const rule of accessRules) {
+      await drizzle.delete(schema.teamMemberAccessOrgs).where(eq(schema.teamMemberAccessOrgs.accessId, rule.id))
+    }
+    await drizzle.delete(schema.teamMemberAccess).where(eq(schema.teamMemberAccess.teamMemberId, id))
+    await drizzle.delete(schema.teamMembers).where(eq(schema.teamMembers.id, id))
+
+    await logAudit(drizzle as unknown as DB, {
+      action: 'team_member.deleted',
+      userId: auth.userId,
+      entityType: 'team_member',
+      entityId: id,
+      metadata: { name: existing?.name ?? null, email: existing?.email ?? null },
+    })
+
+    return NextResponse.json({ success: true })
+  } finally {
+    await mutation.release()
   }
-  await drizzle.delete(schema.teamMemberAccess).where(eq(schema.teamMemberAccess.teamMemberId, id))
-  await drizzle.delete(schema.teamMembers).where(eq(schema.teamMembers.id, id))
-
-  await logAudit(drizzle as unknown as DB, {
-    action: 'team_member.deleted',
-    userId: auth.userId,
-    entityType: 'team_member',
-    entityId: id,
-    metadata: { name: existing?.name ?? null, email: existing?.email ?? null },
-  })
-
-  return NextResponse.json({ success: true })
 }
