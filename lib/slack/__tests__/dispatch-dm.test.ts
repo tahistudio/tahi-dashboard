@@ -216,6 +216,40 @@ describe('transcribeAudio', () => {
 })
 
 describe('handleSlackDm', () => {
+  it.each(['Hi', 'hello', 'hey', 'help', 'what can you do'])('answers %s with help before the note or status path', async text => {
+    const setStatus = vi.fn()
+    const result = await handleSlackDm(event({ text }), deps({ setStatus }))
+    expect(result.reason).toBe('help')
+    expect(noteCalls).toHaveLength(0)
+    expect(setStatus).not.toHaveBeenCalled()
+    expect(posted).toHaveLength(1)
+    expect(posted[0].text).toContain('What is waiting on me?')
+    expect(posted[0].text).toContain('Task for me:')
+  })
+
+  it.each(['What should I work on today?', 'what is waiting on me', "what's due today", "what's due this week", "what's overdue", 'my tasks', 'what needs approving', 'Who owns this client?'])('never files the question %s', async text => {
+    const result = await handleSlackDm(event({ text }), deps())
+    expect(result.reason).toBe('question')
+    expect(noteCalls).toHaveLength(0)
+    expect(posted).toHaveLength(1)
+  })
+
+  it('never files a question in a voice note', async () => {
+    cfEnv.AI = { run: async () => ({ text: 'What should I work on today?' }) }
+    const result = await handleSlackDm(event({ text: '', files: [AUDIO_FILE] }), deps({ downloadFile: async () => new Uint8Array([1]).buffer }))
+    expect(result.reason).toBe('question')
+    expect(result.voice).toBe(true)
+    expect(noteCalls).toHaveLength(0)
+  })
+
+  it('keeps the stranger line for a greeting or question', async () => {
+    for (const text of ['hi', 'what is waiting on me']) {
+      await handleSlackDm(event({ text }), deps({ identity: identity({ level: 'unknown' }) }))
+    }
+    expect(noteCalls).toHaveLength(0)
+    expect(posted.map(message => message.text)).toEqual([SLACK_DENIED_REPLY, SLACK_DENIED_REPLY])
+  })
+
   it('turns a typed DM into a note and replies with one message per suggestion', async () => {
     const outcome = await handleSlackDm(event(), deps())
     expect(outcome.handled).toBe(true)
@@ -226,6 +260,16 @@ describe('handleSlackDm', () => {
     expect(posted).toHaveLength(2)
     expect(posted[0].text).toBe('Here is what I understood.')
     expect(posted[0].channel).toBe('D1')
+  })
+
+  it('keeps a client selected in Tweak on a repeated ambiguous note card', async () => {
+    noteResult.orgId = null
+    noteResult.orgName = null
+    noteResult.rows = [liamsRow({ orgName: 'Chosen Client', proposal: { title: 'Send invoice' } })]
+    const messages: Array<{ blocks?: unknown[] }> = []
+    await handleSlackDm(event(), deps({ postMessage: async (message: { blocks?: unknown[] }) => { messages.push(message) } }))
+    expect(JSON.stringify(messages[1].blocks)).toContain('Chosen Client')
+    expect(JSON.stringify(messages[1].blocks)).not.toContain('*Studio*')
   })
 
   it('answers an unknown user with one sentence and never reaches the note path', async () => {

@@ -207,6 +207,90 @@ describe('resolveOrgFromText', () => {
 })
 
 describe('draftFromNote, a team member', () => {
+  it('files the live Elevate invoice example under its trading-name client with the NZ due date', async () => {
+    const elevate = { id: 'o_elevate', name: 'Telcom Networks Limited trading as Elevate' }
+    const text = 'Task for me: send Elevate their October invoice by Friday'
+    await draftFromNote({ database: fakeDb({ organisations: [elevate] }), text, identity: identity(),
+      now: new Date('2026-10-14T00:00:00Z'),
+      suggest: suggesterReturning([suggestion({ quote: text, proposal: {
+        title: 'Send Elevate October invoice', description: 'Send Elevate their October invoice by Friday.', type: 'tahi_internal',
+      } })]),
+    })
+    expect(contextReads).toEqual(['o_elevate'])
+    expect(insertedDrafts[0][0]).toMatchObject({ orgId: 'o_elevate', proposal: {
+      orgId: 'o_elevate', type: 'internal_client_task', dueDate: '2026-10-16', description: '',
+    } })
+  })
+
+  it('loads aliases and contact names from the existing CRM fields', async () => {
+    const org = { id: 'o_elevate', name: 'Telcom Networks Limited', customFields: '{"shortName":"Elevate"}' }
+    for (const text of ['Send Elevate an invoice', 'Send Sam Smith an invoice']) {
+      await draftFromNote({ database: fakeDb({ organisations: [org], contacts: [{ orgId: org.id, name: 'Sam Smith' }] }),
+        text, identity: identity(), suggest: suggesterReturning([suggestion({ quote: text })]),
+      })
+    }
+    expect(insertedDrafts.map(batch => batch[0].orgId)).toEqual(['o_elevate', 'o_elevate'])
+  })
+
+  it('parses the full note date for one item when the model quote omits it', async () => {
+    await draftFromNote({ database: fakeDb({ organisations: [] }), text: 'Send the October invoice by Friday',
+      identity: identity(), now: new Date('2026-10-14T00:00:00Z'),
+      suggest: suggesterReturning([suggestion({ quote: 'Send the October invoice', proposal: { title: 'Send October invoice' } })]),
+    })
+    expect(insertedDrafts[0][0]).toMatchObject({ quote: 'Send the October invoice', proposal: { dueDate: '2026-10-16' } })
+  })
+
+  it('asks for a narrower client when the candidate list would overflow a Slack card', async () => {
+    const model = vi.fn(suggesterReturning([suggestion()]))
+    const orgs = Array.from({ length: 21 }, (_, i) => ({ id: `org${i}`, name: `Client ${i} trading as Elevate` }))
+    const result = await draftFromNote({ database: fakeDb({ organisations: orgs }), text: 'Send Elevate an invoice', identity: identity(), suggest: model })
+    expect(result.reason).toBe('nothing_understood')
+    expect(result.reply).toContain('Name one client more specifically')
+    expect(model).not.toHaveBeenCalled()
+    expect(insertedDrafts).toHaveLength(0)
+  })
+
+  it('does not return a selected-client row through its old studio dedupe key after access is revoked', async () => {
+    scopeFor = () => ['o_kiwi']
+    insertResult = { inserted: 0, duplicates: 1, similarDropped: 0 }
+    const text = 'Send the invoice'
+    const dedupeKey = await buildDedupeKey({ sourceKind: 'note', transcriptId: null, kind: 'create_task',
+      proposal: { title: 'Send invoice' }, orgId: null, approverType: 'member', approverId: 'tm_liam', quote: text })
+    const selected = { id: 'selected', kind: 'create_task', orgId: 'o_giant', status: 'pending',
+      approverType: 'member', approverId: 'tm_liam', dedupeKey,
+      proposal: JSON.stringify({ title: 'Send invoice', orgId: 'o_giant' }), quote: 'PRIVATE selected-client ask',
+    }
+    const result = await draftFromNote({ database: fakeDb({ organisations: [], task_suggestions: [selected] }), text,
+      identity: identity({ level: 'member' }), suggest: suggesterReturning([suggestion({ quote: text, proposal: { title: 'Send invoice' } })]),
+    })
+    expect(result.rows).toEqual([])
+    expect(JSON.stringify(result)).not.toContain('PRIVATE')
+    expect(result.orgName).toBeNull()
+  })
+
+  it('keeps ambiguity for Tweak and does not give the model either client context', async () => {
+    const text = 'Send Elevate an invoice'
+    const orgs = [{ id: 'one', name: 'One trading as Elevate' }, { id: 'two', name: 'Two trading as Elevate' }]
+    await draftFromNote({ database: fakeDb({ organisations: orgs }), text, identity: identity(),
+      suggest: suggesterReturning([suggestion({ quote: text, proposal: { title: 'Send invoice', orgId: 'invented' } })]),
+    })
+    expect(contextReads).toEqual([null])
+    expect(insertedDrafts[0][0]).toMatchObject({ orgId: null, proposal: { orgId: null, slackClientChoices: orgs } })
+  })
+
+  it('does not expose ambiguous choices if one candidate is outside the sender scope', async () => {
+    scopeFor = () => ['one']
+    const model = vi.fn(suggesterReturning([suggestion()]))
+    const result = await draftFromNote({
+      database: fakeDb({ organisations: [{ id: 'one', name: 'One trading as Elevate' }, { id: 'two', name: 'Two trading as Elevate' }] }),
+      text: 'Send Elevate an invoice', identity: identity({ level: 'member' }), suggest: model,
+    })
+    expect(result.reason).toBe('denied')
+    expect(result.rows).toEqual([])
+    expect(model).not.toHaveBeenCalled()
+    expect(insertedDrafts).toEqual([])
+  })
+
   it('files the sender as the approver and resolves the org from the text', async () => {
     const database = fakeDb({ organisations: ORGS, task_suggestions: [] })
     const result = await draftFromNote({
@@ -308,7 +392,7 @@ describe('draftFromNote, a client', () => {
     const proposal = draft.proposal as Record<string, unknown>
     expect(proposal.requesterContactId).toBe('c_ngaire')
     expect(proposal.requesterName).toBe('Ngaire Reid')
-    expect(String(proposal.description)).toContain('hero image')
+    expect(proposal.description).toBe('')
     expect(draft.quote).toContain('hero image')
   })
 

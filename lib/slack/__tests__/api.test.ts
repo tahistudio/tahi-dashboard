@@ -171,6 +171,14 @@ describe('agent mode (contract section 6b)', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('omits thread_ts for new agent_view channel prompts', async () => {
+    await setSuggestedPrompts({ channelId: 'D1', prompts: [{ title: 'My work', message: 'My tasks' }] })
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      channel_id: 'D1',
+      prompts: [{ title: 'My work', message: 'My tasks' }],
+    })
+  })
+
   it('swallows a refusal, because a status line is never worth failing a note over', async () => {
     responder = () => json({ ok: false, error: 'missing_scope' })
     await expect(setStatus({ channelId: 'D1', threadTs: '1758.1', status: 'Reading your note' })).resolves.toBeUndefined()

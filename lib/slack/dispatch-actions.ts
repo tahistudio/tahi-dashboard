@@ -45,6 +45,11 @@
  * digest's `digest:*` url button with it.
  */
 
+import { and, eq, isNull } from 'drizzle-orm'
+import { schema } from '@/db/d1'
+import { asRecord } from '@/lib/suggestion-summary'
+import { updateMessage } from '@/lib/slack/api'
+import { clientChoicesFromProposal, MAX_CLIENT_CHOICES } from '@/lib/slack/note-quality'
 import {
   registerBlockActionHandler,
   type SlackBlockActionContext,
@@ -54,6 +59,7 @@ import {
   DIGEST_ACTION_PREFIX,
   SUGGESTION_ACTION_PREFIX,
   parseSuggestionActionId,
+  suggestionMessage,
   type SuggestionActionName,
 } from '@/lib/slack/blocks'
 import { clientMayFileRequests, studioReachesOrg } from '@/lib/slack/entitlement'
@@ -67,6 +73,7 @@ import {
 } from '@/lib/slack/mirror'
 import {
   CONTACT_REQUIRED,
+  CLIENT_REQUIRED,
   POSSIBLE_DUPLICATE,
   REQUEST_KINDS,
   TASK_KINDS,
@@ -76,6 +83,7 @@ import {
   snoozePreset,
   type AttachTarget,
   type DecisionInput,
+  type SuggestionRow,
 } from '@/lib/task-suggestions'
 
 /** The lines the bot says back. Plain sentences, no jargon, no dashes. */
@@ -84,6 +92,7 @@ export const DISPATCH_LINES = {
   gone: 'That suggestion is not there any more.',
   alreadyDecided: 'That one was already decided.',
   contactRequired: 'Pick who it is waiting on first, on Tweak.',
+  clientRequired: 'Client? Use Tweak to choose the client, then approve the updated card.',
   attachUnreadable: 'I could not tell what to attach that to.',
 } as const
 
@@ -158,6 +167,7 @@ function decisionFor(action: SuggestionActionName, value: string | null): Decisi
       return target ? { action: 'attach', target } : null
     }
     case 'tweak':
+    case 'choose_client':
       return null
   }
 }
@@ -204,7 +214,7 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
 
   // Tweak is a url button. Slack still sends the interaction, and the honest
   // response is nothing at all: the dashboard is already opening.
-  if (parsed.action === 'tweak') return answer(null)
+  if (parsed.action === 'tweak' && ctx.payload.value !== 'choose_client') return answer(null)
 
   const identity: SlackIdentity | null = ctx.identity
     ?? await findSlackIdentity(ctx.drizzle, { teamId: ctx.payload.slackTeamId, userId: ctx.payload.slackUserId })
@@ -220,6 +230,10 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   const row = await loadSuggestion(ctx.drizzle, parsed.suggestionId)
   if (!row) return answer(studio ? DISPATCH_LINES.gone : SLACK_DENIED_LINE)
   if (!canDecideSuggestion(identity, row)) return answer(SLACK_DENIED_LINE)
+
+  if (parsed.action === 'choose_client' || parsed.action === 'tweak') {
+    return clientChoicePress(ctx, identity, row, parsed.action === 'choose_client')
+  }
 
   // A studio person the studio cannot name is a decision that cannot be
   // audited, so it is not made. This is a setup problem, not a refusal, and
@@ -273,6 +287,7 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   }
 
   if (result.error === CONTACT_REQUIRED) return answer(DISPATCH_LINES.contactRequired)
+  if (result.error === CLIENT_REQUIRED) return answer(DISPATCH_LINES.clientRequired)
 
   // An attach rewrites what the row proposes and leaves it pending: the human
   // still presses the button, so the message keeps its buttons and shows what
@@ -288,6 +303,52 @@ export async function handleSuggestionAction(ctx: SlackBlockActionContext): Prom
   // telling the person their press did nothing.
   await tidy(ctx, result.suggestion)
   return answer(result.changed ? null : DISPATCH_LINES.alreadyDecided)
+}
+
+/** Resolve a note's client on its own private card. This never applies the work. */
+async function clientChoicePress(
+  ctx: SlackBlockActionContext,
+  identity: SlackIdentity,
+  row: SuggestionRow,
+  select: boolean,
+): Promise<SlackBlockActionResult> {
+  const actorId = identity.teamMemberId
+  const choices = clientChoicesFromProposal(row.proposal)
+  if (!isStudioLevel(identity.level) || !actorId || row.approverType !== 'member' || row.approverId !== actorId
+    || row.sourceKind !== 'note' || row.orgId !== null || row.status !== 'pending'
+    || (row.kind !== 'create_task' && row.kind !== 'create_request') || choices.length < 2 || choices.length > MAX_CLIENT_CHOICES
+    || !ctx.payload.channelId || ctx.payload.channelId !== identity.dmChannelId || !ctx.payload.messageTs) {
+    return answer(SLACK_DENIED_LINE)
+  }
+  // Every candidate must still be accessible before any name is shown.
+  const currentChoices: Array<{ id: string; name: string }> = []
+  for (const choice of choices) {
+    if (!await studioReachesOrg(ctx.drizzle, actorId, choice.id, ['tasks', 'requests'])) return answer(SLACK_DENIED_LINE)
+    const [org] = await ctx.drizzle.select({ id: schema.organisations.id, name: schema.organisations.name })
+      .from(schema.organisations).where(eq(schema.organisations.id, choice.id)).limit(1)
+    if (!org) return answer(SLACK_DENIED_LINE)
+    currentChoices.push(org)
+  }
+  if (!select) {
+    const message = suggestionMessage({ ...row, proposal: { ...asRecord(row.proposal), slackClientChoices: currentChoices } }, { chooseClient: true })
+    await updateMessage({ channel: ctx.payload.channelId, ts: ctx.payload.messageTs, ...message })
+    return answer(null)
+  }
+  const selected = currentChoices.find(choice => choice.id === ctx.payload.value)
+  if (!selected) return answer(SLACK_DENIED_LINE)
+  const proposal: Record<string, unknown> = { ...asRecord(row.proposal), orgId: selected.id }
+  delete proposal.slackClientChoices
+  if (row.kind === 'create_task' && proposal.type !== 'client_task') proposal.type = 'internal_client_task'
+  const updated = await ctx.drizzle.update(schema.taskSuggestions)
+    .set({ orgId: selected.id, proposal: JSON.stringify(proposal), updatedAt: new Date().toISOString() })
+    .where(and(eq(schema.taskSuggestions.id, row.id), eq(schema.taskSuggestions.status, 'pending'),
+      eq(schema.taskSuggestions.approverId, actorId), isNull(schema.taskSuggestions.orgId),
+      eq(schema.taskSuggestions.proposal, row.proposal)))
+    .returning({ id: schema.taskSuggestions.id })
+  if (updated.length === 0) return answer(DISPATCH_LINES.alreadyDecided)
+  const message = suggestionMessage({ ...row, orgName: selected.name, proposal })
+  await updateMessage({ channel: ctx.payload.channelId, ts: ctx.payload.messageTs, ...message })
+  return answer(null)
 }
 
 /**

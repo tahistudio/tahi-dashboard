@@ -26,6 +26,7 @@ import {
   decidedMessage,
   escapeSlackText,
   formatCallDay,
+  dueDateLine,
   parseSuggestionActionId,
   quoteBlock,
   slackLink,
@@ -178,6 +179,32 @@ describe('the quote, the assignee and the confidence', () => {
 })
 
 describe('the buttons', () => {
+  it('labels an ambiguous client and reveals the choices only through Tweak', () => {
+    const input = row({ orgName: null, proposal: { title: 'Send invoice', slackClientChoices: [{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }] } })
+    const initial = suggestionMessage(input)
+    expect(textOf(initial)).toContain('*Client?*')
+    expect(buttons(initial).map(button => button.label)).toEqual(['Tweak', 'Tonight', 'This week', 'Reject'])
+    expect(buttons(initial)[0]).toMatchObject({ value: 'choose_client', url: undefined })
+    const tweaked = suggestionMessage(input, { chooseClient: true })
+    expect(textOf(tweaked)).toContain('Choose one, then approve')
+    expect(textOf(tweaked)).toContain('"value":"one"')
+    expect(textOf(tweaked)).toContain('"value":"two"')
+    expect(textOf(initial)).not.toContain('"value":"one"')
+    for (const block of tweaked.blocks) {
+      if (block.type === 'actions') expect(new Set(block.elements.map(button => button.action_id)).size).toBe(block.elements.length)
+    }
+  })
+
+  it('shows full legal and trading names beside short client-choice buttons', () => {
+    const name = 'Telcom Networks Limited trading as Elevate and a very long business unit name for testing'
+    const payload = suggestionMessage(row({ orgName: null, proposal: {
+      title: 'Send invoice', slackClientChoices: [{ id: 'one', name }, { id: 'two', name: 'Another trading as Elevate' }],
+    } }), { chooseClient: true })
+    const choice = payload.blocks.find(block => block.type === 'section' && block.accessory?.value === 'one')
+    expect(choice?.type === 'section' && choice.text.text).toBe(name)
+    expect(choice?.type === 'section' && choice.accessory?.text.text).toBe('Choose 1')
+  })
+
   it('offers the five things a founder can do, in reading order', () => {
     expect(buttons(suggestionMessage(row())).map(b => b.label))
       .toEqual(['Approve', 'Tweak', 'Tonight', 'This week', 'Reject'])
@@ -344,6 +371,15 @@ describe('slackLink', () => {
 })
 
 describe('Slack text, which is not markdown', () => {
+  it('shows a date-only deadline on a studio and client card, and validates it', () => {
+    const proposal = { title: 'Send invoice', dueDate: '2026-10-16' }
+    expect(dueDateLine(proposal)).toBe('Due Fri 16 Oct')
+    expect(textOf(suggestionMessage(row({ proposal })))).toContain('Due Fri 16 Oct')
+    expect(textOf(clientDraftMessage({ id: 's9', kind: 'create_request', proposal, quote: '' }))).toContain('Due Fri 16 Oct')
+    expect(dueDateLine({ dueDate: '2026-02-31' })).toBeNull()
+    expect(dueDateLine({ dueDate: 'invalid' })).toBeNull()
+  })
+
   it('escapes the three characters Slack reads as its own', () => {
     expect(escapeSlackText('Fish & Chips <b> 3 > 2')).toBe('Fish &amp; Chips &lt;b&gt; 3 &gt; 2')
   })

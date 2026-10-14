@@ -19,10 +19,9 @@
  *   Liam's inbox would make the inbox unreadable within a week, which is the
  *   one failure the whole feature exists to avoid.
  *
- *   THE ORG, for a studio note. It is read out of the text by exact name from
- *   the roster, or it is null and the row is studio housekeeping. There is no
- *   middle setting: a suggestion filed under the wrong client is worse than
- *   one filed under none, because the wrong one looks right.
+ *   THE ORG, for a studio note. Legal names, trading names, CRM aliases and
+ *   contact names are matched against the roster. An ambiguous create waits
+ *   for its sender to choose a client on Tweak before it can be approved.
  *
  *   THE CLIENT PATH, which never reaches the model. A client's DM IS the
  *   request. Running it through a suggester would hand them a paraphrase to
@@ -52,6 +51,17 @@ import {
 } from '@/lib/task-suggester'
 import { clientMayFileRequests, studioReachesOrg } from './entitlement'
 import { SLACK_DENIED_REPLY, can, isStudioLevel, type SlackIdentity } from './identity'
+import { SLACK_NOTE_HELP_LINE } from './intents'
+import {
+  enrichNoteProposal,
+  MAX_CLIENT_CHOICES,
+  matchOrgsFromText,
+  orgAliases,
+  studioDate,
+  type OrgNameOption,
+} from './note-quality'
+
+export type { OrgNameOption } from './note-quality'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -72,7 +82,7 @@ const MAX_CLIENT_TITLE = 120
 
 export const NOTE_REPLY_TEAM = 'Here is what I understood.'
 export const NOTE_REPLY_CLIENT = 'Is this the request?'
-export const NOTE_REPLY_NOTHING = 'I could not find anything to file from that. Say it as one clear ask and I will try again.'
+export const NOTE_REPLY_NOTHING = SLACK_NOTE_HELP_LINE
 export const NOTE_REPLY_FAILED = 'I could not read that one just now. Try again in a minute.'
 /** Nothing new was filed and nothing of the sender's is still open to show. */
 export const NOTE_REPLY_TEAM_ON_FILE = 'That is already on file, so there is nothing new to approve.'
@@ -95,6 +105,7 @@ export interface NoteSuggestionRow {
   approverType: string
   approverId: string | null
   orgId: string | null
+  orgName?: string | null
   status: string
 }
 
@@ -159,18 +170,8 @@ export interface DraftFromNoteInput {
   now?: Date
 }
 
-/** A client on the roster, as the name matcher reads one. */
-export interface OrgNameOption {
-  id: string
-  name: string
-}
-
-function escapeForRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 /**
- * The client this note is about, by exact name, or nothing.
+ * The client this note is about, by a unique roster name, or nothing.
  *
  * The match is on a word boundary so "Kiwi Labs" does not fire on
  * "kiwilabsomething", and it is case blind because nobody capitalises a
@@ -183,34 +184,23 @@ function escapeForRegExp(value: string): string {
  * the longer name is the one the text actually spells out.
  */
 export function resolveOrgFromText(text: string, orgs: readonly OrgNameOption[]): string | null {
-  const haystack = text.toLowerCase()
-
-  const matches = orgs.filter(org => {
-    const name = org.name.trim().toLowerCase()
-    if (name.length < 2) return false
-    return new RegExp(`(^|[^a-z0-9])${escapeForRegExp(name)}([^a-z0-9]|$)`, 'i').test(haystack)
-  })
-
-  if (matches.length === 0) return null
-  if (matches.length === 1) return matches[0].id
-
-  const longest = matches.reduce((best, org) => (org.name.trim().length > best.name.trim().length ? org : best), matches[0])
-  const ties = matches.filter(org => org.name.trim().length === longest.name.trim().length)
-  if (ties.length > 1) return null
-
-  // One name containing another is one mention spelled out; two unrelated
-  // names are two clients and no answer.
-  const longestName = longest.name.trim().toLowerCase()
-  const nested = matches.every(org => longestName.includes(org.name.trim().toLowerCase()))
-  return nested ? longest.id : null
+  const matches = matchOrgsFromText(text, orgs)
+  return matches.length === 1 ? matches[0].id : null
 }
 
 async function loadOrgRoster(database: Drizzle): Promise<OrgNameOption[]> {
   const rows = await database
-    .select({ id: schema.organisations.id, name: schema.organisations.name })
+    .select({ id: schema.organisations.id, name: schema.organisations.name,
+      customFields: schema.organisations.customFields, brands: schema.organisations.brands })
     .from(schema.organisations)
     .limit(ORG_ROSTER_LIMIT)
-  return rows.map(row => ({ id: row.id, name: row.name }))
+  const contacts = await database.select({ orgId: schema.contacts.orgId, name: schema.contacts.name })
+    .from(schema.contacts).limit(1500)
+  return rows.map(row => ({
+    id: row.id, name: row.name,
+    aliases: orgAliases(row.customFields, row.brands),
+    contactNames: contacts.filter(contact => contact.orgId === row.id).map(contact => contact.name),
+  }))
 }
 
 async function orgNameOf(database: Drizzle, orgId: string | null): Promise<string | null> {
@@ -287,6 +277,11 @@ async function readBack(
         status: row.status,
       }
       if (!noteRowBelongsTo(identity, candidate)) continue
+      // A selected client keeps the original note key. Recheck the stored
+      // client, because the sender's access may have changed since selection.
+      if (isStudioLevel(identity.level) && (!identity.teamMemberId
+        || !await studioReachesOrg(database, identity.teamMemberId, candidate.orgId, ['tasks', 'requests']))) continue
+      candidate.orgName = await orgNameOf(database, candidate.orgId)
       seen.add(row.id)
       out.push(candidate)
     }
@@ -388,8 +383,14 @@ async function studioNoteDraft(
   const suggest = input.suggest ?? suggestFromTranscript
 
   const roster = await loadOrgRoster(database)
-  const orgId = resolveOrgFromText(text, roster)
+  const choices = matchOrgsFromText(text, roster)
+  const orgId = choices.length === 1 ? choices[0].id : null
   const orgName = orgId ? roster.find(org => org.id === orgId)?.name ?? null : null
+  if (choices.length > MAX_CLIENT_CHOICES) {
+    return { ok: false, reason: 'nothing_understood', reply: 'Name one client more specifically, then send the note again.',
+      orgId: null, orgName: null, approverType: 'member', approverId: teamMemberId,
+      inserted: 0, duplicates: 0, rows: [] }
+  }
 
   // Rule 11, before the model reads anything. The client is picked from the
   // whole roster by name, and the suggester's context is that client's open
@@ -399,6 +400,10 @@ async function studioNoteDraft(
   // Notes can propose both kinds of work. Do not load mixed context or file
   // cards unless the sender can use both features, including with no client.
   if (!await studioReachesOrg(database, teamMemberId, orgId, ['tasks', 'requests'])) return denied()
+  // An ambiguous note must not reveal names outside this sender's access.
+  for (const choice of choices.length > 1 ? choices : []) {
+    if (!await studioReachesOrg(database, teamMemberId, choice.id, ['tasks', 'requests'])) return denied()
+  }
 
   let suggestions
   try {
@@ -407,7 +412,7 @@ async function studioNoteDraft(
       transcript: text,
       wrapUp: null,
       callTitle: null,
-      callDate: at.toISOString().slice(0, 10),
+      callDate: studioDate(at),
       context,
     })
     suggestions = result.suggestions
@@ -455,7 +460,8 @@ async function studioNoteDraft(
     kind: suggestion.kind,
     targetTaskId: suggestion.targetTaskId,
     targetRequestId: suggestion.targetRequestId,
-    proposal: suggestion.proposal,
+    proposal: enrichNoteProposal({ kind: suggestion.kind, proposal: suggestion.proposal,
+      quote: suggestion.quote, dueDateText: kept.length === 1 ? text : suggestion.quote, at, orgId, choices }),
     quote: suggestion.quote,
     rationale: suggestion.rationale,
     confidence: suggestion.confidence,
@@ -517,7 +523,8 @@ async function clientRequestDraft(
     kind: 'create_request' as SuggestionKind,
     targetTaskId: null,
     targetRequestId: null,
-    proposal: {
+    proposal: enrichNoteProposal({ kind: 'create_request', quote: text,
+      at: input.now ?? new Date(), orgId: identity.orgId, choices: [], proposal: {
       title: titleFrom(text),
       description: text,
       // Category, type and priority are left out rather than guessed. The
@@ -526,7 +533,7 @@ async function clientRequestDraft(
       // put a number on a guess.
       requesterName,
       requesterContactId: identity.contactId,
-    },
+    } }),
     // The note IS the source, so the quote is the note. That keeps the same
     // invariant every other suggestion carries: the words are checkable.
     quote: text,
