@@ -1150,3 +1150,34 @@ hits spawn EPERM. Logs: .wrangler/rec0-review-type-check.log,
 .wrangler/rec0-review-vitest.log. Independent QA source review and UIUX
 spacing review pass. No build, browser/live or provider test was claimed.
 All repair changes stay uncommitted; REC.0 stays open.
+
+## 2026-10-14, REC.0 phase 1b last review notes, uncommitted follow-up
+
+Started with clean git status on feat/rec0-phase1b at HEAD 807adc35. Initial
+phase 1b is committed as 3570d4e5, and the review repairs are committed as
+807adc35. Opus re-review passed with notes. Liam requested only this small
+follow-up, left uncommitted on top, with no push, deployment, migration,
+production data or secret change.
+
+Fold PCM WAV remainders shorter than two seconds into the previous part,
+including real 30.02-second and 60.01-second rotations without exceeding
+1 MiB. Continue with paid in-memory Nova output if its create-only R2 cache
+write throws. Use the renewed 15-minute lease only when a group attempt is
+possible; otherwise retain the three-minute lease. Delete cached Nova JSON
+with the audio. Gate manual Whisper fallback to admins in both route and
+button, using the existing delete-audio permissions. Malformed transcription
+JSON returns 400. STATUS.md and TASKS.md now distinguish the two commits from
+this uncommitted follow-up. REC.0 stays open with no phase 1b live claim.
+
+Requested fail-closed gates passed: npm run type-check exit 0; CI=1 npm run
+lint exit 0 (existing warnings); npx tsc --noEmit -p
+workers/mcp-server/tsconfig.json exit 0; touched Vitest files
+app/api/__tests__/admin-recording-chunks.test.ts (42 tests) and
+lib/__tests__/recording-group-audio.test.ts (17 tests), 2 files / 59 tests
+passed, exit 0. Used the existing ignored native sandbox config because
+standard Vitest startup hits esbuild spawn EPERM. Gate logs are
+.wrangler/rec0-last-type-check.log, .wrangler/rec0-last-lint.log,
+.wrangler/rec0-last-worker-tsc.log and .wrangler/rec0-last-vitest.log.
+Independent QA and UIUX source reviews pass. No build, browser/live or real
+provider test was claimed. All follow-up changes remain uncommitted at
+HEAD 807adc35; no push, deploy, migration or production change occurred.

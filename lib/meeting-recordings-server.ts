@@ -141,7 +141,7 @@ async function storage(): Promise<R2Bucket> {
 }
 
 /** A database compare-and-swap settles concurrent retries before any R2/AI write. */
-export async function withRecordingLease<T>(context: RecordingContext, work: (row: RecordingRow, token: string) => Promise<T>, allowDeleted = false, leaseMs = RECORDING_LEASE_MS): Promise<T> {
+export async function withRecordingLease<T>(context: RecordingContext, work: (row: RecordingRow, token: string, extendLease: (durationMs: number) => Promise<void>) => Promise<T>, allowDeleted = false, leaseMs = RECORDING_LEASE_MS): Promise<T> {
   const id = context.recording?.id
   if (!id) throw new RecordingError('Recording not found.', 404)
   const now = new Date().toISOString()
@@ -156,15 +156,26 @@ export async function withRecordingLease<T>(context: RecordingContext, work: (ro
   }
   let renewal = Promise.resolve()
   let renewalError: unknown
-  const heartbeat = leaseMs > RECORDING_LEASE_MS ? setInterval(() => {
-    renewal = renewal.then(async () => {
-      await updateLeased(context, token, { leaseUntil: new Date(Date.now() + leaseMs).toISOString() })
-    }).catch(error => { renewalError = error })
-  }, 60_000) : undefined
+  let activeLeaseMs = leaseMs
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+  const startHeartbeat = () => {
+    if (heartbeat !== undefined || activeLeaseMs <= RECORDING_LEASE_MS) return
+    heartbeat = setInterval(() => {
+      renewal = renewal.then(async () => {
+        await updateLeased(context, token, { leaseUntil: new Date(Date.now() + activeLeaseMs).toISOString() })
+      }).catch(error => { renewalError = error })
+    }, 60_000)
+  }
+  const extendLease = async (durationMs: number) => {
+    await updateLeased(context, token, { leaseUntil: new Date(Date.now() + durationMs).toISOString() })
+    activeLeaseMs = durationMs
+    startHeartbeat()
+  }
+  startHeartbeat()
   try {
     const denied = await requireAccessToOrgOrPreClient(context.database, context.auth.userId, claimed[0].orgId)
     if (denied) throw new RecordingError('Forbidden', denied.status)
-    const result = await work(claimed[0], token)
+    const result = await work(claimed[0], token, extendLease)
     if (renewalError) throw renewalError
     return result
   }
@@ -460,10 +471,15 @@ async function transcribeSystemGroup(context: RecordingContext, row: RecordingRo
   }, {
     read: readResult,
     async create(value) {
-      const saved = await bucket.put(resultKey, JSON.stringify(value), {
-        onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: 'application/json' },
-      })
-      if (saved) return value
+      try {
+        const saved = await bucket.put(resultKey, JSON.stringify(value), {
+          onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: 'application/json' },
+        })
+        if (saved) return value
+      } catch (error) {
+        console.error('Could not retain Nova recording results; using the completed inference:', error)
+        return value
+      }
       const existing = await readResult()
       if (!existing) throw new RecordingError('Speaker results could not be retained. Retry the saved recording.', 503)
       return existing.value
@@ -517,7 +533,11 @@ async function useWhisperForSystem(context: RecordingContext, row: RecordingRow,
 
 /** Mic and standard mode process one chunk; group mode streams the system track once. */
 export async function transcribeNextChunk(context: RecordingContext, withoutSpeakerSeparation = false): Promise<MeetingRecordingDetail> {
-  await withRecordingLease(context, async (row, lease) => {
+  if (withoutSpeakerSeparation && context.auth.userId !== 'api-service') {
+    const access = await resolvePermissions(context.database, context.auth)
+    if (!access.isAdmin) throw new RecordingError('Only an administrator can transcribe without speaker separation.', 403)
+  }
+  await withRecordingLease(context, async (row, lease, extendLease) => {
     if (withoutSpeakerSeparation && row.state === 'ready') throw new RecordingError('This recording is already transcribed.', 409)
     if (row.state === 'ready') {
       await finalizeRecording(context, row, lease, await readChunks(context.database, row.id))
@@ -547,7 +567,10 @@ export async function transcribeNextChunk(context: RecordingContext, withoutSpea
     const group = options.separateSpeakers && !fallback && chunk.track === 'system'
     if (!group) await context.database.update(chunks).set({ state: 'transcribing', attempts: chunk.attempts + 1, error: null }).where(chunkFence(chunk.id, row.id, lease))
     try {
-      if (group) await transcribeSystemGroup(context, row, lease, found)
+      if (group) {
+        await extendLease(RECORDING_GROUP_LEASE_MS)
+        await transcribeSystemGroup(context, row, lease, found)
+      }
       else {
         const bucket = await storage()
         const object = await bucket.get(chunk.storageKey)
@@ -575,7 +598,7 @@ export async function transcribeNextChunk(context: RecordingContext, withoutSpea
       try { await finalizeRecording(context, row, lease, after) }
       catch { await updateLeased(context, lease, { state: 'failed', error: 'Transcript could not be saved. Retry to save the transcribed chunks.' }) }
     }
-  }, true, RECORDING_GROUP_LEASE_MS)
+  }, true)
   const detail = await scopedRecordingDetail(context, context.recording!.id)
   return { ...detail, pending: detail.recording.state === 'transcribing' }
 }
@@ -638,11 +661,12 @@ export async function deleteRecordingAudio(context: RecordingContext): Promise<b
   }
   return withRecordingLease(context, async (row, lease) => {
     const found = await readChunks(context.database, row.id)
-    const bucket = found.length ? await storage() : null
+    const bucket = await storage()
+    const keys = [...found.map(chunk => chunk.storageKey), `meeting-recordings/${row.id}/system/nova-3.json`]
     // Tombstone first. A late upload sees deletion and compensates by
     // removing its immutable object. Repeated DELETE cleans up again.
     await updateLeased(context, lease, { deletedAt: row.deletedAt ?? new Date().toISOString() })
-    for (let offset = 0; offset < found.length; offset += 100) await bucket!.delete(found.slice(offset, offset + 100).map(chunk => chunk.storageKey))
+    for (let offset = 0; offset < keys.length; offset += 100) await bucket.delete(keys.slice(offset, offset + 100))
     await updateLeased(context, lease, { error: null })
     await logAudit(context.database, {
       userId: attributedUserId(context.auth), action: 'meeting_recording.audio_deleted', entityType: 'meeting_recording', entityId: row.id,

@@ -182,4 +182,26 @@ describe('Cloudflare group speaker results', () => {
       expect(new DataView(pcm.data.buffer, pcm.data.byteOffset).getInt16(0, true)).toBe(16384)
     }
   })
+
+  it.each([
+    { seconds: 30.02, durations: [30_020] },
+    { seconds: 60.01, durations: [30_000, 30_010] },
+    { seconds: 31.999, durations: [31_999] },
+    { seconds: 32, durations: [30_000, 2000] },
+  ])('keeps a $seconds-second chunk below 1 MiB with no part shorter than two seconds', ({ seconds, durations }) => {
+    const samples = new Float32Array(Math.round(seconds * 16_000)).fill(0.5)
+    samples[samples.length - 1] = -0.5
+    const parts = splitRecordingPcmWav(encodeRecordingPcmWav(samples))
+    expect(parts.map(part => part.durationMs)).toEqual(durations)
+    let sampleCount = 0
+    for (const part of parts) {
+      expect(part.audio.byteLength).toBeLessThan(1024 * 1024)
+      expect(part.durationMs).toBeGreaterThanOrEqual(2000)
+      expect(part.startMs).toBe(sampleCount / 16)
+      sampleCount += parseRecordingPcmWav(part.audio).sampleCount
+    }
+    expect(sampleCount).toBe(samples.length)
+    const last = parseRecordingPcmWav(parts[parts.length - 1].audio)
+    expect(new DataView(last.data.buffer, last.data.byteOffset).getInt16(last.data.byteLength - 2, true)).toBe(-16384)
+  })
 })

@@ -1,12 +1,12 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 phase 1 live per Liam; phase 1b uncommitted, not deployed). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 phase 1 live per Liam; phase 1b committed through 807adc35, follow-up uncommitted, not deployed). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## REC.0 phase 1b, prepared 2026-10-14
 
 Liam confirmed the manual recorder is live at /calls/record on main 6f9f2170
-and his first real test worked. This clean feat/rec0-phase1b worktree prepares
+and his first real test worked. Phase 1b on feat/rec0-phase1b adds
 paragraph joining, creator/attendee/client speaker names, deterministic saved
 transcript refresh and link re-rendering. The suggester reads the named text.
 Optional group separation uses one Cloudflare Nova 3 system-track inference
@@ -20,20 +20,27 @@ the team member's calls within two minutes; clicking opens title/call prefill.
 No automatic recording or external notification. Existing scoped APIs/MCP
 provide creator identity and bounded call time filters. No new migration.
 
-Main session owns commit and deployment. Phase 1b is uncommitted and has not
-been deployed. Real Nova accuracy/long-call latency, Windows installation,
-and signed-in 375/768/dark checks remain open. Source QA/UIUX reviews pass;
+Initial phase 1b is committed as 3570d4e5, with review repairs in 807adc35.
+This small follow-up remains uncommitted on top. Main session owns deployment;
+phase 1b has not been deployed. Real Nova accuracy/long-call latency, Windows
+installation, and signed-in 375/768/dark checks remain open. Source QA/UIUX reviews pass;
 headless browser launch is blocked by sandbox spawn EPERM. Gate results and
 handoff notes are recorded in the run log.
 
-The phase 1b review repairs are uncommitted at base 3570d4e5. Raw Nova JSON
-is retained in R2 before parsing and reused on retry; a renewed lease keeps
+The phase 1b review repairs in 807adc35 retain raw Nova JSON
+in R2 before parsing and reuse it on retry; a renewed lease keeps
 late inference from billing concurrently. Two failed group attempts or a
 system timeline over two hours switch to Whisper, with an explicit fallback
 action and completed mic results preserved. Gap, speaker, reminder, PWA and
 pre-client relink findings are fixed. The two PATCH mirror failures were stale
-mocks. Requested source gates pass, 10 targeted Vitest files / 245 tests.
-No phase 1b deployment or new live claim was made in this repair session.
+mocks. Repair source gates passed, 10 targeted Vitest files / 245 tests.
+
+Opus re-review passed with notes. The uncommitted follow-up folds WAV
+remainders shorter than two seconds into the previous part, preserves paid
+Nova results when cache writes throw, and limits the long lease to possible
+group attempts. Audio deletion removes the Nova JSON, manual Whisper fallback
+is admin-only, and malformed transcription JSON returns 400. Follow-up gate
+results are recorded in the run log. REC.0 stays open with no phase 1b live claim.
 
 ## Next-20 items 2 to 7 hardening, 2026-10-13
 

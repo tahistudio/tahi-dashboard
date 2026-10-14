@@ -94,17 +94,21 @@ export function parseRecordingPcmWav(audio: ArrayBuffer): { data: Uint8Array; sa
   return { data: new Uint8Array(audio, RECORDING_PCM_HEADER_BYTES), sampleCount: dataSize / PCM_BYTES_PER_SAMPLE }
 }
 
-/** Keep fallback inputs independently decodable and below the tutorial's 1 MB chunk size. */
+/** Keep fallback inputs independently decodable and below 1 MiB without tiny trailing parts. */
 export function splitRecordingPcmWav(audio: ArrayBuffer): Array<{ audio: ArrayBuffer; startMs: number; durationMs: number }> {
   const pcm = parseRecordingPcmWav(audio)
   const samplesPerPart = 30 * RECORDING_PCM_SAMPLE_RATE
+  const minimumRemainderSamples = 2 * RECORDING_PCM_SAMPLE_RATE
   const parts = []
-  for (let start = 0; start < pcm.sampleCount; start += samplesPerPart) {
-    const count = Math.min(samplesPerPart, pcm.sampleCount - start)
+  for (let start = 0; start < pcm.sampleCount;) {
+    const remaining = pcm.sampleCount - start
+    const count = remaining > samplesPerPart && remaining - samplesPerPart < minimumRemainderSamples
+      ? remaining : Math.min(samplesPerPart, remaining)
     const bytes = new Uint8Array(RECORDING_PCM_HEADER_BYTES + count * PCM_BYTES_PER_SAMPLE)
     bytes.set(wavHeader(count))
     bytes.set(pcm.data.subarray(start * PCM_BYTES_PER_SAMPLE, (start + count) * PCM_BYTES_PER_SAMPLE), RECORDING_PCM_HEADER_BYTES)
     parts.push({ audio: bytes.buffer, startMs: start * 1000 / RECORDING_PCM_SAMPLE_RATE, durationMs: count * 1000 / RECORDING_PCM_SAMPLE_RATE })
+    start += count
   }
   return parts
 }

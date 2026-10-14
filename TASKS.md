@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 phase 1 live per Liam, phase 1b uncommitted).
+Last updated: 2026-10-14 (REC.0 phase 1 live per Liam, phase 1b committed through 807adc35, follow-up uncommitted).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1335,16 +1335,20 @@ scheduled; each needs a scope before building.
   inbox. Committed as 1608f4c6 on feat/rec0-manual-recorder, then reviewed by
   Opus, with fixes in 989e31db (re-reviewed, PASS with notes).
   Phase 1 is live at main 6f9f2170, confirmed by Liam's successful real call
-  on 2026-10-14. Phase 1b is prepared, uncommitted on feat/rec0-phase1b:
+  on 2026-10-14. Initial phase 1b is committed as 3570d4e5 on feat/rec0-phase1b:
   same-speaker paragraphs, creator/attendee/client names, named transcript
   relink/refresh, opt-in Nova 3 group system audio (Whisper mic), PWA icons and
   Record call shortcut, and scoped in-app two-minute call reminders/prefill.
-  Review repairs are uncommitted at base 3570d4e5: raw Nova R2 reuse, renewed
+  Review repairs are committed as 807adc35: raw Nova R2 reuse, renewed
   inference lease, 50 ms gap handling, automatic/manual Whisper fallback and
   two-hour group cap, plus speaker/reminder/PWA/relink corrections. The two
-  PATCH mirror failures were stale mocks. Requested gates pass, 10 targeted
-  Vitest files / 245 tests. Details are in the 2026-10-14 review-repair log.
-  No new migration. Main session commits and deploys. Real Nova accuracy and
+  PATCH mirror failures were stale mocks. Repair gates passed, 10 targeted
+  Vitest files / 245 tests. Opus re-review passed with notes. The follow-up is
+  uncommitted on top: fold short WAV tails, tolerate Nova cache write errors,
+  use long leases only for possible group attempts, delete cached Nova JSON
+  with audio, restrict manual Whisper fallback to admins, and return 400 for
+  malformed transcription JSON. Follow-up gates are in the 2026-10-14 run log.
+  No new migration. Main session owns deployment. Real Nova accuracy and
   long-call latency, Windows install/background capture, and signed-in 375/768
   and dark proof remain outstanding. Phase 1 excludes calendar detection,
   a desktop app and a joining bot. Earlier scope retained below as future work:

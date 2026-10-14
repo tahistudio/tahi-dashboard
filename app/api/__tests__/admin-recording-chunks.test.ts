@@ -272,6 +272,15 @@ describe('recording chunks route guards and uniqueness', () => {
     expect(objects.size).toBe(0)
     expect(sqlite.prepare('SELECT deleted_at FROM meeting_recordings').get()).toMatchObject({ deleted_at: expect.any(String) })
   })
+
+  it('deletes retained Nova JSON even when no audio chunks remain', async () => {
+    const key = 'meeting-recordings/rec/system/nova-3.json'
+    objects.set(key, { audio: new TextEncoder().encode('{}').buffer, metadata: {} })
+    expect(sqlite.prepare('SELECT * FROM meeting_recording_chunks').all()).toHaveLength(0)
+    expect((await deleteRecording(req('', undefined, 'DELETE'), params)).status).toBe(200)
+    expect(objects.has(key)).toBe(false)
+    expect((await deleteRecording(req('', undefined, 'DELETE'), params)).status).toBe(200)
+  })
 })
 
 describe('recording transcription recovery', () => {
@@ -281,6 +290,20 @@ describe('recording transcription recovery', () => {
     const stopped = await stop(req('stop', { expectedChunks: { mic: 1, system: 1 }, durationMs: 30_000 }), params)
     expect(stopped.status).toBe(200)
   }
+
+  it('keeps the three-minute lease for ordinary Whisper transcription', async () => {
+    await stoppedTwoTracks()
+    vi.useFakeTimers()
+    const leaseDurations: number[] = []
+    h.ai.run.mockImplementation(async () => {
+      const row = sqlite.prepare('SELECT lease_until FROM meeting_recordings WHERE id = ?').get('rec')
+      leaseDurations.push(new Date(String(row?.lease_until)).getTime() - Date.now())
+      return { text: 'Hello', segments: [{ start: 0, end: 1, text: 'Hello' }] }
+    })
+    await transcribe(req('transcribe'), params)
+    await transcribe(req('transcribe'), params)
+    expect(leaseDurations).toEqual([3 * 60_000, 3 * 60_000])
+  })
 
   it('preserves successful chunks, retries only a failed chunk and files one transcript', async () => {
     await stoppedTwoTracks()
@@ -453,8 +476,9 @@ describe('whole-system group recording transcription', () => {
     ] }] }] } }
   }
 
-  function successfulModels() {
+  function successfulModels(onInference?: (model: string) => void) {
     h.ai.run.mockImplementation(async (model: string, input: unknown) => {
+      onInference?.(model)
       if (model === RECORDING_MODEL) {
         expect(input).toMatchObject({ audio: 'AQID', task: 'transcribe', language: 'en' })
         return { text: 'Microphone speech', segments: [{ start: 1, end: 2, text: 'Microphone speech' }] }
@@ -467,6 +491,57 @@ describe('whole-system group recording transcription', () => {
       return novaOutput()
     })
   }
+
+  it('extends the lease only when processing the Nova system group', async () => {
+    const group = await stoppedGroup()
+    vi.useFakeTimers()
+    const leases: Array<{ model: string; durationMs: number }> = []
+    successfulModels(model => {
+      const row = sqlite.prepare('SELECT lease_until FROM meeting_recordings WHERE id = ?').get(group.id)
+      leases.push({ model, durationMs: new Date(String(row?.lease_until)).getTime() - Date.now() })
+    })
+    await transcribe(req('transcribe'), group.params)
+    await transcribe(req('transcribe'), group.params)
+    expect(leases).toEqual([
+      { model: RECORDING_MODEL, durationMs: 3 * 60_000 },
+      { model: RECORDING_GROUP_MODEL, durationMs: 15 * 60_000 },
+    ])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('finishes with the paid Nova result when retaining its JSON in R2 throws', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    await transcribe(req('transcribe'), group.params)
+    puts.mockRejectedValueOnce(new Error('Injected Nova JSON R2 failure'))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const finished = await transcribe(req('transcribe'), group.params)
+    expect(finished.status).toBe(200)
+    const detail = await finished.json() as MeetingRecordingDetail
+    expect(detail.recording).toMatchObject({ state: 'ready', error: null })
+    expect(detail.transcript.text).toContain('Them 1: Start continued.')
+    expect(detail.chunks.every(chunk => chunk.state === 'ready')).toBe(true)
+    expect(objects.has(`meeting-recordings/${group.id}/system/nova-3.json`)).toBe(false)
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('using the completed inference'), expect.any(Error))
+    expect((await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail).transcript).toEqual(detail.transcript)
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
+  })
+
+  it('deletes the cached Nova response and raw audio while retaining the filed transcript', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    await transcribe(req('transcribe'), group.params)
+    const detail = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    const key = `meeting-recordings/${group.id}/system/nova-3.json`
+    expect(objects.has(key)).toBe(true)
+    const unrelatedKey = 'meeting-recordings/other/system/nova-3.json'
+    objects.set(unrelatedKey, { audio: new TextEncoder().encode('{}').buffer, metadata: {} })
+    expect((await deleteRecording(req('', undefined, 'DELETE'), group.params)).status).toBe(200)
+    expect([...objects.keys()]).toEqual([unrelatedKey])
+    expect(sqlite.prepare('SELECT text FROM call_transcripts WHERE id = ?').get(detail.transcript.id)).toEqual({ text: detail.transcript.text })
+    expect((await deleteRecording(req('', undefined, 'DELETE'), group.params)).status).toBe(200)
+    expect(objects.has(unrelatedKey)).toBe(true)
+  })
 
   it('uses Whisper for mic and one streamed Nova inference, retaining speaker identity across stored chunk edges', async () => {
     const group = await stoppedGroup()
@@ -540,6 +615,37 @@ describe('whole-system group recording transcription', () => {
     expect(finished.transcript.text).toContain('Remote speech')
     expect(sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')).toEqual(mic)
     expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL, RECORDING_GROUP_MODEL, RECORDING_MODEL, RECORDING_MODEL])
+  })
+
+  it('denies explicit speaker fallback for non-admins before changing recording or chunk state', async () => {
+    const group = await stoppedGroup()
+    const recording = sqlite.prepare('SELECT * FROM meeting_recordings WHERE id = ?').get(group.id)
+    const chunks = sqlite.prepare('SELECT * FROM meeting_recording_chunks WHERE recording_id = ? ORDER BY track, sequence').all(group.id)
+    h.isAdmin = false
+
+    const response = await transcribe(req('transcribe', { separateSpeakers: false }), group.params)
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({ error: 'Only an administrator can transcribe without speaker separation.' })
+    expect(sqlite.prepare('SELECT * FROM meeting_recordings WHERE id = ?').get(group.id)).toEqual(recording)
+    expect(sqlite.prepare('SELECT * FROM meeting_recording_chunks WHERE recording_id = ? ORDER BY track, sequence').all(group.id)).toEqual(chunks)
+    expect(h.ai.run).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 for malformed transcription JSON without changing recording or chunk state', async () => {
+    const group = await stoppedGroup()
+    const recording = sqlite.prepare('SELECT * FROM meeting_recordings WHERE id = ?').get(group.id)
+    const chunks = sqlite.prepare('SELECT * FROM meeting_recording_chunks WHERE recording_id = ? ORDER BY track, sequence').all(group.id)
+
+    const response = await transcribe(new NextRequest(`http://localhost/api/admin/recordings/${group.id}/transcribe`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{',
+    }), group.params)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'Invalid JSON.' })
+    expect(sqlite.prepare('SELECT * FROM meeting_recordings WHERE id = ?').get(group.id)).toEqual(recording)
+    expect(sqlite.prepare('SELECT * FROM meeting_recording_chunks WHERE recording_id = ? ORDER BY track, sequence').all(group.id)).toEqual(chunks)
+    expect(h.ai.run).not.toHaveBeenCalled()
   })
 
   it('manually disables separation and decodes maximum three-minute system WAV chunks through Whisper', async () => {
