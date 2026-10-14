@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Win32;
 using TahiRecorder.App.Capture;
 using TahiRecorder.App.Integration;
 using TahiRecorder.Core.Api;
@@ -29,6 +30,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly TouchMenuItem _pause = new("Pause auto-start for 1 hour");
     private readonly TouchMenuItem _windows = new("Start with Windows");
     private readonly TouchMenuItem _signOut = new("Sign out this device");
+    private readonly TouchMenuItem _localRecordings = new("Local recordings (0)");
+    private DateTimeOffset _nextRetentionUtc;
     private HostSettings _settings = new();
     private RecorderAutomation _automation = new();
     private FileOutboxStore? _store;
@@ -59,6 +62,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_start);
         menu.Items.Add(_stop);
         menu.Items.Add(new TouchMenuItem("Open recordings", null, (_, _) => OpenRecordings()));
+        menu.Items.Add(_localRecordings);
         menu.Items.Add(_pause);
         menu.Items.Add(_windows);
         menu.Items.Add(_signOut);
@@ -99,13 +103,22 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RefreshTray();
         };
         _signOut.Click += async (_, _) => await SignOutAsync();
+        _localRecordings.Click += (_, _) => OpenLocalRecordings();
+        menu.Opening += (_, _) => RefreshLocalRecordings();
+        // SystemEvents remembers the subscribing synchronization context. Subscribe
+        // off the UI thread so suspend can wait for disk flush while the UI stays free.
+        Task.Run(() =>
+        {
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            SystemEvents.SessionEnding += OnSessionEnding;
+        }).GetAwaiter().GetResult();
         _timer.Tick += async (_, _) => await TickAsync();
         _dispatcher.BeginInvoke(new Action(async () => await InitializeAsync()));
     }
 
     internal void DispatchActivation(string argument) => Post(async () =>
     {
-        var values = ParseActivation(argument);
+        var values = ToastActivation.Parse(argument);
         if (!values.TryGetValue("action", out var action)) return;
         if (action == "open")
         {
@@ -151,8 +164,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             HostLog.Error("Recorder initialization failed", error);
             _paired = false;
             _captureFault = true;
-            _detail = "Could not load this device. Local audio is retained.";
-            ShowPairing();
+            // A damaged local spool is an attention error, not lost credentials.
+            _detail = "Recorder needs attention. Local audio is retained. Check the local recording folder and logs.";
         }
         _timer.Start();
         RefreshTray();
@@ -166,7 +179,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _pending = false;
         _store = new FileOutboxStore(AppPaths.Outbox(deviceId));
         var spool = AppPaths.Capture(deviceId);
-        await RecoverAsync(_store, spool);
+        _pump = new OutboxPump(_store, _api);
+        var needsAttention = await OutboxRecovery.RecoverAsync(_store, spool, _lifetime.Token,
+            async (id, cancellation) => await _pump.BlockRecordingAsync(id, cancellation));
         _capture = new WindowsAudioRecorder(spool);
         _capture.ChunkReady += (_, args) =>
         {
@@ -184,12 +199,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 return;
             }
             _captureFault = true;
-            lock (_automationGate) _automation.PauseAutoStartForOneHour(DateTimeOffset.UtcNow);
-            await StopManuallyAsync();
-            _detail = "Capture stopped because audio could not be saved. Check disk space and folder access.";
+            var audioGap = _capture?.HasAudioGap == true;
+            await StopForLifecycleAsync(RecordingStopReason.CaptureGap);
+            _detail = audioGap ? "Recording stopped after an audio gap longer than 10 seconds. Local audio is retained."
+                : "Capture stopped because audio could not be saved. Check disk space and folder access.";
             RefreshTray();
         });
-        _pump = new OutboxPump(_store, _api);
         _pump.CreateSending += clientRef =>
         {
             lock (_automationGate)
@@ -204,8 +219,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _pump.StatusChanged += status => Post(() => { _detail = status; RefreshTray(); });
         _paired = true;
         _accessEnded = false;
-        _captureFault = false;
-        _detail = null;
+        _captureFault = needsAttention;
+        _detail = needsAttention ? "Recorder needs attention. Check local recordings and logs. Other uploads continue." : null;
         _settings = _settings with { ActiveCaptureRef = null };
         PersistState();
         _workerCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -213,33 +228,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var currentPump = _pump;
         _uploadTask = Task.Run(() => UploadLoopAsync(currentPump, cancellation));
         _calendarTask = Task.Run(() => CalendarLoopAsync(cancellation));
-    }
-
-    private async Task RecoverAsync(FileOutboxStore store, string spool)
-    {
-        var recovered = WindowsAudioRecorder.RecoverInterrupted(spool);
-        foreach (var interrupted in recovered)
-        {
-            if (!await store.ContainsAsync(interrupted.ClientRef, _lifetime.Token))
-            {
-                HostLog.Write("Capture spool has no matching durable create. Audio is retained for inspection.");
-                continue;
-            }
-            foreach (var chunk in interrupted.Chunks)
-                await TransferChunkAsync(store, chunk);
-        }
-        // Also seal a crash between the durable create and the first captured sample.
-        foreach (var id in store.RecordingIds())
-        {
-            var recording = await store.ReadAsync(id, _lifetime.Token);
-            if (recording.CaptureStopped) continue;
-            var recoveredCapture = recovered.FirstOrDefault(item => item.ClientRef == id);
-            if (recoveredCapture is null && Directory.Exists(Path.Combine(spool, id.ToString("D"))))
-                throw new InvalidDataException("Capture journal needs recovery before finalizing.");
-            var duration = recoveredCapture?.DurationMs
-                ?? recording.Chunks.Select(chunk => chunk.Metadata.StartMs + chunk.Metadata.DurationMs).DefaultIfEmpty(0).Max();
-            await store.StopAsync(id, duration, _lifetime.Token);
-        }
     }
 
     private async Task TransferChunkAsync(FileOutboxStore store, CapturedChunk chunk)
@@ -263,8 +251,21 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_exiting || !await _operations.WaitAsync(0)) return;
         try
         {
+            if (DateTimeOffset.UtcNow >= _nextRetentionUtc)
+            {
+                await PruneLocalDataAsync();
+                _nextRetentionUtc = DateTimeOffset.UtcNow.AddHours(1);
+            }
             if (_paired && !_captureFault)
             {
+                if (_capture?.HasAudioGap == true)
+                {
+                    lock (_automationGate) _automation.StopForLifecycle(RecordingStopReason.CaptureGap);
+                    await StopCaptureAsync(_settings.ActiveCaptureRef);
+                    _detail = "Recording stopped after an audio gap longer than 10 seconds.";
+                    RefreshTray();
+                    return;
+                }
                 if (_capture?.HasPersistenceFailure == true)
                     throw new IOException("Capture cannot persist audio.");
                 var meeting = _detector.Poll();
@@ -295,6 +296,21 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RefreshTray();
         }
         finally { _operations.Release(); }
+    }
+
+    private async Task PruneLocalDataAsync()
+    {
+        var root = Path.Combine(AppPaths.Root, "outbox");
+        foreach (var folder in Directory.EnumerateDirectories(root))
+        {
+            var device = Path.GetFileName(folder);
+            if (!Guid.TryParse(device, out _)) continue;
+            var store = _store?.DirectoryPath.Equals(folder, StringComparison.OrdinalIgnoreCase) == true
+                ? _store : new FileOutboxStore(folder);
+            await store.PruneTerminalAsync(DateTimeOffset.UtcNow, _lifetime.Token, AppPaths.Capture(device));
+        }
+        HostLog.Prune();
+        RefreshLocalRecordings();
     }
 
     private async Task ApplyActionsAsync(IReadOnlyList<RecordingAction> actions)
@@ -329,6 +345,38 @@ internal sealed class TrayApplicationContext : ApplicationContext
         RefreshTray();
     }
 
+    private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs args)
+    {
+        if (args.Mode == PowerModes.Suspend) StopForSystemEvent(RecordingStopReason.SystemSuspend);
+    }
+
+    private void OnSessionEnding(object sender, SessionEndingEventArgs args) =>
+        StopForSystemEvent(RecordingStopReason.SessionEnding);
+
+    private void StopForSystemEvent(RecordingStopReason reason)
+    {
+        try { StopForLifecycleAsync(reason).GetAwaiter().GetResult(); }
+        catch (Exception error) { HostLog.Error("System event retained interrupted capture", error); }
+    }
+
+    private async Task StopForLifecycleAsync(RecordingStopReason reason)
+    {
+        await _operations.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            Guid? clientRef;
+            lock (_automationGate)
+            {
+                clientRef = _automation.Current?.ClientRef ?? _settings.ActiveCaptureRef;
+                _automation.StopForLifecycle(reason);
+            }
+            await StopCaptureAsync(clientRef).ConfigureAwait(false);
+            TryPersistState();
+            Post(RefreshTray);
+        }
+        finally { _operations.Release(); }
+    }
+
     private Task StopManuallyAsync(Guid? generation = null) => InOperationAsync(async () =>
     {
         IReadOnlyList<RecordingAction> actions;
@@ -349,18 +397,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         if (_capture is null || _store is null) return;
         // Physical capture stops before any fallible settings/outbox write.
-        await _capture.StopAsync(_lifetime.Token);
+        await _capture.StopAsync(_lifetime.Token).ConfigureAwait(false);
         Task[] chunks;
         lock (_chunksGate) chunks = _chunkJobs.ToArray();
-        await Task.WhenAll(chunks);
+        await Task.WhenAll(chunks).ConfigureAwait(false);
         lock (_chunksGate) foreach (var job in chunks) _chunkJobs.Remove(job);
         if (!_capture.LastStopCompleted && clientRef is not null)
         {
             _captureFault = true;
             throw new IOException("Capture tail remains local and must be recovered before stop.");
         }
-        if (clientRef is not null && await _store.ContainsAsync(clientRef.Value, _lifetime.Token))
-            await _store.StopAsync(clientRef.Value, _capture.LastDurationMs, _lifetime.Token);
+        if (clientRef is not null && await _store.ContainsAsync(clientRef.Value, _lifetime.Token).ConfigureAwait(false))
+            await _store.StopAsync(clientRef.Value, _capture.LastDurationMs, _lifetime.Token).ConfigureAwait(false);
         _settings = _settings with { ActiveCaptureRef = null };
         _notifications.RemoveRecording();
         _pending = true;
@@ -381,7 +429,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     Post(HandleAccessEndedAsync);
                     return;
                 }
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellation);
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellation);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return; }
             catch (Exception error)
@@ -420,7 +468,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_accessEnded || _exiting) return;
         _accessEnded = true;
         _paired = false;
-        await StopManuallyAsync();
+        await StopForLifecycleAsync(RecordingStopReason.Shutdown);
         await StopWorkersAsync();
         Volatile.Write(ref _upcoming, Array.Empty<UpcomingCall>());
         _detail = "Device access ended. Pair again for new recordings. Previous audio is retained.";
@@ -430,7 +478,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void ShowPairing()
     {
-        if (_exiting) return;
+        if (_exiting || _captureFault) return;
         if (_pairing is { IsDisposed: false }) { _pairing.Activate(); return; }
         _pairing = new PairingForm(_api, async response =>
         {
@@ -496,7 +544,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_exiting) return;
         _exiting = true;
         _timer.Stop();
-        await StopManuallyAsync();
+        await StopForLifecycleAsync(RecordingStopReason.Shutdown);
         await _operations.WaitAsync();
         try
         {
@@ -553,14 +601,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var waiting = _paired && !paused && (_meetingActive || Volatile.Read(ref _upcoming).Count > 0);
         var state = current is not null ? TrayState.Recording : !_paired ? TrayState.Idle
             : _pending ? TrayState.Uploading : waiting ? TrayState.Waiting : TrayState.Idle;
-        var label = current is not null ? "Recording: " + current.Title
+        var label = _captureFault ? "Recorder needs attention. Local audio is retained."
+            : current is not null ? "Recording: " + current.Title
             : !_paired ? "Idle: device needs pairing" : paused ? $"Idle: auto-start paused until {_automation.PausedUntil?.ToLocalTime():t}"
             : state == TrayState.Uploading ? "Uploading: audio saved locally"
             : state == TrayState.Waiting ? "Waiting: watching for a meeting capture session" : "Idle";
         if (_detail is not null) label += ". " + _detail;
         _status.Text = label.Length > 72 ? label[..69] + "..." : label;
         _status.ToolTipText = label;
-        var tooltip = "Tahi Recorder: " + state.ToString().ToLowerInvariant();
+        var tooltip = "Tahi Recorder: " + (_captureFault ? "needs attention" : state.ToString().ToLowerInvariant());
         _tray.Text = tooltip[..Math.Min(tooltip.Length, 63)];
         _tray.Icon = _icons[state];
         _start.Enabled = _paired && !_captureFault && current?.IsAutomatic != true && !_exiting;
@@ -594,21 +643,29 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }));
 
-    private static Dictionary<string, string> ParseActivation(string argument)
+    private void RefreshLocalRecordings()
     {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var field in argument.Split('&'))
+        try
         {
-            var pair = field.Split('=', 2);
-            if (pair.Length == 2) result[Uri.UnescapeDataString(pair[0])] = Uri.UnescapeDataString(pair[1]);
+            var outbox = Path.Combine(AppPaths.Root, "outbox");
+            var count = Directory.EnumerateFiles(outbox, "recording.json", SearchOption.AllDirectories).Count();
+            _localRecordings.Text = $"Local recordings ({count})";
         }
-        return result;
+        catch (Exception error) { HostLog.Error("Local recording count unavailable", error); }
+    }
+
+    private void OpenLocalRecordings()
+    {
+        try { Process.Start(new ProcessStartInfo(AppPaths.Root) { UseShellExecute = true }); }
+        catch (Exception error) { HostLog.Error("Local recording folder launch failed", error); }
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.SessionEnding -= OnSessionEnding;
             _lifetime.Cancel();
             _timer.Dispose();
             _tray.ContextMenuStrip?.Dispose();

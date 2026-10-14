@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text;
+using TahiRecorder.App.Security;
 
 namespace TahiRecorder.App.Integration;
 
@@ -8,6 +9,7 @@ internal static class StartMenuShortcut
 {
     internal static void Create(string executable, string appId, Guid activator)
     {
+        WindowsInstallSecurity.RequireSafe();
         var directory = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
         Directory.CreateDirectory(directory);
         var shortcut = Path.Combine(directory, "Tahi Recorder.lnk");

@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
+using TahiRecorder.App.Security;
 using TahiRecorder.Core.Automation;
 using Windows.UI.Notifications;
 
@@ -19,6 +20,7 @@ public sealed class WindowsNotifications : IDisposable
         RecorderToastActivator.Activated = activated;
         try
         {
+            WindowsInstallSecurity.RequireSafe();
             Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(AppUserModelId));
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Missing executable path.");
             using (var com = Registry.CurrentUser.CreateSubKey($@"Software\Classes\CLSID\{{{ActivatorClassId}}}\LocalServer32"))
@@ -69,6 +71,7 @@ public sealed class WindowsNotifications : IDisposable
 
     internal void RemoveRecording()
     {
+        if (!_available) return;
         try { ToastNotificationManager.History.Remove("recording", "capture", AppUserModelId); }
         catch (Exception error) { HostLog.Error("Notification removal failed", error); }
     }

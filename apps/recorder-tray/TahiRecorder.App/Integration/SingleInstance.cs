@@ -15,12 +15,14 @@ internal sealed class SingleInstance : IDisposable
 
     internal SingleInstance()
     {
-        var user = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        using var currentIdentity = WindowsIdentity.GetCurrent();
+        var user = currentIdentity.User?.Value ?? throw new UnauthorizedAccessException("Missing current user SID.");
         var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(user)))[..24];
         _pipeName = "TahiRecorder-" + identity;
         _mutex = new Mutex(initiallyOwned: false, "Local\\" + _pipeName);
         try { IsOwner = _mutex.WaitOne(0); }
         catch (AbandonedMutexException) { IsOwner = true; }
+        catch { _mutex.Dispose(); throw; }
     }
 
     internal void StartListening(Action<string> activated)
@@ -48,6 +50,11 @@ internal sealed class SingleInstance : IDisposable
                 }
                 catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { break; }
                 catch (IOException error) { HostLog.Error("Activation pipe failed", error); }
+                catch (UnauthorizedAccessException error)
+                {
+                    HostLog.Error("Activation pipe access refused", error);
+                    await Task.Delay(250, _shutdown.Token).ConfigureAwait(false);
+                }
             }
         });
     }
@@ -57,14 +64,15 @@ internal sealed class SingleInstance : IDisposable
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out, PipeOptions.Asynchronous);
+            using var pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
             var data = Encoding.UTF8.GetBytes(argument);
             if (data.Length > 4096) return;
             await pipe.WriteAsync(data, timeout.Token).ConfigureAwait(false);
             await pipe.FlushAsync(timeout.Token).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is IOException or OperationCanceledException or TimeoutException)
+        catch (Exception error) when (error is IOException or OperationCanceledException or TimeoutException or UnauthorizedAccessException)
         {
             HostLog.Error("Activation forwarding failed", error);
         }

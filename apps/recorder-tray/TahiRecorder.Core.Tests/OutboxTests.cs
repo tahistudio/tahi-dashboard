@@ -107,18 +107,26 @@ public sealed class OutboxTests : IDisposable
     }
 
     [Fact]
-    public async Task FailedIsTerminalAndEmptyStopUsesZeroCounts()
+    public async Task FailedIsRetriedThreeTimesAndEmptyStopUsesZeroCounts()
     {
         var store = Store;
         var id = Guid.NewGuid();
         await store.CreateAsync(new(id, "Empty", ["mic", "system"]));
         await store.StopAsync(id, 100);
         api.StopState = "failed";
-        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        api.TranscribeState = "failed";
+        var pump = new OutboxPump(store, api, clock);
+        await pump.PumpOnceAsync();
         Assert.Equal(new ExpectedChunks(0, 0), api.Stopped!.ExpectedChunks);
         Assert.Equal(0, api.Stopped.DurationMs);
+        Assert.Null((await store.ReadAsync(id)).TerminalState);
+        for (var retry = 0; retry < 3; retry++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(1));
+            await new OutboxPump(Store, api, clock).PumpOnceAsync();
+        }
         Assert.Equal("failed", (await store.ReadAsync(id)).TerminalState);
-        Assert.Equal(0, api.Transcribes);
+        Assert.Equal(3, api.Transcribes);
     }
 
     [Fact]
@@ -167,11 +175,141 @@ public sealed class OutboxTests : IDisposable
         Assert.Equal(1, api.Uploads);
     }
 
-    private async Task<(FileOutboxStore, Guid)> QueuedAsync()
+    [Fact]
+    public async Task PoisonUploadIsBlockedAndNextRecordingStillUploads()
+    {
+        var (store, poison) = await QueuedAsync(includeSystem: true);
+        var second = Guid.NewGuid();
+        await store.CreateAsync(new(second, "Second", ["mic", "system"]));
+        await store.AddChunkAsync(second, "mic", 0, 0, 100, CanonicalWav.Write([], 100));
+        api.PoisonClientRef = poison;
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        var blocked = await store.ReadAsync(poison);
+        Assert.Equal("blocked", blocked.TerminalState);
+        Assert.Equal(OutboxPump.BlockedError, blocked.LastError);
+        Assert.False(blocked.Chunks.Single().Confirmed);
+        Assert.True((await store.ReadAsync(second)).Chunks.Single().Confirmed);
+        Assert.Equal(2, api.Created.Count);
+        Assert.Equal(1, api.Stops);
+        Assert.True(blocked.StopConfirmed);
+        Assert.Equal(new ExpectedChunks(1, 1), api.Stopped!.ExpectedChunks);
+        Assert.Equal(100, api.Stopped.DurationMs);
+        Assert.True(File.Exists(Path.Combine(directory, poison.ToString("D"), "mic-0000.wav")));
+    }
+
+    [Fact]
+    public async Task ProgressResetsPollsAndSchedulesAnotherCallAfterOneSecond()
+    {
+        var (store, id) = await QueuedAsync();
+        await store.StopAsync(id, 100);
+        var pump = new OutboxPump(store, api, clock);
+        await pump.PumpOnceAsync();
+        Assert.Equal(1, (await store.ReadAsync(id)).TranscriptionPolls);
+        api.TranscribeChunks = [new("mic", 0, true, "ready")];
+        clock.Advance(TimeSpan.FromSeconds(2));
+        await pump.PumpOnceAsync();
+        var progressed = await store.ReadAsync(id);
+        Assert.Equal(0, progressed.TranscriptionPolls);
+        Assert.Equal(clock.GetUtcNow().AddSeconds(1), progressed.NextAttemptUtc);
+        await pump.PumpOnceAsync();
+        Assert.Equal(2, api.Transcribes);
+        api.ReadChunks = api.TranscribeChunks;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await pump.PumpOnceAsync();
+        Assert.Equal(3, api.Transcribes);
+        Assert.Equal(1, (await store.ReadAsync(id)).TranscriptionPolls);
+    }
+
+    [Fact]
+    public async Task FailedServerStateCanRecoverOnRetry()
+    {
+        var (store, id) = await QueuedAsync();
+        await store.StopAsync(id, 100);
+        api.TranscribeState = "failed";
+        var pump = new OutboxPump(store, api, clock);
+        await pump.PumpOnceAsync();
+        var failed = await store.ReadAsync(id);
+        Assert.Null(failed.TerminalState);
+        Assert.True(failed.NextAttemptUtc > clock.GetUtcNow());
+        api.StopState = "failed";
+        api.TranscribeState = "ready";
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await pump.PumpOnceAsync();
+        Assert.Equal("ready", (await store.ReadAsync(id)).TerminalState);
+        Assert.Equal(2, api.Transcribes);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task PermanentConflictWithoutCodeIsBlocked(string? code)
+    {
+        var (store, id) = await QueuedAsync();
+        api.CreateError = new RecorderApiException(409, code);
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        Assert.Equal("blocked", (await store.ReadAsync(id)).TerminalState);
+        Assert.Equal(OutboxPump.BlockedError, (await store.ReadAsync(id)).LastError);
+    }
+
+    [Fact]
+    public async Task CreatedSequenceSurvivesRestartAndFileTimestampChanges()
+    {
+        var (store, first) = await QueuedAsync();
+        var second = Guid.NewGuid();
+        await Store.CreateAsync(new(second, "Second", ["mic"]));
+        File.SetCreationTimeUtc(Path.Combine(directory, first.ToString("D"), "recording.json"), DateTime.UtcNow.AddDays(1));
+        Assert.Equal(new[] { first, second }, Store.RecordingIds());
+        Assert.True((await store.ReadAsync(first)).CreatedSequence < (await Store.ReadAsync(second)).CreatedSequence);
+        Assert.Equal(2, Store.LocalRecordingCount);
+    }
+
+    [Fact]
+    public async Task SevenDayRetentionPrunesOnlyReadyOrFailedAudio()
+    {
+        var (store, completed) = await QueuedAsync();
+        await store.StopAsync(completed, 100);
+        api.StopState = "ready";
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        var audio = Path.Combine(directory, completed.ToString("D"), "mic-leftover.wav");
+        await File.WriteAllBytesAsync(audio, [1, 2]);
+        var captureDirectory = Path.Combine(directory, "capture");
+        var captureAudio = Path.Combine(captureDirectory, completed.ToString("D"), "mic.pcm");
+        Directory.CreateDirectory(Path.GetDirectoryName(captureAudio)!);
+        await File.WriteAllBytesAsync(captureAudio, [1, 2]);
+        var pending = Guid.NewGuid();
+        await store.CreateAsync(new(pending, "Pending", ["mic"]));
+        Assert.Empty(await store.PruneTerminalAsync(clock.GetUtcNow().AddDays(6)));
+        Assert.Equal(new[] { completed }, await store.PruneTerminalAsync(clock.GetUtcNow().AddDays(7), captureDirectory: captureDirectory));
+        Assert.False(File.Exists(audio));
+        Assert.False(File.Exists(captureAudio));
+        Assert.Equal(new[] { pending }, store.RecordingIds());
+    }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("[]")]
+    [InlineData("{\"createdSequence\":\"invalid\"}")]
+    public async Task DamagedManifestNeedsAttentionAndDoesNotTriggerAuthentication(string content)
+    {
+        var (store, id) = await QueuedAsync();
+        await File.WriteAllTextAsync(Path.Combine(directory, id.ToString("D"), "recording.json"), content);
+        var pump = new OutboxPump(store, api, clock);
+        var statuses = new List<string>();
+        pump.StatusChanged += statuses.Add;
+        Assert.False(await pump.HasPendingAsync());
+        Assert.False(pump.AuthenticationRequired);
+        Assert.Contains(OutboxPump.BlockedError, statuses);
+        Assert.True(File.Exists(Path.Combine(directory, id.ToString("D"), "needs-attention.json")));
+        await pump.PumpOnceAsync();
+        Assert.Empty(api.Created);
+    }
+
+    private async Task<(FileOutboxStore, Guid)> QueuedAsync(bool includeSystem = false)
     {
         var store = Store;
         var id = Guid.NewGuid();
-        await store.CreateAsync(new(id, "Call", ["mic", "system"]));
+        await store.CreateAsync(new(id, "Call", includeSystem ? ["mic", "system"] : ["mic"]));
         await store.AddChunkAsync(id, "mic", 0, 0, 100, CanonicalWav.Write([], 100));
         return (store, id);
     }
@@ -191,7 +329,9 @@ public sealed class OutboxTests : IDisposable
         public Exception? CreateError { get; set; }
         public Exception? UploadError { get; set; }
         public Exception? ReserveError { get; set; }
+        public Guid? PoisonClientRef { get; set; }
         public IReadOnlyList<ChunkState> ReadChunks { get; set; } = [];
+        public IReadOnlyList<ChunkState> TranscribeChunks { get; set; } = [];
         public ChunkReservation Reservation { get; set; } = new("/api/admin/recordings/server/chunks", false, false);
         public int Uploads { get; private set; }
         public int Stops { get; private set; }
@@ -200,16 +340,33 @@ public sealed class OutboxTests : IDisposable
         public string TranscribeState { get; set; } = "transcribing";
         public StopRecordingRequest? Stopped { get; private set; }
         public Task<RecordingState> CreateAsync(CreateRecordingRequest request, CancellationToken ct)
-        { Created.Add(request); if (CreateError is not null) throw CreateError; return Task.FromResult(new RecordingState("server", "recording")); }
+        { Created.Add(request); if (CreateError is not null) throw CreateError; return Task.FromResult(new RecordingState(request.ClientRef.ToString("N"), "recording")); }
         public Task<ChunkReservation> ReserveAsync(string id, ChunkMetadata metadata, CancellationToken ct)
-        { if (ReserveError is not null) throw ReserveError; return Task.FromResult(Reservation); }
+        {
+            if (ReserveError is not null) throw ReserveError;
+            return Task.FromResult(id == PoisonClientRef?.ToString("N")
+                ? new ChunkReservation("https://off-origin.invalid/upload", false, false) : Reservation);
+        }
         public Task UploadAsync(string url, byte[] wav, CancellationToken ct)
-        { Uploads++; if (UploadError is not null) throw UploadError; return Task.CompletedTask; }
+        {
+            Uploads++;
+            if (url.StartsWith("https://off-origin.invalid", StringComparison.Ordinal)) throw new InvalidOperationException("Off-origin upload rejected.");
+            if (UploadError is not null) throw UploadError;
+            return Task.CompletedTask;
+        }
         public Task<RecordingDetail> StopAsync(string id, StopRecordingRequest request, CancellationToken ct)
-        { Stops++; Stopped = request; return Task.FromResult(Detail(StopState)); }
+        {
+            Stops++;
+            Stopped = request;
+            var enabledTracks = Created.Find(item => item.ClientRef.ToString("N") == id)?.Tracks ?? [];
+            if (request.ExpectedChunks.Mic + request.ExpectedChunks.System > 0
+                && (request.ExpectedChunks.Mic < 1 || enabledTracks.Contains("system") && request.ExpectedChunks.System < 1))
+                throw new RecorderApiException(400);
+            return Task.FromResult(Detail(StopState));
+        }
         public Task<RecordingDetail> ReadAsync(string id, CancellationToken ct) => Task.FromResult(new RecordingDetail(new("server", StopState), ReadChunks));
         public Task<RecordingDetail> TranscribeAsync(string id, CancellationToken ct)
-        { Transcribes++; return Task.FromResult(Detail(TranscribeState)); }
+        { Transcribes++; return Task.FromResult(new RecordingDetail(new("server", TranscribeState), TranscribeChunks)); }
         public Task<IReadOnlyList<RecordingDetail>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<RecordingDetail>>([]);
         private static RecordingDetail Detail(string state) => new(new("server", state), []);
     }

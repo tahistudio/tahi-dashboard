@@ -10,14 +10,18 @@ internal sealed class HostSettingsStore
 {
     private readonly object _gate = new();
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private byte[]? _saved;
 
     internal HostSettings Load()
     {
         lock (_gate)
         {
             if (!File.Exists(AppPaths.Settings)) return new HostSettings();
-            return JsonSerializer.Deserialize<HostSettings>(File.ReadAllText(AppPaths.Settings), Json)
+            var bytes = File.ReadAllBytes(AppPaths.Settings);
+            var settings = JsonSerializer.Deserialize<HostSettings>(bytes, Json)
                 ?? throw new InvalidDataException("Invalid recorder settings.");
+            _saved = JsonSerializer.SerializeToUtf8Bytes(settings, Json);
+            return settings;
         }
     }
 
@@ -25,15 +29,17 @@ internal sealed class HostSettingsStore
     {
         lock (_gate)
         {
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(settings, Json);
+            if (_saved is not null && bytes.AsSpan().SequenceEqual(_saved)) return;
             var pending = AppPaths.Settings + ".pending";
             using (var stream = new FileStream(pending, FileMode.Create, FileAccess.Write, FileShare.None,
                        4096, FileOptions.WriteThrough))
             {
-                var bytes = JsonSerializer.SerializeToUtf8Bytes(settings, Json);
                 stream.Write(bytes);
                 stream.Flush(true);
             }
             File.Move(pending, AppPaths.Settings, overwrite: true);
+            _saved = bytes;
         }
     }
 }

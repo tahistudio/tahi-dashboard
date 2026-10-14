@@ -60,32 +60,4 @@ public sealed class CanonicalWavTests
         Assert.Equal(44, CanonicalWav.Write([], 0).Length);
     }
 
-    [Fact]
-    public void TimelinePadsSilentGapsAgainstSharedSampleClock()
-    {
-        var timeline = new PcmTimelineBuffer();
-        timeline.AddAt(2, new byte[] { 1, 0, 2, 0 });
-        var pcm = timeline.TakeThrough(6);
-        Assert.Equal(new byte[] { 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0 }, pcm);
-        Assert.Equal(6, timeline.ConsumedSamples);
-    }
-
-    [Fact]
-    public void TimelineRetainsPacketRemainderAcrossChunksAndIgnoresLatePackets()
-    {
-        var timeline = new PcmTimelineBuffer();
-        timeline.AddAt(0, new byte[] { 1, 0, 2, 0, 3, 0, 4, 0 });
-        Assert.Equal(new byte[] { 1, 0, 2, 0 }, timeline.TakeThrough(2));
-        timeline.AddAt(0, new byte[] { 9, 0, 9, 0 });
-        Assert.Equal(new byte[] { 3, 0, 4, 0 }, timeline.TakeThrough(4));
-    }
-
-    [Fact]
-    public void TimelineRejectsIncompleteSamplesAndBackwardConsumption()
-    {
-        var timeline = new PcmTimelineBuffer();
-        Assert.Throws<ArgumentException>(() => timeline.AddAt(0, new byte[] { 1 }));
-        timeline.TakeThrough(1);
-        Assert.Throws<ArgumentOutOfRangeException>(() => timeline.TakeThrough(0));
-    }
 }

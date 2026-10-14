@@ -7,6 +7,9 @@ namespace TahiRecorder.Core.Outbox;
 public sealed class OutboxRecording
 {
     public required CreateRecordingRequest Request { get; set; }
+    public long CreatedSequence { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset? TerminalUtc { get; set; }
     public string? RecordingId { get; set; }
     public bool CreateSent { get; set; }
     public DateTimeOffset NotBeforeUtc { get; set; }
@@ -17,6 +20,8 @@ public sealed class OutboxRecording
     public string? LastError { get; set; }
     public int Failures { get; set; }
     public int TranscriptionPolls { get; set; }
+    public bool ServerFailed { get; set; }
+    public int ServerFailureRetries { get; set; }
     public DateTimeOffset NextAttemptUtc { get; set; }
     public List<OutboxChunk> Chunks { get; set; } = [];
 }
@@ -32,7 +37,9 @@ public sealed class OutboxChunk
 public sealed class FileOutboxStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> sequenceLocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> locks = new();
+    private readonly ConcurrentDictionary<Guid, byte> damagedRecordings = new();
     public string DirectoryPath { get; }
 
     public FileOutboxStore(string directory)
@@ -46,7 +53,9 @@ public sealed class FileOutboxStore
         return await LockedAsync(request.ClientRef, async () =>
         {
             if (File.Exists(Manifest(request.ClientRef))) return await LoadUnsafeAsync(request.ClientRef, cancellationToken);
-            var recording = new OutboxRecording { Request = request, NotBeforeUtc = DateTimeOffset.UtcNow.AddSeconds(5) };
+            var createdUtc = DateTimeOffset.UtcNow;
+            var recording = new OutboxRecording { Request = request, CreatedSequence = await NextSequenceAsync(cancellationToken),
+                CreatedUtc = createdUtc, NotBeforeUtc = createdUtc.AddSeconds(5) };
             await SaveUnsafeAsync(recording, cancellationToken);
             return recording;
         }, cancellationToken);
@@ -109,9 +118,89 @@ public sealed class FileOutboxStore
             return true;
         }, cancellationToken);
 
+    public int LocalRecordingCount => RecordingIds().Count();
+
     public IEnumerable<Guid> RecordingIds() => Directory.EnumerateDirectories(DirectoryPath)
         .Select(Path.GetFileName).Where(name => Guid.TryParse(name, out _)).Select(name => Guid.Parse(name!))
-        .Where(id => File.Exists(Manifest(id))).OrderBy(id => File.GetCreationTimeUtc(Manifest(id)));
+        .Where(id => File.Exists(Manifest(id))).OrderBy(CreatedSequenceForOrdering)
+        .ThenBy(id => File.GetCreationTimeUtc(Manifest(id))).ThenBy(id => id);
+
+    /// <summary>Only completed server recordings expire. Blocked and pending audio is retained.</summary>
+    public async Task<IReadOnlyList<Guid>> PruneTerminalAsync(DateTimeOffset now, CancellationToken cancellationToken = default,
+        string? captureDirectory = null)
+    {
+        var removed = new List<Guid>();
+        foreach (var id in RecordingIds().ToArray())
+        {
+            await LockedAsync(id, async () =>
+            {
+                try
+                {
+                    var recording = await LoadUnsafeAsync(id, cancellationToken);
+                    if (recording.TerminalState is not ("ready" or "failed")) return false;
+                    var terminalUtc = recording.TerminalUtc ?? File.GetLastWriteTimeUtc(Manifest(id));
+                    if (terminalUtc > now.AddDays(-7)) return false;
+                    if (captureDirectory is not null)
+                    {
+                        var captureRoot = Path.GetFullPath(captureDirectory);
+                        var captureFolder = Path.GetFullPath(Path.Combine(captureRoot, id.ToString("D")));
+                        if (!captureFolder.StartsWith(Path.TrimEndingDirectorySeparator(captureRoot) + Path.DirectorySeparatorChar,
+                            StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Invalid capture retention path.");
+                        // Keep the manifest until both locations are clean, so interruption is retryable.
+                        if (Directory.Exists(captureFolder)) Directory.Delete(captureFolder, true);
+                    }
+                    Directory.Delete(Folder(id), true);
+                    removed.Add(id);
+                }
+                catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
+                return true;
+            }, cancellationToken);
+        }
+        return removed;
+    }
+
+    internal bool NeedsAttention(Guid id) => damagedRecordings.ContainsKey(id)
+        || File.Exists(Path.Combine(Folder(id), "needs-attention.json"));
+
+    internal async Task MarkDamagedUnsafeAsync(Guid id, CancellationToken cancellationToken)
+    {
+        damagedRecordings.TryAdd(id, 0);
+        try
+        {
+            await AtomicWriteAsync(Path.Combine(Folder(id), "needs-attention.json"),
+                JsonSerializer.SerializeToUtf8Bytes(new { error = OutboxPump.BlockedError }, Json), cancellationToken);
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
+    }
+
+    private long CreatedSequenceForOrdering(Guid id)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(Manifest(id)));
+            if (document.RootElement.TryGetProperty("createdSequence", out var sequence) && sequence.TryGetInt64(out var value))
+                return value;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) { }
+        return 0;
+    }
+
+    private async Task<long> NextSequenceAsync(CancellationToken cancellationToken)
+    {
+        var gate = sequenceLocks.GetOrAdd(DirectoryPath, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var path = Path.Combine(DirectoryPath, "created-sequence.json");
+            var sequence = File.Exists(path)
+                ? JsonSerializer.Deserialize<long>(await File.ReadAllBytesAsync(path, cancellationToken), Json)
+                : RecordingIds().Select(CreatedSequenceForOrdering).DefaultIfEmpty().Max();
+            sequence = checked(sequence + 1);
+            await AtomicWriteAsync(path, JsonSerializer.SerializeToUtf8Bytes(sequence, Json), cancellationToken);
+            return sequence;
+        }
+        finally { gate.Release(); }
+    }
 
     internal string ChunkPath(Guid clientRef, OutboxChunk chunk)
     {
@@ -130,6 +219,14 @@ public sealed class FileOutboxStore
         var bytes = await File.ReadAllBytesAsync(Manifest(clientRef), cancellationToken);
         var recording = JsonSerializer.Deserialize<OutboxRecording>(bytes, Json) ?? throw new InvalidDataException("Empty outbox manifest.");
         if (recording.Request.ClientRef != clientRef) throw new InvalidDataException("Outbox identity mismatch.");
+        if (recording.CreatedSequence == 0)
+        {
+            recording.CreatedUtc = File.GetCreationTimeUtc(Manifest(clientRef));
+            if (recording.TerminalState is "ready" or "failed" && recording.TerminalUtc is null)
+                recording.TerminalUtc = File.GetLastWriteTimeUtc(Manifest(clientRef));
+            recording.CreatedSequence = await NextSequenceAsync(cancellationToken);
+            await SaveUnsafeAsync(recording, cancellationToken);
+        }
         return recording;
     }
     internal Task SaveUnsafeAsync(OutboxRecording recording, CancellationToken cancellationToken) =>

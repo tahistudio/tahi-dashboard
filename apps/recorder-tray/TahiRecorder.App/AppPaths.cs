@@ -1,3 +1,6 @@
+using System.Security.Principal;
+using TahiRecorder.Core.Security;
+
 namespace TahiRecorder.App;
 
 internal static class AppPaths
@@ -11,8 +14,10 @@ internal static class AppPaths
 
     internal static void EnsureDirectories()
     {
-        Directory.CreateDirectory(Root);
-        Directory.CreateDirectory(Logs);
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User ?? throw new UnauthorizedAccessException("Missing current user SID.");
+        RecorderDirectorySecurity.ProtectDataDirectory(Root, user);
+        HostLog.Prune();
     }
 
     private static string SafeDeviceId(string deviceId)
@@ -26,6 +31,16 @@ internal static class AppPaths
 internal static class HostLog
 {
     private static readonly object Gate = new();
+
+    internal static void Prune()
+    {
+        lock (Gate)
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-14);
+            foreach (var file in Directory.EnumerateFiles(AppPaths.Logs, "*.log"))
+                if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file);
+        }
+    }
 
     internal static void Write(string message)
     {

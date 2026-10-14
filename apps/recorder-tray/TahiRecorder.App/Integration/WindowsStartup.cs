@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using TahiRecorder.App.Security;
 
 namespace TahiRecorder.App.Integration;
 
@@ -19,6 +20,7 @@ internal static class WindowsStartup
 
     internal static void EnsureDefault()
     {
+        WindowsInstallSecurity.RequireSafe();
         using var preferences = Registry.CurrentUser.CreateSubKey(PreferencesPath);
         if (preferences.GetValue("StartupConfigured") is null)
         {
@@ -33,6 +35,7 @@ internal static class WindowsStartup
 
     internal static void SetEnabled(bool enabled)
     {
+        if (enabled) WindowsInstallSecurity.RequireSafe();
         using var key = Registry.CurrentUser.CreateSubKey(RunPath);
         if (enabled)
         {

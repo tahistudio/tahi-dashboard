@@ -153,8 +153,133 @@ public sealed class RecorderAutomationTests
         recorder.Tick(Noon, true, "zoom", [call]);
         Assert.Empty(recorder.Tick(Noon.AddMinutes(45), true, "zoom", []));
         Assert.NotNull(recorder.Current);
-        var stop = Assert.Single(recorder.Tick(Noon.AddMinutes(45).AddSeconds(1), false, "zoom", []));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(45).AddSeconds(1), false, "zoom", []));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(45).AddSeconds(5), false, "zoom", []));
+        var stop = Assert.Single(recorder.Tick(Noon.AddMinutes(45).AddSeconds(6), false, "zoom", []));
         Assert.Equal(RecordingStopReason.ScheduledOverrun, stop.StopReason);
+    }
+
+    [Fact]
+    public void ManualRecordingIgnoresInactiveTicksBeforeAndAfterItsStartWithoutAMeeting()
+    {
+        var call = Call("calendar-only", Noon, TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.Tick(Noon.AddMinutes(-5), false, "unknown", [call]);
+        recorder.Tick(Noon.AddMinutes(-1), false, "unknown", [call]);
+        var original = Assert.Single(recorder.ManualStart(Noon, "unknown", "Voice notes")).Plan;
+        Assert.Empty(recorder.Tick(Noon, false, "unknown", [call]));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(1), false, "unknown", [call]));
+        Assert.Empty(recorder.Tick(Noon.AddHours(11), false, "unknown", [call]));
+        Assert.Equal(original, recorder.Current);
+        Assert.Equal(RecordingStopReason.MaximumDuration,
+            Assert.Single(recorder.Tick(Noon.AddHours(12), false, "unknown", [])).StopReason);
+    }
+
+    [Fact]
+    public void ManualStartDoesNotInheritAMeetingSeenBeforeItStarted()
+    {
+        var recorder = new RecorderAutomation();
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", []);
+        recorder.ManualStart(Noon);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(1), false, "unknown", []));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(2), false, "unknown", []));
+        Assert.NotNull(recorder.Current);
+    }
+
+    [Fact]
+    public void PausedAutomaticRecordingKeepsItsCaptureAtTheNextCalendarCall()
+    {
+        var first = Call("first", Noon, TimeSpan.FromMinutes(30));
+        var second = Call("second", Noon.AddMinutes(30), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        var original = Assert.Single(recorder.Tick(Noon, true, "zoom", [first])).Plan;
+        recorder.PauseAutoStartForOneHour(Noon.AddMinutes(1));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(30), true, "zoom", [first, second]));
+        Assert.Equal(original, recorder.Current);
+    }
+
+    [Fact]
+    public void ManualRecordingKeepsItsCaptureAtTheNextCalendarCall()
+    {
+        var call = Call("next", Noon.AddMinutes(5), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        var original = Assert.Single(recorder.ManualStart(Noon)).Plan;
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(3), true, "zoom", [call]));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(5), true, "zoom", [call]));
+        Assert.Equal(original, recorder.Current);
+    }
+
+    [Fact]
+    public void ManualRecordingStopsAtTheNextObservedMeetingSessionWithoutAnImmediateSplit()
+    {
+        var recorder = new RecorderAutomation();
+        var original = Assert.Single(recorder.ManualStart(Noon)).Plan;
+        Assert.Empty(recorder.Tick(Noon, true, "zoom", [], "first-session"));
+        var stop = Assert.Single(recorder.Tick(Noon.AddMinutes(1), true, "zoom", [], "second-session"));
+        Assert.Equal(RecordingActionKind.Stop, stop.Kind);
+        Assert.Equal(RecordingStopReason.NextCall, stop.StopReason);
+        Assert.Equal(original, stop.Plan);
+        Assert.Null(recorder.Current);
+        Assert.False(recorder.ExportState().SuppressCurrentSession);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(1).AddSeconds(1), true, "zoom", [], "second-session"));
+        var next = Assert.Single(recorder.Tick(Noon.AddMinutes(1).AddSeconds(20), true, "zoom", [], "second-session"));
+        Assert.True(next.Plan.IsAutomatic);
+        Assert.NotEqual(original.ClientRef, next.Plan.ClientRef);
+    }
+
+    [Fact]
+    public void FirstMeetingSessionObservedDuringManualRecordingDoesNotStopIt()
+    {
+        var recorder = new RecorderAutomation();
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [], "before-manual");
+        var original = Assert.Single(recorder.ManualStart(Noon)).Plan;
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(1), true, "zoom", [], "first-during-manual"));
+        Assert.Equal(original, recorder.Current);
+        var stop = Assert.Single(recorder.Tick(Noon.AddMinutes(2), true, "zoom", [], "second-during-manual"));
+        Assert.Equal(RecordingStopReason.NextCall, stop.StopReason);
+    }
+
+    [Fact]
+    public void EarlyJoinWithinTenMinutesOfCalendarWindowWaitsAndStartsLinked()
+    {
+        var call = Call("next", Noon.AddMinutes(12), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        Assert.Empty(recorder.Tick(Noon, true, "zoom", [call]));
+        Assert.Empty(recorder.Tick(Noon.AddSeconds(20), true, "zoom", [call]));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(9).AddSeconds(59), true, "zoom", [call]));
+        var start = Assert.Single(recorder.Tick(Noon.AddMinutes(10), true, "zoom", [call]));
+        Assert.Equal(call, start.Plan.Call);
+        Assert.Equal(Noon.AddMinutes(10), start.Plan.StartedAt);
+    }
+
+    [Fact]
+    public void CalendarWindowMoreThanTenMinutesAwayDoesNotDelayAnUnknownCall()
+    {
+        var call = Call("next", Noon.AddMinutes(13), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.Tick(Noon, true, "zoom", [call]);
+        Assert.Null(Assert.Single(recorder.Tick(Noon.AddSeconds(20), true, "zoom", [call])).Plan.Call);
+    }
+
+    [Theory]
+    [InlineData(RecordingStopReason.SystemSuspend)]
+    [InlineData(RecordingStopReason.SessionEnding)]
+    [InlineData(RecordingStopReason.Shutdown)]
+    [InlineData(RecordingStopReason.CaptureGap)]
+    public void LifecycleStopLeavesCalendarUnsuppressedAndResetsUnknownQualification(RecordingStopReason reason)
+    {
+        var recorder = new RecorderAutomation();
+        var call = Call("first", Noon, TimeSpan.FromMinutes(30));
+        recorder.Tick(Noon, true, "zoom", [call]);
+        Assert.Equal(reason, Assert.Single(recorder.StopForLifecycle(reason)).StopReason);
+        var snapshot = recorder.ExportState();
+        Assert.False(snapshot.SuppressCurrentSession);
+        Assert.Null(snapshot.ManuallyStoppedAt);
+        Assert.Empty(snapshot.SuppressedCalls);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(1), true, "zoom", []));
+        Assert.Single(recorder.Tick(Noon.AddMinutes(1).AddSeconds(20), true, "zoom", []));
+        recorder.StopForLifecycle(reason);
+        Assert.Equal(call, Assert.Single(recorder.Tick(Noon.AddMinutes(2), true, "zoom", [call])).Plan.Call);
     }
 
     [Fact]
@@ -227,6 +352,75 @@ public sealed class RecorderAutomationTests
         Assert.Empty(recorder.Tick(Noon.AddMinutes(28), true, "zoom", [first, second]));
         var next = Assert.Single(recorder.Tick(Noon.AddMinutes(31), true, "zoom", [first, second]));
         Assert.Equal(second, next.Plan.Call);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(15)]
+    public void ManualStopSuppressesCalendarWindowOpeningWithinFifteenMinutesOnSameSession(int minutes)
+    {
+        var call = Call("next", Noon.AddMinutes(minutes + 2), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.ManualStart(Noon.AddMinutes(-1));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [], "zoom-process");
+        recorder.ManualStop(Noon);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(minutes), true, "zoom", [call], "zoom-process"));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(minutes + 3), true, "zoom", [call], "zoom-process"));
+        // Restore retains the session identity even when the upcoming call was not known at stop.
+        var restored = new RecorderAutomation(recorder.ExportState());
+        Assert.Empty(restored.Tick(Noon.AddMinutes(minutes + 4), true, "zoom", [call], "zoom-process"));
+    }
+
+    [Fact]
+    public void UpcomingManualStopSuppressionDoesNotAffectAnotherMeetingSession()
+    {
+        var call = Call("next", Noon.AddMinutes(7), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.ManualStart(Noon.AddMinutes(-1));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [call], "first-session");
+        recorder.ManualStop(Noon);
+        var start = Assert.Single(recorder.Tick(Noon.AddMinutes(7), true, "zoom", [call], "second-session"));
+        Assert.Equal(call, start.Plan.Call);
+    }
+
+    [Fact]
+    public void ManualStopAllowsCalendarWindowOpeningBeyondFifteenMinutesOnSameSession()
+    {
+        var call = Call("next", Noon.AddMinutes(18), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.ManualStart(Noon.AddMinutes(-1));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [call], "same-session");
+        recorder.ManualStop(Noon);
+        var start = Assert.Single(recorder.Tick(Noon.AddMinutes(18), true, "zoom", [call], "same-session"));
+        Assert.Equal(call, start.Plan.Call);
+    }
+
+    [Fact]
+    public void UpcomingManualStopSuppressionAlsoAppliesAfterInactiveSuppressionResets()
+    {
+        var call = Call("next", Noon.AddMinutes(7), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.ManualStart(Noon.AddMinutes(-1));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [call], "same-session");
+        recorder.ManualStop(Noon);
+        recorder.Tick(Noon.AddMinutes(1), false, "unknown", [call]);
+        recorder.Tick(Noon.AddMinutes(2), false, "unknown", [call]);
+        Assert.False(recorder.ExportState().SuppressCurrentSession);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(7), true, "zoom", [call], "same-session"));
+    }
+
+    [Fact]
+    public void ManualStopRetainsMeetingSessionIdentityThroughBriefInactivity()
+    {
+        var call = Call("next", Noon.AddMinutes(7), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.ManualStart(Noon.AddMinutes(-1));
+        recorder.Tick(Noon.AddSeconds(-2), true, "zoom", [], "same-session");
+        recorder.Tick(Noon.AddSeconds(-1), false, "unknown", []);
+        recorder.ManualStop(Noon);
+        Assert.Equal("same-session", recorder.ExportState().ManuallyStoppedSessionKey);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(7), true, "zoom", [call], "same-session"));
     }
 
     [Fact]

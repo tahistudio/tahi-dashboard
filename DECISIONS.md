@@ -1675,12 +1675,21 @@ Pairing hardening: a new code invalidates this member's earlier unused codes. At
 Calendar limits: calendar sync runs every fifteen minutes; only events matched to a lead, deal or client become calls; the single Google integration is Liam's calendar. Member matching requires their attendee email, their own connected Google account email in attendees, or their creator identity on a call without googleCalendarEventId. Synced discovery rows ignore creator identity, including legacy rows attributed to the member who pressed Sync now; new synced inserts use system. The integration stores account email but no connecting member identity, so account ownership uses team_members.email. Upcoming calls return windows overlapping [now, now + 15 minutes], with window [start - 2 minutes, end + 10 minutes]; create links only when that window is open now. Parsed times and a derived platform are exposed, never a meeting URL. Calls outside those limits cannot receive a calendar-linked automatic start, but the approved unlinked automatic detection and Start recording now cover them. No client notification, subscription, secret or production-data change is introduced here.
 Escalated to Liam: No additional decision needed; implements his approved revision 1 brief and fixed choices.
 
-Client implementation note, 2026-10-14: feat/rec0-tray-app from main 15de17d7
+Client implementation note, 2026-10-14: committed as 8665e762 on
+feat/rec0-tray-app from main 15de17d7. The committed baseline builds with zero
+warnings and its tests pass with restored packages. It
 implements a portable net8.0 Core library plus the required
-net8.0-windows10.0.17763.0 WinForms host. NAudio 2.2.1 uses the approved default
-render loopback fallback, including all desktop playback during a call.
+net8.0-windows10.0.17763.0 WinForms host. The review repairs use NAudio 2.2.1
+default Communications capture/render endpoints, with the approved loopback
+fallback including all desktop playback on that endpoint during a call.
 The client queues create/clientRef before capture, isolates outbox/spool and
 DPAPI credentials by device identity, and saves upload confirmation before
 deleting audio. Per-device credential binding avoids a crash pairing a new
-token with an old device's outbox. No participant notice is added. These files
-remain uncommitted; App/xUnit restore and real-call proof are still required.
+token with an old device's outbox. No participant notice is added. Review
+repairs remain uncommitted and preserve both framework targets. They enforce
+current-user-owned protected storage and trusted install writers before
+registration, isolate poison recordings, add bounded polling/retention,
+and flush lifecycle stops without manual suppression. A calendar window
+opening within ten minutes delays unknown-call start until it can link;
+manual recordings ignore calendar split boundaries. The main session must
+publish and obtain real-call proof. Review verification is in the running log.

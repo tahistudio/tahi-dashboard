@@ -31,7 +31,7 @@ public sealed class RecorderApiException : Exception
     public bool Uploaded { get; }
     public TimeSpan? RetryAfter { get; }
     public bool IsAuthenticationFailure => StatusCode is 401 or 403;
-    public bool IsRetryable => StatusCode is 408 or 409 or 429 || StatusCode >= 500;
+    public bool IsRetryable => StatusCode is 408 or 429 || StatusCode == 409 && !string.IsNullOrWhiteSpace(Code) || StatusCode >= 500;
 
     public RecorderApiException(int statusCode, string? code = null, bool uploaded = false,
         TimeSpan? retryAfter = null) : base($"Recorder request failed ({statusCode}{(code is null ? "" : ", " + code)}).")

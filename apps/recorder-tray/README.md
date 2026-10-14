@@ -3,7 +3,8 @@
 REC.0 phase 2 client, from the approved revision 1 spec and Decision #072.
 The server is live at `https://portal.tahi.studio` per Liam's 2026-10-14 brief.
 The exact API contract is [the server handoff](../../docs/recorder-tray-server-handoff.md).
-This worktree's changes remain uncommitted. No production operation was performed.
+The initial Windows client is committed as `8665e762`. The review fixes in this
+worktree remain uncommitted. No production operation was performed.
 
 ## Project layout
 
@@ -17,7 +18,8 @@ This worktree's changes remain uncommitted. No production operation was performe
 - `TahiRecorder.sln` and `NuGet.Config`: solution and public package source.
 
 Package versions are pinned: NAudio 2.2.1, Toolkit notifications 7.1.3,
-ProtectedData 8.0.0, xUnit 2.9.2, runner 2.8.2 and Test SDK 17.11.1.
+ProtectedData 8.0.0, System.Drawing.Common 8.0.0, xUnit 2.9.2, runner 2.8.2
+and Test SDK 17.11.1.
 Next, TypeScript, ESLint and Vitest exclusions already exist. Nested bin/obj,
 local package caches, smoke/build logs and publish output are ignored.
 
@@ -32,16 +34,21 @@ dotnet test TahiRecorder.Core.Tests/TahiRecorder.Core.Tests.csproj -c Release --
 dotnet publish TahiRecorder.App/TahiRecorder.App.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
 ```
 
-The result is `publish/TahiRecorder.App.exe`. Put it in a stable location before
-launching. Startup and the Start menu shortcut point to that executable.
+The result is `publish/TahiRecorder.App.exe`. Use an administrator shell to
+create `C:/Program Files/Tahi Recorder/` and copy the published executable there.
+Run the installed executable as your ordinary Windows user. Never run the
+recorder from the repository. Keep the folder's standard Program Files ACLs;
+other ordinary users must not have write permission. Startup and the Start menu
+shortcut point to the installed executable. An unsafe executable directory
+disables startup, COM and shortcut registration and shows an install message.
 Keep trimming disabled because WinForms, COM and notifications need metadata.
 Distribution is local/manual. Auto-update, signing and macOS remain follow-ups.
 SmartScreen or Defender may flag the unsigned executable.
 
 If optional workload discovery fails, set
 `$env:MSBuildEnableWorkloadResolver = 'false'` in the build shell.
-The main session must run restore, build, test and publish with package access
-before distributing the executable.
+The restored `.packages` cache supports offline build/test with `--no-restore`.
+A new package version requires restore once before those offline commands.
 
 ## Pairing and credentials
 
@@ -68,7 +75,7 @@ access it. Revocation and quotas bound the compromised-PC model from #072.
 ## Tray and automation
 
 States: idle, waiting, recording (red), uploading. Menu: status line, Start
-recording now, Stop recording, Open recordings, Pause auto-start for 1 hour,
+recording now, Stop recording, Open recordings, Local recordings (n), Pause auto-start for 1 hour,
 Start with Windows, Sign out this device, Quit. Stop always remains available
 in the menu. Manual start is disabled during automatic recording.
 
@@ -80,10 +87,17 @@ dashboard's existing linking controls. Devices cannot relink.
 
 Calendar windows are start minus two minutes to end plus ten minutes. The unique
 call containing now wins among overlapping windows, otherwise ambiguity stays
-unlinked. Another call's start splits the recording; late joins are allowed.
+unlinked. Early joins wait when a calendar window opens within ten minutes,
+then start linked at start minus two minutes. Another call's start splits an
+automatic recording unless auto-start is paused. Calendar boundaries never
+split a manual recording; late joins are allowed.
 Stop occurs on manual Stop, after sixty seconds without a meeting capture
 session, at the next-call boundary, at twelve hours, or at scheduled end plus
-fifteen minutes with no active session. Active calls may overrun scheduled end.
+fifteen minutes after at least five seconds of inactivity. A manual recording
+ignores inactivity until a meeting session has been seen during it. A new actual
+meeting session ends it. Suspend, session ending and Quit flush capture without
+manual suppression. Active calls may overrun scheduled end. Manual Stop also
+suppresses windows opening within fifteen minutes on the same session key.
 Manual-stop suppression and the one-hour pause persist across restart.
 
 Calendar limits from #072: fifteen-minute sync, lead/deal/client-matched events
@@ -100,15 +114,19 @@ Meet because the signal cannot distinguish sites. Other browser microphone
 uses can trigger the unknown-call path. Logs contain observed process names
 and UTC timestamps, no audio or credential.
 
-Mic capture uses `WasapiCapture`. NAudio 2.2.1 uses the approved default-render
+Mic capture uses the default Communications capture endpoint with `WasapiCapture`.
+NAudio 2.2.1 uses the default Communications render endpoint with
 `WasapiLoopbackCapture` fallback here, so system audio includes all desktop
 output during the call. Both formats request Windows audio-engine conversion
 to 16 kHz mono s16le. One Stopwatch drives sample positions and silence padding.
 Default endpoint notifications reopen capture without resetting the timeline.
-Temporary reconnect errors keep recording; fatal persistence errors stop safely.
+Temporary reconnect errors keep recording. A padded gap is capped at ten seconds;
+a longer gap ends capture at that cap. Fatal persistence errors stop safely.
 
 Thirty-second chunks and shorter tails use MIME exactly `audio/wav`, a 44-byte
 RIFF header and size `44 + durationMs * 32`. A full chunk is 960,044 bytes.
+The last full chunk is retained until a tail shorter than two seconds can be
+folded into it. The combined chunk remains below the server's 180-second limit.
 Incremental PCM and a durable journal allow partial-chunk recovery after restart.
 API surfaces were checked against
 [NAudio 2.2.1 source](https://github.com/naudio/NAudio/tree/v2.2.1/NAudio.Wasapi).
@@ -118,6 +136,11 @@ Notifications use Microsoft's
 ## Outbox and troubleshooting
 
 Under `%LOCALAPPDATA%/TahiRecorder/`:
+
+Every start protects the root DACL with inheritance disabled and FullControl
+for the current user SID, SYSTEM and Administrators only. Descendants inherit
+only that root. A wrong root owner or extra ACE refuses recording with a tray
+error. Local recordings (n) opens this folder for inspection.
 
 - `tokens/<deviceId>.dpapi`: credential encrypted for CurrentUser and bound to
   the persisted device identity, avoiding a crash mixing old and new devices.
@@ -130,8 +153,15 @@ Create and its UUID clientRef are durable before capture starts. Operations for
 one recording are serialized. Uploaded acknowledgement is persisted before
 deleting WAVs. Metadata-only duplicates still upload; `uploaded: true`, a
 successful PUT, or PUT `409 duplicate` with `uploaded: true` confirms possession.
-Stop counts/duration persist. Transcription repeats with backoff until ready
-or failed. Restart recovers and seals interrupted captures, then resumes upload.
+Stop counts/duration and created sequence persist. Transcription progress resets
+polling to about one second. Busy, errors and no progress back off. A server
+failed state is retried three times before becoming final. A poison recording
+is blocked with a fixed message and a best-effort server stop, while other
+recordings continue. Restart recovers and seals interrupted captures, then
+resumes upload. Damaged spool/manifest data shows needs attention without
+reopening pairing. Ready/failed recordings, their manifests and leftover audio
+expire after seven days; pending/blocked audio is retained. Logs expire after
+fourteen days. Retention runs at startup and hourly.
 
 - Network/timeouts, `409 busy`, retryable `503`: retain audio and back off.
 - `429 open_recording`: let the earlier recording finish. Known local capture
@@ -144,8 +174,8 @@ or failed. Restart recovers and seals interrupted captures, then resumes upload.
   Restart from the stable exe location; use tray Stop regardless.
 - Detection: inspect `logs/capture-processes-*.log` during real calls. Verify
   new Teams/WebView2 and browser process trees on the actual computer.
-- Device switch: check Windows default capture/render devices and microphone
-  privacy settings. Bluetooth reconnect gaps are padded with silence.
+- Device switch: check Windows default Communications capture/render devices and
+  microphone privacy settings. Reconnect gaps are padded up to ten seconds.
 - Disk/journal/transfer errors: retain folders for recovery. Do not delete the
   outbox to fix network errors. Damaged journals need operator review.
 
@@ -154,26 +184,18 @@ must remain on the portal's recording chunks endpoint.
 
 ## Validation handoff
 
-xUnit coverage (70 authored cases): calendar/unknown starts, overlapping windows, late join,
+xUnit coverage: calendar/unknown starts, overlapping windows, late join,
 back-to-back split, stop rules, manual suppression/restart, pause, Not this call;
 WAV headers/length/padding/truncation/timeline; protected storage with a fake
 protector; exact API JSON/origin guards; durable create/clientRef retries,
 duplicate confirmation, cleanup/restart/counts/terminal states/concurrency;
 429 open_recording/daily_quota, 409 busy, Retry-After and authentication failure.
 
-Sandbox results:
-
-```text
-Core restore: exit 0
-Core Release build: Build succeeded. 0 Warning(s), 0 Error(s).
-Supplemental package-free Core smoke: 35 checks passed, exit 0 (not xUnit).
-Solution restore: NU1301, unable to load https://api.nuget.org/v3/index.json.
-Solution build: NU1301 and NETSDK1004, missing test project assets.
-dotnet test --no-restore: NETSDK1004, missing test project assets, exit 1.
-```
-
-No executable or xUnit pass is claimed. After the main session runs the build
-commands, verify pairing/single instance/Windows startup/toast buttons; real
+The committed baseline `8665e762` builds with zero warnings and its tests pass
+with the restored packages. Review-fix build/test results are recorded in
+the running log and [the review report](../../docs/superpowers/audits/2026-10-14-rec0-tray-app-review-fixes.md).
+Before distribution, verify
+pairing/single instance/Windows startup/toast buttons; real
 calendar and unknown Zoom/Meet/Teams calls; muted mic and both-sided transcript;
 manual-stop/pause/late join/ambiguity/back-to-back behaviour; silence and default
 device switching; sleep/crash/offline recovery; revocation and per-device

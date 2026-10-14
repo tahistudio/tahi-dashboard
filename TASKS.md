@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client uncommitted, package and real-call validation pending).
+Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client committed at 8665e762, review repairs uncommitted).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1339,13 +1339,14 @@ scheduled; each needs a scope before building.
   owned slim reads, quotas, upcoming calls, Settings devices and blocked-designer
   MCP list/revoke. The tray brief confirms the server side is live at main
   15de17d7; the earlier server preparation/deploy notes are historical.
-  The C# tray app is prepared uncommitted on feat/rec0-tray-app from main
+  The C# tray app is committed as 8665e762 on feat/rec0-tray-app from main
   15de17d7, where the server is live per Liam's tray brief. Core, WinForms host
   and xUnit projects implement capture/automation/pairing/tray/durable outbox.
-  Core build passed with zero warnings/errors and a separate supplemental smoke
-  passed 35 checks. NuGet NU1301 blocks App/xUnit restore, so the main session
-  must restore/build/test/publish and exercise real calls before closing REC.0.
-  No commit, push, deploy, live pairing or production write in this client run.
+  The committed baseline builds with zero warnings and tests pass with restored
+  packages. The Windows review repairs remain uncommitted; verification is in
+  the running log and review report. Publish and real calls remain required
+  before closing REC.0. No commit, push, deploy, live pairing or production
+  write in this review run.
   Automatic known and unknown call capture,
   no recording notice and the pairing MCP exception are approved in #072.
   Review repair is committed at 54b14081: call windows/member

@@ -1366,3 +1366,37 @@ transcripts. Orphaned server open recordings without local metadata need
 dashboard resolution; local audio stays retained. No executable/xUnit/live
 pass is claimed. All changes remain uncommitted. No commit, push, deploy,
 migration, real pairing/capture, secret or production-data operation occurred.
+
+## 2026-10-14, REC.0 Windows tray review repairs, uncommitted on 8665e762
+
+Started with clean git status on feat/rec0-tray-app at 8665e762. The original
+client is committed and its restored-package baseline builds with zero
+warnings and passing tests per Liam's brief; the preceding preparation entry
+is historical. The security and behaviour review repairs remain uncommitted.
+No dashboard code, framework target, commit, push, deploy, secret, pairing,
+audio capture or production data changed.
+
+Implemented protected storage and install ACL gates, toast argument parsing,
+manual-session/early-join/suppression fixes, progress-sensitive polling,
+three failed-state retries, poison and startup recovery isolation, server slot
+release, Communications devices, portable crash spool, ten-second gap stop,
+short-tail folding, suspend/session-ending/Quit flushing without manual
+suppression, seven-day audio/manifests and fourteen-day logs retention,
+Local recordings count/folder, state-only settings writes and durable ordering.
+Updated README, STATUS, TASKS and Decision #072 client note. Full item/file/line
+report: docs/superpowers/audits/2026-10-14-rec0-tray-app-review-fixes.md.
+
+Final Release xUnit: 123 passed, 0 failed, 0 skipped, exit 0. Supplemental host
+source compilation: 0 warnings/errors, exit 0, using cached dependencies in an
+ignored scratch project. This is not the full dependency/build gate. The real
+solution Release build is blocked by absent System.Drawing.Common 8.0.0 and
+its SystemEvents 8.0.0 dependency: NU1101, 3 warnings, 2 errors, exit 1. The new
+explicit package reference is retained; the supplied cache contains only 4.7.0.
+NuGet downloads are sandbox-blocked. Asked Liam
+to restore the two missing packages from an unrestricted shell, after which
+the actual Release build and all tests must run again.
+
+Raw logs: apps/recorder-tray/.build-logs/review-build.log,
+review-host-source-build.log and review-tests-final-pass.log/.trx.
+QA/UIUX source findings were fixed and re-reviewed. Native Windows integration
+and real-call proof remain pending; REC.0 stays open. No completed/live claim.

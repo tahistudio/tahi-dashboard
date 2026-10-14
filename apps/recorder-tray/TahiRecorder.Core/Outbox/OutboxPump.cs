@@ -4,6 +4,7 @@ namespace TahiRecorder.Core.Outbox;
 
 public sealed class OutboxPump
 {
+    public const string BlockedError = "Recording needs attention. Local audio is retained.";
     private readonly FileOutboxStore store;
     private readonly IRecorderApi api;
     private readonly TimeProvider clock;
@@ -15,11 +16,36 @@ public sealed class OutboxPump
     public OutboxPump(FileOutboxStore store, IRecorderApi api, TimeProvider? clock = null)
     { this.store = store; this.api = api; this.clock = clock ?? TimeProvider.System; }
 
+    public Task<bool> BlockRecordingAsync(Guid clientRef, CancellationToken cancellationToken = default) =>
+        store.LockedAsync(clientRef, async () =>
+        {
+            try
+            {
+                var recording = await store.LoadUnsafeAsync(clientRef, cancellationToken);
+                await HandleFailureAsync(recording, new InvalidDataException(), cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                await store.MarkDamagedUnsafeAsync(clientRef, cancellationToken);
+            }
+            return true;
+        }, cancellationToken);
+
     public async Task<bool> HasPendingAsync(CancellationToken cancellationToken = default)
     {
+        var pending = false;
         foreach (var id in store.RecordingIds())
-            if ((await store.ReadAsync(id, cancellationToken)).TerminalState is null) return true;
-        return false;
+        {
+            if (store.NeedsAttention(id)) { StatusChanged?.Invoke(BlockedError); continue; }
+            try { pending |= (await store.ReadAsync(id, cancellationToken)).TerminalState is null; }
+            catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                await store.LockedAsync(id, async () =>
+                { await store.MarkDamagedUnsafeAsync(id, cancellationToken); return true; }, cancellationToken);
+                StatusChanged?.Invoke(BlockedError);
+            }
+        }
+        return pending;
     }
 
     public async Task PumpOnceAsync(CancellationToken cancellationToken = default)
@@ -32,42 +58,37 @@ public sealed class OutboxPump
             {
                 await store.LockedAsync(id, async () =>
                 {
-                    var recording = await store.LoadUnsafeAsync(id, cancellationToken);
-                    if (recording.TerminalState is not null || recording.NextAttemptUtc > clock.GetUtcNow()
-                        || recording.NotBeforeUtc > clock.GetUtcNow()) return false;
+                    OutboxRecording? recording = null;
                     try
                     {
-                        await AdvanceAsync(recording, cancellationToken);
+                        if (store.NeedsAttention(id)) return false;
+                        recording = await store.LoadUnsafeAsync(id, cancellationToken);
+                        if (recording.TerminalState is not null || recording.NextAttemptUtc > clock.GetUtcNow()
+                            || recording.NotBeforeUtc > clock.GetUtcNow()) return false;
+                        var result = await AdvanceAsync(recording, cancellationToken);
                         recording.Failures = 0;
                         recording.LastError = null;
                         if (recording.TerminalState is null)
-                            recording.NextAttemptUtc = clock.GetUtcNow().AddSeconds(recording.StopConfirmed
-                                ? Math.Min(60, Math.Pow(2, Math.Min(6, ++recording.TranscriptionPolls))) : 2);
+                        {
+                            if (result == AdvanceResult.Progress) recording.TranscriptionPolls = 0;
+                            recording.NextAttemptUtc = clock.GetUtcNow().AddSeconds(result switch
+                            {
+                                AdvanceResult.Progress => 1,
+                                AdvanceResult.ServerFailed => Math.Min(60, Math.Pow(2, recording.ServerFailureRetries + 1)),
+                                _ when recording.StopConfirmed => Math.Min(60, Math.Pow(2, Math.Min(6, ++recording.TranscriptionPolls))),
+                                _ => 2
+                            });
+                        }
                         await store.SaveUnsafeAsync(recording, cancellationToken);
                     }
-                    catch (Exception error) when (error is RecorderApiException or HttpRequestException or IOException
-                        or System.Text.Json.JsonException || error is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+                    catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
-                        var apiError = error as RecorderApiException;
-                        if (apiError?.IsAuthenticationFailure == true) AuthenticationRequired = true;
-                        recording.Failures++;
-                        // Never persist server bodies, upload URLs or exception strings containing grants.
-                        recording.LastError = apiError is null ? "Network or local storage unavailable."
-                            : $"HTTP {apiError.StatusCode}: {apiError.Code ?? "request_failed"}";
-                        var delay = apiError?.RetryAfter ?? TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, Math.Min(8, recording.Failures))));
-                        if (apiError?.Code == "daily_quota") delay = delay < TimeSpan.FromMinutes(15) ? TimeSpan.FromMinutes(15) : delay;
-                        if (apiError?.Code == "open_recording") delay = delay < TimeSpan.FromSeconds(30) ? TimeSpan.FromSeconds(30) : delay;
-                        if (apiError is { IsRetryable: false, IsAuthenticationFailure: false })
+                        if (recording is null)
                         {
-                            recording.TerminalState = "blocked";
-                            StatusChanged?.Invoke("Recording needs attention. Local audio is retained.");
+                            await store.MarkDamagedUnsafeAsync(id, cancellationToken);
+                            StatusChanged?.Invoke(BlockedError);
                         }
-                        recording.NextAttemptUtc = clock.GetUtcNow() + (delay < TimeSpan.Zero ? TimeSpan.FromSeconds(2) : delay);
-                        await store.SaveUnsafeAsync(recording, cancellationToken);
-                        StatusChanged?.Invoke(AuthenticationRequired ? "Device access ended. Pair again to resume new recordings."
-                            : apiError?.Code == "daily_quota" ? "Daily quota reached. Audio is saved for retry."
-                            : apiError?.Code == "open_recording" ? "Open recordings to resolve an earlier open recording. Local audio is saved."
-                            : "Upload delayed. Audio is saved for retry.");
+                        else await HandleFailureAsync(recording, error, cancellationToken);
                     }
                     return true;
                 }, cancellationToken);
@@ -77,7 +98,67 @@ public sealed class OutboxPump
         finally { pumpGate.Release(); }
     }
 
-    private async Task AdvanceAsync(OutboxRecording recording, CancellationToken cancellationToken)
+    private async Task HandleFailureAsync(OutboxRecording recording, Exception error, CancellationToken cancellationToken)
+    {
+        var apiError = error as RecorderApiException;
+        if (apiError?.IsAuthenticationFailure == true) AuthenticationRequired = true;
+        recording.Failures++;
+        // Persist only fixed messages. Exception bodies can contain upload grants.
+        recording.LastError = "Upload delayed. Audio is saved for retry.";
+        var retryable = apiError?.IsRetryable == true || apiError?.IsAuthenticationFailure == true
+            || error is HttpRequestException || error is OperationCanceledException;
+        var delay = apiError?.RetryAfter ?? TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, Math.Min(8, recording.Failures))));
+        if (apiError?.Code == "daily_quota") delay = delay < TimeSpan.FromMinutes(15) ? TimeSpan.FromMinutes(15) : delay;
+        if (apiError?.Code == "open_recording") delay = delay < TimeSpan.FromSeconds(30) ? TimeSpan.FromSeconds(30) : delay;
+        if (!retryable)
+        {
+            recording.TerminalState = "blocked";
+            recording.TerminalUtc = clock.GetUtcNow();
+            recording.LastError = BlockedError;
+            await BestEffortStopAsync(recording, cancellationToken);
+        }
+        recording.NextAttemptUtc = clock.GetUtcNow() + (delay < TimeSpan.Zero ? TimeSpan.FromSeconds(2) : delay);
+        try { await store.SaveUnsafeAsync(recording, cancellationToken); }
+        catch (Exception saveError) when (saveError is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        { await store.MarkDamagedUnsafeAsync(recording.Request.ClientRef, cancellationToken); }
+        StatusChanged?.Invoke(!retryable ? BlockedError
+            : AuthenticationRequired ? "Device access ended. Pair again to resume new recordings."
+            : apiError?.Code == "daily_quota" ? "Daily quota reached. Audio is saved for retry."
+            : apiError?.Code == "open_recording" ? "Open recordings to resolve an earlier open recording. Local audio is saved."
+            : "Upload delayed. Audio is saved for retry.");
+    }
+
+    private async Task BestEffortStopAsync(OutboxRecording recording, CancellationToken cancellationToken)
+    {
+        if (recording.RecordingId is null || recording.StopConfirmed) return;
+        try
+        {
+            await api.StopAsync(recording.RecordingId, StopRequest(recording, releaseOpenSlot: true), cancellationToken);
+            recording.StopConfirmed = true;
+        }
+        catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
+    }
+
+    private static StopRecordingRequest StopRequest(OutboxRecording recording, bool releaseOpenSlot = false)
+    {
+        var counts = new ExpectedChunks(recording.Chunks.Count(c => c.Metadata.Track == "mic"),
+            recording.Chunks.Count(c => c.Metadata.Track == "system"));
+        var duration = recording.Chunks.Count == 0 ? 0
+            : Math.Max(recording.DurationMs, recording.Chunks.Max(c => c.Metadata.StartMs + c.Metadata.DurationMs));
+        if (releaseOpenSlot && recording.Chunks.Count != 0)
+        {
+            // The server seals incomplete uploads, but each enabled track needs a positive expected count.
+            // An absent track can remain missing while stoppedAt releases the open recording slot.
+            counts = new ExpectedChunks(
+                Math.Max(recording.Request.Tracks.Contains("mic") ? 1 : 0,
+                    recording.Chunks.Where(c => c.Metadata.Track == "mic").Select(c => c.Metadata.Sequence + 1).DefaultIfEmpty().Max()),
+                Math.Max(recording.Request.Tracks.Contains("system") ? 1 : 0,
+                    recording.Chunks.Where(c => c.Metadata.Track == "system").Select(c => c.Metadata.Sequence + 1).DefaultIfEmpty().Max()));
+        }
+        return new(counts, duration);
+    }
+
+    private async Task<AdvanceResult> AdvanceAsync(OutboxRecording recording, CancellationToken cancellationToken)
     {
         var clientRef = recording.Request.ClientRef;
         if (recording.RecordingId is null)
@@ -97,8 +178,6 @@ public sealed class OutboxPump
                 try { reservation = await api.ReserveAsync(recording.RecordingId, chunk.Metadata, cancellationToken); }
                 catch (RecorderApiException error) when (error.StatusCode == 409)
                 {
-                    // A transcript may have completed after a crash before the local ack.
-                    // Owned reads can confirm its stored body even when reservations are closed.
                     var duplicateConfirmed = error.Code == "duplicate" && error.Uploaded;
                     if (!duplicateConfirmed)
                     {
@@ -109,7 +188,6 @@ public sealed class OutboxPump
                     if (!duplicateConfirmed) throw;
                     reservation = new ChunkReservation("", true, true);
                 }
-                // Duplicate alone can mean metadata exists. Only uploaded confirms the body.
                 if (!reservation.Uploaded)
                 {
                     var wav = await File.ReadAllBytesAsync(store.ChunkPath(clientRef, chunk), cancellationToken);
@@ -122,29 +200,58 @@ public sealed class OutboxPump
             // Durable acknowledgement precedes deletion. A crash repeats only this cleanup.
             File.Delete(store.ChunkPath(clientRef, chunk));
         }
-        if (!recording.CaptureStopped) return;
+        if (!recording.CaptureStopped) return AdvanceResult.NoProgress;
         if (!recording.StopConfirmed)
         {
-            var counts = new ExpectedChunks(recording.Chunks.Count(c => c.Metadata.Track == "mic"),
-                recording.Chunks.Count(c => c.Metadata.Track == "system"));
-            var detail = await api.StopAsync(recording.RecordingId, new StopRecordingRequest(counts, recording.DurationMs), cancellationToken);
+            var detail = await api.StopAsync(recording.RecordingId, StopRequest(recording), cancellationToken);
             recording.StopConfirmed = true;
-            UpdateTerminal(recording, detail);
+            if (UpdateTerminal(recording, detail)) return AdvanceResult.NoProgress;
+            if (detail.Recording.State == "failed")
+            { recording.ServerFailed = true; return AdvanceResult.ServerFailed; }
             await store.SaveUnsafeAsync(recording, cancellationToken);
         }
-        if (recording.TerminalState is not null) return;
         var current = await api.ReadAsync(recording.RecordingId, cancellationToken);
-        UpdateTerminal(recording, current);
-        if (recording.TerminalState is null)
-            UpdateTerminal(recording, await api.TranscribeAsync(recording.RecordingId, cancellationToken));
+        if (UpdateTerminal(recording, current)) return AdvanceResult.NoProgress;
+        if (current.Recording.State == "failed")
+        {
+            if (!recording.ServerFailed)
+            { recording.ServerFailed = true; return AdvanceResult.ServerFailed; }
+        }
+        if (recording.ServerFailed)
+        {
+            if (recording.ServerFailureRetries >= 3)
+            { SetTerminal(recording, "failed"); return AdvanceResult.NoProgress; }
+            recording.ServerFailureRetries++;
+        }
+        var transcribed = await api.TranscribeAsync(recording.RecordingId, cancellationToken);
+        if (UpdateTerminal(recording, transcribed)) return AdvanceResult.NoProgress;
+        if (transcribed.Recording.State == "failed")
+        {
+            recording.ServerFailed = true;
+            if (recording.ServerFailureRetries >= 3) SetTerminal(recording, "failed");
+            return AdvanceResult.ServerFailed;
+        }
+        recording.ServerFailed = false;
+        var readyBefore = current.Chunks.Count(c => c.State == "ready");
+        var readyAfter = transcribed.Chunks.Count(c => c.State == "ready");
+        return readyAfter > readyBefore || transcribed.Recording.State != current.Recording.State
+            ? AdvanceResult.Progress : AdvanceResult.NoProgress;
     }
 
-    private void UpdateTerminal(OutboxRecording recording, RecordingDetail detail)
+    private bool UpdateTerminal(OutboxRecording recording, RecordingDetail detail)
     {
-        if (detail.Recording.State is "ready" or "failed")
-        {
-            recording.TerminalState = detail.Recording.State;
-            StatusChanged?.Invoke(detail.Recording.State == "ready" ? "Transcript ready in recordings." : "Transcription failed. Open recordings to review.");
-        }
+        if (detail.Recording.State != "ready") return false;
+        SetTerminal(recording, "ready");
+        return true;
     }
+
+    private void SetTerminal(OutboxRecording recording, string state)
+    {
+        recording.TerminalState = state;
+        recording.TerminalUtc = clock.GetUtcNow();
+        recording.TranscriptionPolls = 0;
+        StatusChanged?.Invoke(state == "ready" ? "Transcript ready in recordings." : "Transcription failed. Open recordings to review.");
+    }
+
+    private enum AdvanceResult { NoProgress, Progress, ServerFailed }
 }

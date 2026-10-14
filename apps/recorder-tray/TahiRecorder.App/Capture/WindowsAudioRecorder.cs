@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Wave;
+using TahiRecorder.Core.Audio;
 
 namespace TahiRecorder.App.Capture;
 
@@ -26,6 +27,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     private int _reopenMic;
     private int _reopenSystem;
     private int _persistenceFailure;
+    private int _audioGapStopDurationMs = -1;
 
     public WindowsAudioRecorder(string spoolDirectory)
     {
@@ -36,6 +38,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     public event EventHandler<CaptureErrorEventArgs>? Error;
     public int LastDurationMs { get; private set; }
     public bool HasPersistenceFailure => Volatile.Read(ref _persistenceFailure) != 0;
+    public bool HasAudioGap => Volatile.Read(ref _audioGapStopDurationMs) >= 0;
     public bool LastStopCompleted { get; private set; }
     public bool IsRecording { get { lock (_gate) return _running; } }
 
@@ -75,6 +78,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         LastDurationMs = 0;
         LastStopCompleted = false;
         Interlocked.Exchange(ref _persistenceFailure, 0);
+        Interlocked.Exchange(ref _audioGapStopDurationMs, -1);
         _clock.Restart();
         lock (_gate) _running = true;
         try
@@ -108,8 +112,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         try
         {
             var flow = channel.Track == "mic" ? DataFlow.Capture : DataFlow.Render;
-            var role = channel.Track == "mic" ? Role.Console : Role.Multimedia;
-            channel.Endpoint = _enumerator!.GetDefaultAudioEndpoint(flow, role);
+            channel.Endpoint = _enumerator!.GetDefaultAudioEndpoint(flow, Role.Communications);
             var capture = channel.Track == "mic"
                 ? new WasapiCapture(channel.Endpoint)
                 : new WasapiLoopbackCapture(channel.Endpoint);
@@ -141,7 +144,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         {
             lock (_gate)
             {
-                if (!_running || _spool is null || channel.Closing || HasPersistenceFailure)
+                if (!_running || _spool is null || channel.Closing || HasPersistenceFailure || HasAudioGap)
                     return;
                 var byteCount = args.BytesRecorded - args.BytesRecorded % 2;
                 var samples = byteCount / 2;
@@ -154,6 +157,10 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
                 _spool.AddAt(channel.Track, startSample, args.Buffer.AsSpan(0, byteCount));
                 channel.LastAudioEndSample = startSample + samples;
             }
+        }
+        catch (CaptureGapExceededException exception)
+        {
+            ReportAudioGap(exception);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -181,7 +188,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (HasPersistenceFailure)
+                if (HasPersistenceFailure || HasAudioGap)
                     return;
                 if (Interlocked.Exchange(ref _reopenMic, 0) != 0)
                     ReopenChannel(_channels["mic"]);
@@ -204,6 +211,10 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+        }
+        catch (CaptureGapExceededException exception)
+        {
+            ReportAudioGap(exception);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -263,8 +274,17 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
                     lock (_gate)
                     {
                         _clock.Stop();
-                        LastDurationMs = checked((int)Math.Min(_clock.ElapsedMilliseconds, 43_200_000));
-                        chunks = _spool!.Advance(LastDurationMs, complete: true);
+                        LastDurationMs = CaptureEndDurationMs();
+                        try
+                        {
+                            chunks = _spool!.Advance(LastDurationMs, complete: true);
+                        }
+                        catch (CaptureGapExceededException exception)
+                        {
+                            ReportAudioGap(exception);
+                            LastDurationMs = CaptureEndDurationMs();
+                            chunks = _spool!.Advance(LastDurationMs, complete: true);
+                        }
                         LastStopCompleted = true;
                     }
                 }
@@ -278,7 +298,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
                     lock (_gate)
                     {
                         _clock.Stop();
-                        LastDurationMs = checked((int)Math.Min(_clock.ElapsedMilliseconds, 43_200_000));
+                        LastDurationMs = CaptureEndDurationMs();
                         _running = false;
                         try { _spool?.Dispose(); }
                         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -347,6 +367,21 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         catch { /* The host can also inspect HasPersistenceFailure when polling recorder state. */ }
     }
 
+    private int CaptureEndDurationMs() => HasAudioGap ? Volatile.Read(ref _audioGapStopDurationMs)
+        : checked((int)Math.Min(_clock.ElapsedMilliseconds, DurableCaptureSpool.MaximumDurationMs));
+
+    private void ReportAudioGap(CaptureGapExceededException exception)
+    {
+        if (Interlocked.CompareExchange(ref _audioGapStopDurationMs, exception.StopDurationMs, -1) != -1)
+            return;
+        try
+        {
+            Error?.Invoke(this, new CaptureErrorEventArgs("all",
+                "Capture stopped after an audio gap longer than 10 seconds. Saved audio is preserved.", isFatal: true));
+        }
+        catch { /* The host can also inspect HasAudioGap when polling recorder state. */ }
+    }
+
     public static IReadOnlyList<RecoveredCapture> RecoverInterrupted(string spoolDirectory) =>
         CaptureSpool.RecoverInterrupted(Path.GetFullPath(spoolDirectory));
 
@@ -363,6 +398,8 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     {
         public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
         {
+            if (role != Role.Communications)
+                return;
             if (flow is DataFlow.Capture or DataFlow.All)
                 Interlocked.Exchange(ref owner._reopenMic, 1);
             if (flow is DataFlow.Render or DataFlow.All)

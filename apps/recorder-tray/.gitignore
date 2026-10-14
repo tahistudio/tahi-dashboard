@@ -2,5 +2,6 @@
 **/obj/
 .packages/
 .build-home/
+.dotnet-home/
 .build-logs/
 publish/
