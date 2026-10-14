@@ -5,6 +5,7 @@ import {
   real,
   index,
   uniqueIndex,
+  unique,
 } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
@@ -2152,6 +2153,51 @@ export const meetingRecordingChunks = sqliteTable('meeting_recording_chunks', {
 }, (table) => [
   uniqueIndex('idx_meeting_chunks_sequence').on(table.recordingId, table.track, table.sequence),
   index('idx_meeting_chunks_recording_state').on(table.recordingId, table.state),
+])
+
+// ============================================================
+// RECORDER DEVICES (REC.0 phase 2, migration 0114)
+// ============================================================
+
+export const recorderDevices = sqliteTable('recorder_devices', {
+  id: text('id').primaryKey().notNull(),
+  teamMemberId: text('team_member_id').notNull(),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: text('created_at').notNull(),
+  lastSeenAt: text('last_seen_at').notNull(),
+  membershipCheckedAt: text('membership_checked_at'),
+  revokedAt: text('revoked_at'),
+  revokedReason: text('revoked_reason'),
+}, (table) => [index('idx_recorder_devices_member').on(table.teamMemberId)])
+
+export const recorderPairingCodes = sqliteTable('recorder_pairing_codes', {
+  codeHash: text('code_hash').primaryKey().notNull(),
+  teamMemberId: text('team_member_id').notNull(),
+  createdByUserId: text('created_by_user_id').notNull(),
+  expiresAt: text('expires_at').notNull(),
+  usedAt: text('used_at'),
+  usedByDeviceId: text('used_by_device_id'),
+}, (table) => [index('idx_recorder_pairing_codes_member').on(table.teamMemberId)])
+
+export const recorderPairingAttempts = sqliteTable('recorder_pairing_attempts', {
+  id: text('id').primaryKey().notNull(),
+  ipHash: text('ip_hash').notNull(),
+  attemptedAt: text('attempted_at').notNull(),
+  succeeded: integer('succeeded').notNull().default(0),
+}, (table) => [index('idx_recorder_pairing_attempts_ip_time').on(table.ipHash, table.attemptedAt)])
+
+export const recorderRecordings = sqliteTable('recorder_recordings', {
+  recordingId: text('recording_id').primaryKey().notNull().references(() => meetingRecordings.id),
+  deviceId: text('device_id').notNull(),
+  teamMemberId: text('team_member_id').notNull(),
+  clientRef: text('client_ref').notNull(),
+  callId: text('call_id'),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  unique('recorder_recordings_device_id_client_ref_unique').on(table.deviceId, table.clientRef),
+  index('idx_recorder_recordings_member').on(table.teamMemberId),
+  index('idx_recorder_recordings_device').on(table.deviceId),
 ])
 
 // ============================================================

@@ -10,6 +10,7 @@ import {
   CONDITIONAL_CONFIRM_TOOLS,
   CONFIRM_ARG,
   DESIGNER_CONFIRM_TOOLS,
+  DESIGNER_BLOCKED_TOOLS,
   DESIGNER_READ_TOOLS,
   DESIGNER_WRITE_TOOLS,
   classifyTool,
@@ -44,9 +45,9 @@ describe('classification table', () => {
     for (const [name, count] of seen) expect(count, name).toBe(1)
   })
 
-  it('reads are reads: every get_ and list_ tool is readable by the designer', () => {
+  it('reads are readable unless explicitly classified as restricted', () => {
     for (const name of toolNames) {
-      if (/^(get|list)_/.test(name)) expect(classifyTool(name, 'designer'), name).toBe('read')
+      if (/^(get|list)_/.test(name)) expect(classifyTool(name, 'designer'), name).toBe(DESIGNER_BLOCKED_TOOLS.has(name) ? 'blocked' : 'read')
     }
   })
 

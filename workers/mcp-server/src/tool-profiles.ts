@@ -122,6 +122,8 @@ export const CONDITIONAL_CONFIRM_TOOLS: ReadonlySet<string> = new Set(['update_r
 /** Explicit restricted writes, in addition to default deny for all unlisted tools. */
 export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
   'link_stripe_customer', 'confirm_xero_contact',
+  // Recorder devices can capture calls, so their management stays with admins.
+  'list_recorder_devices', 'revoke_recorder_device',
   // Paid transcription and its manual fallback stay with an administrator.
   'transcribe_meeting_recording',
 ])

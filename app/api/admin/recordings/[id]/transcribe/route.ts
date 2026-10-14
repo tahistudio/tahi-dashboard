@@ -16,5 +16,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       throw new RecordingError('Separate speakers can only be disabled for this action.')
     }
     return NextResponse.json(await transcribeNextChunk(context, 'separateSpeakers' in body))
-  })
+  }, { device: 'transcribe' })
 }

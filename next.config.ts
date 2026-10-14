@@ -2,6 +2,9 @@ import type { NextConfig } from 'next'
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare'
 
 const nextConfig: NextConfig = {
+  outputFileTracingExcludes: {
+    '*': ['./apps/recorder-tray/**/*'],
+  },
   // The app serves at the domain root (e.g. portal.tahi.studio). No basePath.
 
   experimental: {

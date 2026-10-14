@@ -9,7 +9,7 @@ import {
   Building2, FileText, Columns3, ClipboardList, Target, GitBranch, Sparkles,
   Plug, Webhook, Workflow, Clock, Bot, Users, CreditCard, Coins, PiggyBank,
   ScrollText, AlertTriangle, Palette, ChevronDown, Wallet, Shield,
-  Mail,
+  Mail, Laptop,
 } from 'lucide-react'
 import '@/app/(dashboard)/settings/settings.css'
 
@@ -43,6 +43,7 @@ import { OrgSettingsSection } from '@/components/tahi/settings/sections/org'
 import { PeopleSection } from '@/components/tahi/settings/sections/people'
 import { PlanBillingSection } from '@/components/tahi/settings/sections/plan'
 import { SubscriptionSection } from '@/components/tahi/settings/sections/subscription'
+import { RecorderDevicesSection } from '@/components/tahi/settings/sections/recorder-devices'
 
 type Audience = 'both' | 'admin' | 'client'
 
@@ -68,6 +69,7 @@ interface SectionDef {
   // Client sections that only a workspace admin (contacts.portalRole === 'admin',
   // or the primary contact) may reach. Hidden from client members in the sub-nav.
   clientAdminOnly?: boolean
+  adminRoleOnly?: boolean
 }
 
 // Registry order is intentional: it drives the order items appear inside their
@@ -77,6 +79,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'appearance', label: 'Appearance', icon: SunMoon, group: 'Account', audience: 'both', Component: AppearanceSection },
   { id: 'notifications', label: 'Notifications', icon: Bell, group: 'Account', audience: 'both', Component: NotificationsSection },
   { id: 'booking', label: 'Booking link', icon: CalendarClock, group: 'Account', audience: 'admin', Component: BookingSection },
+  { id: 'recorder-devices', label: 'Recorder devices', icon: Laptop, group: 'Account', audience: 'admin', adminRoleOnly: true, Component: RecorderDevicesSection },
 
   { id: 'branding', label: 'Branding', icon: Paintbrush, group: 'Workspace', audience: 'admin', Component: BrandingSection },
   { id: 'modules', label: 'Modules', icon: LayoutGrid, group: 'Workspace', audience: 'admin', superAdminOnly: true, Component: ModulesSection },
@@ -123,6 +126,7 @@ const CLIENT_GROUPS = ['Account', 'Organization', 'Plan & billing']
 
 interface Visibility {
   isAdmin: boolean
+  hasAdminRole: boolean
   isSuperAdmin: boolean
   isClientAdmin: boolean
   /** Resolved FEATURE_TREE map from PermissionsProvider (server-computed). */
@@ -142,6 +146,7 @@ function isVisible(section: SectionDef, v: Visibility): boolean {
   if (section.audience === 'both') return true
   if (v.isAdmin) {
     if (section.audience !== 'admin') return false
+    if (section.adminRoleOnly && !v.hasAdminRole) return false
     // Sensitive admin surfaces are super-admin only in the sub-nav.
     if (section.superAdminOnly && !v.isSuperAdmin) return false
     // Granular feature gate (fail-open when the map has no entry).
@@ -171,7 +176,7 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   // Super-admin flag + resolved feature map drive the admin sub-nav gates.
   // Resolved server-side in the dashboard layout and surfaced through
   // PermissionsProvider (no flash).
-  const { isSuperAdmin, features } = usePermissions()
+  const { isSuperAdmin, isAdmin: hasAdminRole, features } = usePermissions()
 
   // Client-admin flag drives the client sub-nav gate (#6). GET
   // /api/portal/profile now states the verdict outright (`isAdmin`), decided by
@@ -194,8 +199,8 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   }, [isAdmin, profile])
 
   const visibility = useMemo<Visibility>(
-    () => ({ isAdmin, isSuperAdmin, isClientAdmin, features: features ?? {} }),
-    [isAdmin, isSuperAdmin, isClientAdmin, features],
+    () => ({ isAdmin, hasAdminRole, isSuperAdmin, isClientAdmin, features: features ?? {} }),
+    [isAdmin, hasAdminRole, isSuperAdmin, isClientAdmin, features],
   )
 
   // Sections this audience may see, kept in registry order.
@@ -269,6 +274,7 @@ export function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
                   key={section.id}
                   type="button"
                   className={on ? 'set-navitem on' : 'set-navitem'}
+                  style={{ minHeight: '2.75rem' }}
                   aria-current={on ? 'page' : undefined}
                   onClick={() => selectSection(section.id)}
                 >

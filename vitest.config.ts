@@ -11,6 +11,7 @@ export default defineConfig({
       '.claude/**',
       'mcp-server/**',
       'workers/**',
+      'apps/recorder-tray/**',
       // Ship Studio plugins are self-contained packages with their own
       // vitest + jsdom deps (run via their own config); don't sweep them
       // into the app's test run (mirrors mcp-server / workers above).

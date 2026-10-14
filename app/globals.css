@@ -7,6 +7,7 @@
 @source not "../docs";
 @source not "../SPECS";
 @source not "../*.md";
+@source not "../apps/recorder-tray";
 
 /* ============================================================
    TAHI STUDIO : DESIGN SYSTEM

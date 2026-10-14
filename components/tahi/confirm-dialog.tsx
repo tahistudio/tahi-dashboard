@@ -191,9 +191,10 @@ export function ConfirmDialog({
         alignItems: 'center',
         justifyContent: 'center',
         background: 'rgba(0,0,0,0.4)',
+        padding: '0.75rem',
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel()
+        if (e.target === e.currentTarget && !loading) onCancel()
       }}
     >
       <div
@@ -204,7 +205,10 @@ export function ConfirmDialog({
           padding: '1.5rem',
           width: '100%',
           maxWidth: '26rem',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+          boxShadow: '0 1.25rem 3.75rem rgba(0,0,0,0.15)',
+          minWidth: 0,
+          maxHeight: 'calc(100dvh - 1.5rem)',
+          overflowY: 'auto',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
@@ -228,7 +232,7 @@ export function ConfirmDialog({
               }}
             />
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <h3
               id="confirm-dialog-title"
               style={{
@@ -236,6 +240,7 @@ export function ConfirmDialog({
                 fontWeight: 600,
                 color: 'var(--color-text)',
                 margin: 0,
+                overflowWrap: 'anywhere',
               }}
             >
               {title}
@@ -246,6 +251,7 @@ export function ConfirmDialog({
                 color: 'var(--color-text-muted)',
                 marginTop: '0.375rem',
                 lineHeight: 1.5,
+                overflowWrap: 'anywhere',
               }}
             >
               {description}
@@ -255,12 +261,21 @@ export function ConfirmDialog({
             type="button"
             className="tahi-focus-ring"
             onClick={onCancel}
+            disabled={loading}
+            onMouseEnter={event => { if (!loading) event.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={event => { event.currentTarget.style.background = 'transparent' }}
             style={{
-              padding: '0.25rem',
+              padding: '0.5rem',
+              width: '2.75rem',
+              height: '2.75rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               borderRadius: '0.375rem',
               border: 'none',
-              background: 'none',
-              cursor: 'pointer',
+              background: 'transparent',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.5 : 1,
               color: 'var(--color-text-muted)',
               flexShrink: 0,
             }}
@@ -273,6 +288,7 @@ export function ConfirmDialog({
         <div
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             gap: '0.5rem',
             justifyContent: 'flex-end',
             marginTop: '1.25rem',
@@ -284,12 +300,14 @@ export function ConfirmDialog({
             className="tahi-focus-ring"
             onClick={onCancel}
             disabled={loading}
+            onMouseEnter={event => { if (!loading) event.currentTarget.style.background = 'var(--color-bg-secondary)' }}
+            onMouseLeave={event => { event.currentTarget.style.background = 'var(--color-bg)' }}
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '0.5rem',
               fontSize: '0.875rem',
               fontWeight: 500,
-              border: '1px solid var(--color-border)',
+              border: '0.0625rem solid var(--color-border)',
               background: 'var(--color-bg)',
               color: 'var(--color-text)',
               cursor: loading ? 'not-allowed' : 'pointer',
@@ -305,12 +323,14 @@ export function ConfirmDialog({
               className="tahi-focus-ring"
               onClick={() => void handleSecondary()}
               disabled={loading}
+              onMouseEnter={event => { if (!loading) event.currentTarget.style.color = 'var(--color-text)' }}
+              onMouseLeave={event => { event.currentTarget.style.color = 'var(--color-text-muted)' }}
               style={{
                 padding: '0.5rem 1rem',
                 borderRadius: '0.5rem',
                 fontSize: '0.875rem',
                 fontWeight: 500,
-                border: '1px solid var(--color-border)',
+                border: '0.0625rem solid var(--color-border)',
                 background: 'var(--color-bg-secondary)',
                 color: 'var(--color-text-muted)',
                 cursor: loading ? 'not-allowed' : 'pointer',
@@ -326,6 +346,8 @@ export function ConfirmDialog({
             className="tahi-focus-ring"
             onClick={() => void handleConfirm()}
             disabled={loading}
+            onMouseEnter={event => { if (!loading) event.currentTarget.style.opacity = '0.9' }}
+            onMouseLeave={event => { event.currentTarget.style.opacity = '1' }}
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '0.5rem',
@@ -333,7 +355,7 @@ export function ConfirmDialog({
               fontWeight: 600,
               border: 'none',
               background: loading ? 'var(--color-text-subtle)' : confirmBg,
-              color: 'white',
+              color: 'var(--color-text-on-dark)',
               cursor: loading ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',

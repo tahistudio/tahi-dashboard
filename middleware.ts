@@ -10,6 +10,7 @@ import {
 import { resolveNoOrgRedirect } from '@/lib/workspace-choice'
 import { db } from '@/lib/db'
 import { isSeatInvite, resolveInvite } from '@/lib/onboarding-invites'
+import { isRecorderDeviceBearer, isRecorderDeviceRouteAllowed } from '@/lib/recorder-device-routes'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -143,6 +144,12 @@ const isClientOnlyRoute = createRouteMatcher([
 ])
 
 export default clerkMiddleware(async (auth, req) => {
+  // A recorder token grants only the explicitly opted-in recording methods.
+  // Run before public routes, the dev preview and the generic Bearer bypass.
+  if (isRecorderDeviceBearer(req.headers.get('authorization'))
+    && !isRecorderDeviceRouteAllowed(req.method, req.nextUrl.pathname)) {
+    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+  }
   // Dev-only: auto-auth the Ship Studio preview wrapper, which loads the local
   // dev server but can't complete Clerk's browser sign-in. The wrapper marks
   // its page loads with ?shipstudio=1 and/or runs headless Chrome; we persist

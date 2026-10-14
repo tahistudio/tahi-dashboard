@@ -1,7 +1,20 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 phase 1 live per Liam; phase 1b committed through 807adc35, follow-up uncommitted, not deployed). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 phases 1 and 1b live per Liam; phase 2 dashboard prepared, uncommitted). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+
+## REC.0 phase 2 dashboard, prepared 2026-10-14
+
+Phases 1 and 1b are live per Liam's current brief, main 729cc282. The live
+five-second WAV probe passed for both tracks; retain Whisper vad_filter.
+The tray dashboard changes are uncommitted on feat/rec0-tray-server:
+separable migration 0114, restricted device auth/pairing, owned slim recording
+APIs, quotas, upcoming calls, Settings devices and full-profile list/revoke
+MCP tools. Decision #072 records the fixed choices and pairing's MCP exception.
+The main session must ship/apply 0114 first, review and deploy the server,
+then verify signed-in 375/768 light/dark states. No migration apply, deploy,
+secret change or C# app is performed here. REC.0 stays open. The following
+phase 1b notes are historical preparation details superseded by this live status.
 
 ## REC.0 phase 1b, prepared 2026-10-14
 

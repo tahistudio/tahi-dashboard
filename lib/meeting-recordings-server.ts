@@ -12,7 +12,7 @@ import { attributedUserId } from '@/lib/mcp-actor'
 import { logAudit } from '@/lib/audit'
 import { resolvePermissions } from '@/lib/permissions'
 import { readRecordingOptions, writeRecordingOptions } from '@/lib/recording-options'
-import { MAX_RECORDING_GROUP_DURATION_MS, RECORDING_GROUP_LEASE_MS, RECORDING_PCM_HEADER_BYTES, RECORDING_PCM_SAMPLE_RATE, transcribeRecordingGroup, type RecordingGroupAiBinding } from '@/lib/recording-group-audio'
+import { MAX_RECORDING_GROUP_DURATION_MS, parseRecordingPcmWav, RECORDING_GROUP_LEASE_MS, RECORDING_PCM_HEADER_BYTES, RECORDING_PCM_SAMPLE_RATE, transcribeRecordingGroup, type RecordingGroupAiBinding } from '@/lib/recording-group-audio'
 import { hashTranscript, parseCallKind, resolveCallOrgId } from '@/lib/call-transcripts'
 import { recordingSpeakerNames, type RecordingSpeakerNames } from '@/lib/recording-speaker-names'
 import {
@@ -21,6 +21,9 @@ import {
   RECORDING_LEASE_MS, transcribeRecordingAudio, validateChunk,
 } from '@/lib/meeting-recordings'
 import type { MeetingRecording, MeetingRecordingChunk, MeetingRecordingDetail, RecordingTrack } from '@/lib/meeting-recordings-types'
+import { getRecorderDeviceAuth, isRecorderDeviceRequest, RecorderDeviceAuthError, type RecorderDeviceAuth } from '@/lib/recorder-device-auth'
+import { assertRecorderOwnership, recorderAudioQuota, recorderClientRef, recorderRecording, recorderRecordingDetail, type RecorderRecording, type RecorderRecordingDetail } from '@/lib/recorder-recordings'
+import { recorderUpcomingCalls } from '@/lib/recorder-upcoming-calls'
 
 type RecordingRow = typeof schema.meetingRecordings.$inferSelect
 type ChunkRow = typeof schema.meetingRecordingChunks.$inferSelect
@@ -29,7 +32,7 @@ const chunks = schema.meetingRecordingChunks
 
 export interface RecordingContext {
   database: DB
-  auth: RequestAuthResult
+  auth: RequestAuthResult & { recorderDevice?: RecorderDeviceAuth['recorderDevice'] }
   recording?: RecordingRow
 }
 
@@ -37,9 +40,9 @@ function jsonValue<T>(value: string | null, fallback: T): T {
   try { return value ? JSON.parse(value) as T : fallback } catch { return fallback }
 }
 
-function publicRecording(row: RecordingRow): MeetingRecording {
+function publicRecording(row: RecordingRow, source: 'browser' | 'tray' = 'browser'): MeetingRecording {
   return {
-    id: row.id, title: row.title, orgId: row.orgId, callKind: row.callKind, callId: row.callId,
+    id: row.id, source, title: row.title, orgId: row.orgId, callKind: row.callKind, callId: row.callId,
     createdById: row.createdById, ...readRecordingOptions(row.tracks),
     state: row.state, startedAt: row.startedAt, stoppedAt: row.stoppedAt, durationMs: row.durationMs,
     expectedChunks: jsonValue(row.expectedChunks, null), transcriptId: row.transcriptId,
@@ -99,19 +102,32 @@ export async function recordingDetail(database: DB, id: string): Promise<Meeting
 }
 
 export async function scopedRecordingDetail(context: RecordingContext, id: string): Promise<MeetingRecordingDetail> {
+  if (context.auth.recorderDevice) throw new RecordingError('Unauthorised', 401)
   const detail = await recordingDetail(context.database, id)
   const denied = await requireAccessToOrgOrPreClient(context.database, context.auth.userId, detail.recording.orgId)
   if (denied) throw new RecordingError('Forbidden', denied.status)
   return detail
 }
 
+/** Device responses never load transcript text, segments or chunk text. */
+export async function recordingResponse(context: RecordingContext, id: string): Promise<MeetingRecordingDetail | RecorderRecordingDetail> {
+  if (context.auth.recorderDevice) return recorderRecordingDetail(context.database, context.auth as RecorderDeviceAuth, id)
+  return scopedRecordingDetail(context, id)
+}
+
 /** All routes fail closed before reading any audio or recording metadata. */
 export async function withRecordingContext(
   req: NextRequest, id: string | undefined,
   work: (context: RecordingContext) => Promise<NextResponse>,
+  options?: { device: 'create' | 'chunk' | 'stop' | 'transcribe' | 'read' },
 ): Promise<NextResponse> {
   try {
-    const auth = await getRequestAuth(req)
+    let auth: RecordingContext['auth'] = await getRequestAuth(req)
+    if (isRecorderDeviceRequest(req)) {
+      // Even an unrelated session cookie cannot widen a recorder token.
+      if (!options || auth.userId) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+      if (!auth.userId) auth = await getRecorderDeviceAuth(req) ?? auth
+    }
     if (!auth.userId) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     if (!isTahiAdmin(auth.orgId) || resolvePreviewOrgId(true, req.cookies.get(IMPERSONATE_ORG_COOKIE)?.value)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -119,6 +135,7 @@ export async function withRecordingContext(
     const featureDenied = await requireFeature(auth, 'calls')
     if (featureDenied) return featureDenied
     const database = await db()
+    if (id && auth.recorderDevice) await assertRecorderOwnership(database, auth as RecorderDeviceAuth, recordingId(id))
     const row = id ? await readRecording(database, recordingId(id)) : undefined
     if (row) {
       const denied = await requireAccessToOrgOrPreClient(database, auth.userId, row.orgId)
@@ -126,6 +143,9 @@ export async function withRecordingContext(
     }
     return await work({ database, auth, recording: row })
   } catch (error) {
+    if (error instanceof RecorderDeviceAuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status, headers: { 'Retry-After': String(error.retryAfter) } })
+    }
     if (error instanceof RecordingError) {
       return NextResponse.json({ error: error.message, code: error.code, duplicate: error.code === 'duplicate', uploaded: error.code === 'duplicate' }, { status: error.status })
     }
@@ -221,7 +241,48 @@ async function choice(context: RecordingContext, value: unknown): Promise<{ orgI
   return { orgId, callKind: null, callId: null }
 }
 
-export async function createRecording(context: RecordingContext, value: unknown): Promise<MeetingRecording> {
+async function createDeviceRecording(
+  context: RecordingContext, body: Record<string, unknown>, title: string,
+): Promise<RecorderRecording> {
+  const auth = context.auth as RecorderDeviceAuth
+  const clientRef = recorderClientRef(body.clientRef)
+  const devices = schema.recorderRecordings
+  const existing = async () => {
+    const [found] = await context.database.select({ id: devices.recordingId }).from(devices)
+      .where(and(eq(devices.deviceId, auth.recorderDevice.id), eq(devices.clientRef, clientRef))).limit(1)
+    if (!found) return null
+    await assertRecorderOwnership(context.database, auth, found.id)
+    return recorderRecording(publicRecording(await readRecording(context.database, found.id), 'tray'))
+  }
+  const previous = await existing()
+  if (previous) return previous
+  const nowMs = Date.now()
+  const now = new Date(nowMs).toISOString()
+  const calls = body.callId ? await recorderUpcomingCalls(context.database, auth, nowMs) : []
+  const call = calls.find(candidate => candidate.id === body.callId && candidate.kind === body.callKind
+    && nowMs >= candidate.startMs - 120_000 && nowMs <= candidate.endMs + 600_000)
+  const target = call ? await choice(context, { callId: call.id, callKind: call.kind })
+    : { orgId: null, callKind: null, callId: null }
+  const id = crypto.randomUUID()
+  // D1 batch is transactional. The guarded insert and side row cannot race a
+  // concurrent create, leave an orphan or admit a second open recording.
+  await context.database.batch([
+    context.database.insert(recordings).select(sql`SELECT ${id}, ${title}, ${target.orgId}, ${target.callKind}, ${target.callId},
+      ${auth.userId}, ${writeRecordingOptions(body.tracks as RecordingTrack[], false)}, 'recording', ${now},
+      NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, ${now}, ${now}
+      WHERE NOT EXISTS (SELECT 1 FROM recorder_recordings WHERE device_id = ${auth.recorderDevice.id} AND client_ref = ${clientRef})
+      AND NOT EXISTS (SELECT 1 FROM recorder_recordings rr INNER JOIN meeting_recordings mr ON mr.id = rr.recording_id
+        WHERE rr.device_id = ${auth.recorderDevice.id} AND mr.stopped_at IS NULL AND mr.deleted_at IS NULL)
+      AND ${recorderAudioQuota(auth.recorderDevice.id, 1)}`),
+    context.database.insert(devices).select(sql`SELECT ${id}, ${auth.recorderDevice.id}, ${auth.recorderDevice.teamMemberId},
+      ${clientRef}, ${target.callId}, ${now} WHERE EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${id})`),
+  ])
+  const created = await existing()
+  if (!created) throw new RecordingError('This device has an open recording or has reached its daily audio limit.', 429)
+  return created
+}
+
+export async function createRecording(context: RecordingContext, value: unknown): Promise<MeetingRecording | RecorderRecording> {
   if (!value || typeof value !== 'object') throw new RecordingError('Recording details are required.')
   const body = value as Record<string, unknown>
   const title = typeof body.title === 'string' ? body.title.trim().slice(0, 200) : ''
@@ -236,6 +297,10 @@ export async function createRecording(context: RecordingContext, value: unknown)
   if (body.separateSpeakers === true && !body.tracks.includes('system')) {
     throw new RecordingError('Separate speakers requires system audio. Turn it off for a microphone-only recording.')
   }
+  if (context.auth.recorderDevice) {
+    if (body.separateSpeakers === true) throw new RecordingError('Tray recordings use standard transcription.')
+    return createDeviceRecording(context, body, title)
+  }
   const target = await choice(context, body)
   const now = new Date().toISOString()
   const [row] = await context.database.insert(recordings).values({
@@ -245,17 +310,32 @@ export async function createRecording(context: RecordingContext, value: unknown)
   return publicRecording(row)
 }
 
-export async function listRecordings(context: RecordingContext): Promise<MeetingRecording[]> {
+export async function listRecordings(context: RecordingContext): Promise<MeetingRecording[] | RecorderRecordingDetail[]> {
+  if (context.auth.recorderDevice) {
+    const auth = context.auth as RecorderDeviceAuth
+    const owned = await context.database.select({ id: schema.recorderRecordings.recordingId }).from(schema.recorderRecordings)
+      .where(and(eq(schema.recorderRecordings.deviceId, auth.recorderDevice.id),
+        eq(schema.recorderRecordings.teamMemberId, auth.recorderDevice.teamMemberId)))
+      .orderBy(desc(schema.recorderRecordings.createdAt)).limit(100)
+    return Promise.all(owned.map(row => recorderRecordingDetail(context.database, auth, row.id)))
+  }
   const scope = await scopedOrgIds(context.auth)
   if (scope.kind === 'none') return []
   const rows = await context.database.select().from(recordings)
     .where(scope.kind === 'some' ? or(isNull(recordings.orgId), inArray(recordings.orgId, scope.orgIds)) : undefined)
     .orderBy(desc(recordings.createdAt)).limit(100)
-  return rows.map(publicRecording)
+  const trayRows = rows.length ? await context.database.select({ id: schema.recorderRecordings.recordingId }).from(schema.recorderRecordings)
+    .where(inArray(schema.recorderRecordings.recordingId, rows.map(row => row.id))) : []
+  const trayIds = new Set(trayRows.map(row => row.id))
+  return rows.map(row => publicRecording(row, trayIds.has(row.id) ? 'tray' : 'browser'))
 }
 
 export async function reserveChunk(context: RecordingContext, value: unknown): Promise<{ uploadUrl: string; duplicate: boolean; uploaded: boolean }> {
   const metadata = validateChunk(value)
+  if (context.auth.recorderDevice && (metadata.mimeType !== 'audio/wav'
+    || metadata.size !== RECORDING_PCM_HEADER_BYTES + metadata.durationMs * RECORDING_PCM_SAMPLE_RATE * 2 / 1000)) {
+    throw new RecordingError('Tray audio must be mono 16 kHz PCM WAV with its exact duration and size.')
+  }
   return withRecordingLease(context, async (row, lease) => {
     if (row.transcriptId) throw new RecordingError('This recording has already been transcribed.', 409)
     const { tracks, separateSpeakers } = readRecordingOptions(row.tracks)
@@ -273,14 +353,17 @@ export async function reserveChunk(context: RecordingContext, value: unknown): P
         ${metadata.mimeType}, ${metadata.size}, ${`meeting-recordings/${row.id}/${metadata.track}/${metadata.sequence}.audio`},
         ${crypto.randomUUID()}, 'reserved', ${now}, ${now}
       WHERE EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease} AND deleted_at IS NULL)
+      AND ${context.auth.recorderDevice ? recorderAudioQuota(context.auth.recorderDevice.id, metadata.durationMs) : sql`1 = 1`}
       ON CONFLICT (recording_id, track, sequence) DO NOTHING`)
     const [chunk] = await context.database.select().from(chunks).where(eq(chunks.id, id)).limit(1)
+    if (!chunk && context.auth.recorderDevice) throw new RecordingError('This device has reached its daily audio limit.', 429)
     if (!chunk || (['startMs', 'durationMs', 'mimeType', 'size'] as const).some(key => chunk[key] !== metadata[key])) {
       throw new RecordingError('A different chunk already uses this sequence.', 409)
     }
     return {
       uploadUrl: `/api/admin/recordings/${row.id}/chunks?track=${metadata.track}&sequence=${metadata.sequence}&token=${chunk.uploadToken}`,
-      duplicate: inserted.meta.changes === 0, uploaded: chunk.uploadedAt !== null,
+      duplicate: context.auth.recorderDevice ? chunk.uploadedAt !== null : inserted.meta.changes === 0,
+      uploaded: chunk.uploadedAt !== null,
     }
   })
 }
@@ -324,6 +407,13 @@ export async function uploadChunk(context: RecordingContext, req: NextRequest): 
     if (chunk.uploadedAt) throw new RecordingError('This chunk has already been uploaded.', 409, 'duplicate')
     if (row.transcriptId) throw new RecordingError('This recording is already complete.', 409)
     const audio = await boundedBody(req, chunk.size)
+    if (context.auth.recorderDevice) {
+      try {
+        if (chunk.mimeType !== 'audio/wav' || parseRecordingPcmWav(audio).sampleCount !== chunk.durationMs * RECORDING_PCM_SAMPLE_RATE / 1000) {
+          throw new Error('Duration mismatch')
+        }
+      } catch { throw new RecordingError('Tray audio must be a complete mono 16 kHz PCM WAV matching its reservation.') }
+    }
     const bucket = await storage()
     const active = await readRecording(context.database, row.id)
     if (active.leaseToken !== lease || active.deletedAt) throw new RecordingError('Upload expired. Retry the saved audio chunk.', 409, 'busy')
@@ -374,7 +464,7 @@ function allExpected(rows: ChunkRow[], expected: { mic: number; system: number }
   })
 }
 
-export async function stopRecording(context: RecordingContext, value: unknown): Promise<MeetingRecordingDetail> {
+export async function stopRecording(context: RecordingContext, value: unknown): Promise<MeetingRecordingDetail | RecorderRecordingDetail> {
   if (!value || typeof value !== 'object') throw new RecordingError('Stopped recording details are required.')
   const body = value as Record<string, unknown>
   await withRecordingLease(context, async (row, lease) => {
@@ -401,7 +491,7 @@ export async function stopRecording(context: RecordingContext, value: unknown): 
       error: complete ? null : 'Some audio chunks are still uploading. Retry their uploads before transcribing.',
     })
   })
-  return scopedRecordingDetail(context, context.recording!.id)
+  return recordingResponse(context, context.recording!.id)
 }
 
 function discoveryMirrorStatement(
@@ -532,7 +622,7 @@ async function useWhisperForSystem(context: RecordingContext, row: RecordingRow,
 }
 
 /** Mic and standard mode process one chunk; group mode streams the system track once. */
-export async function transcribeNextChunk(context: RecordingContext, withoutSpeakerSeparation = false): Promise<MeetingRecordingDetail> {
+export async function transcribeNextChunk(context: RecordingContext, withoutSpeakerSeparation = false): Promise<MeetingRecordingDetail | RecorderRecordingDetail> {
   if (withoutSpeakerSeparation && context.auth.userId !== 'api-service') {
     const access = await resolvePermissions(context.database, context.auth)
     if (!access.isAdmin) throw new RecordingError('Only an administrator can transcribe without speaker separation.', 403)
@@ -599,11 +689,12 @@ export async function transcribeNextChunk(context: RecordingContext, withoutSpea
       catch { await updateLeased(context, lease, { state: 'failed', error: 'Transcript could not be saved. Retry to save the transcribed chunks.' }) }
     }
   }, true)
-  const detail = await scopedRecordingDetail(context, context.recording!.id)
+  const detail = await recordingResponse(context, context.recording!.id)
   return { ...detail, pending: detail.recording.state === 'transcribing' }
 }
 
 export async function linkRecording(context: RecordingContext, value: unknown): Promise<MeetingRecordingDetail & { mirrored: boolean }> {
+  if (context.auth.recorderDevice) throw new RecordingError('Unauthorised', 401)
   if (!value || typeof value !== 'object') throw new RecordingError('Choose a client or a call.')
   if (!('orgId' in value) && !('callId' in value)) throw new RecordingError('Choose a client or a call.')
   const mirrored = await withRecordingLease(context, async (row, lease) => {
@@ -655,6 +746,7 @@ export async function linkRecording(context: RecordingContext, value: unknown): 
 }
 
 export async function deleteRecordingAudio(context: RecordingContext): Promise<boolean> {
+  if (context.auth.recorderDevice) throw new RecordingError('Unauthorised', 401)
   if (context.auth.userId !== 'api-service') {
     const access = await resolvePermissions(context.database, context.auth)
     if (!access.isAdmin) throw new RecordingError('Only an administrator can delete recording audio.', 403)

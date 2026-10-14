@@ -1266,6 +1266,12 @@ export const TOOLS: ToolDef[] = [
     call_id: prop('string', 'Id of the call in that table'),
   }, ['id', 'call_kind', 'call_id']),
 
+  // Device pairing is intentionally limited to a Clerk-session Settings flow.
+  tool('list_recorder_devices', 'List recorder devices paired to your own studio account, including last seen, created and revoked dates. Does not return device tokens or pairing codes. Returns { items }.'),
+  tool('revoke_recorder_device', 'Revoke one recorder device paired to your own studio account. Its next upload is refused. Pairing a replacement requires the signed-in Settings page.', {
+    deviceId: prop('string', 'Recorder device id'),
+  }, ['deviceId']),
+
   // Manual browser recordings: capture itself requires the dashboard browser.
   tool('list_meeting_recordings', 'List manual call recordings visible to this studio identity, with their processing state and explicit client or call link. Recording capture happens only in the dashboard browser. Returns { items }.'),
   tool('get_meeting_recording', 'Read a manual call recording, its chunk processing states, group speaker option and its saved named transcript. Microphone uses the creator name or Me; system uses the sole external attendee or client, or Them 1, Them 2 when group separation was explicitly enabled in the browser. Returns { recording, chunks, transcript }.', {
@@ -2837,6 +2843,14 @@ export async function executeTool(
         callKind: args.call_kind,
         callId: args.call_id,
       }))
+
+    case 'list_recorder_devices':
+      return json(await apiGet('/api/admin/recorder-devices', token))
+    case 'revoke_recorder_device': {
+      const deviceId = need('deviceId')
+      assertSafeIdArgs({ deviceId })
+      return json(await apiWrite(`/api/admin/recorder-devices/${deviceId}/revoke`, token, 'POST', {}))
+    }
 
     // Manual browser recordings. IDs are checked here too for direct dispatches.
     case 'list_meeting_recordings':

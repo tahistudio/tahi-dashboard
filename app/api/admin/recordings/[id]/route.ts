@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { deleteRecordingAudio, scopedRecordingDetail, withRecordingContext } from '@/lib/meeting-recordings-server'
+import { deleteRecordingAudio, recordingResponse, withRecordingContext } from '@/lib/meeting-recordings-server'
 
 type Params = { params: Promise<{ id: string }> }
 
 export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params
-  return withRecordingContext(req, id, async context => NextResponse.json(await scopedRecordingDetail(context, id)))
+  return withRecordingContext(req, id, async context => NextResponse.json(await recordingResponse(context, id)), { device: 'read' })
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {

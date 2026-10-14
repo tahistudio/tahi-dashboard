@@ -1181,3 +1181,73 @@ standard Vitest startup hits esbuild spawn EPERM. Gate logs are
 Independent QA and UIUX source reviews pass. No build, browser/live or real
 provider test was claimed. All follow-up changes remain uncommitted at
 HEAD 807adc35; no push, deploy, migration or production change occurred.
+
+## 2026-10-14, REC.0 phase 2 dashboard preparation, uncommitted
+
+Started clean on feat/rec0-tray-server from main 729cc282. Read the full
+revision 1 tray spec and CLAUDE.md. Liam confirms phases 1 and 1b live and
+supplied Step 0: two five-second 16 kHz mono PCM WAV chunks, 160,044 bytes
+each, accepted by live chunk/stop/transcribe with a finalised transcript.
+The tone hallucinated Thank you.; retain vad_filter. Decision #072 records
+that evidence, PM schema approval, auto-start including unknown calls,
+no-notice exposure, calendar limits and the deliberate pairing MCP exception.
+
+Prepared separable 0114 in lib/recorder-devices-migration.ts,
+drizzle/migrations/0114_recorder_devices.sql and the migrate runner's import
+and registration only. Exactly four additive tables and their required
+constraints/indexes, all CREATE IF NOT EXISTS, no ALTER. A real SQLite test
+proves re-running, preserved parent recordings, uniqueness and foreign keys.
+Matching Drizzle declarations land separately with server code.
+
+Server changes add explicit recorder-token route and handler opt-ins without
+changing getRequestAuth, current member/admin/Clerk checks, membership-outage
+503, idle expiry and throttled last seen. Pairing uses session-only self code
+creation, D1 atomic failure reservations and transactional single-use exchange.
+Review found expiry could pass while awaiting Clerk; consume time is refreshed
+and regression tested. Device recording changes add atomic idempotent creates,
+one-open and daily audio quotas, call revalidation, owned slim responses and
+upcoming call metadata without meeting URLs. Device WAV validation ties quota
+duration to actual PCM bytes. Existing per-recording leases serialize writes.
+Settings adds device management states and Tray source badges. Full MCP tools
+list/revoke are blocked for designers; pairing intentionally has no MCP tool.
+
+Repo hygiene excludes apps/recorder-tray from tracing, TypeScript, lint,
+Vitest and Tailwind scanning, and ignores nested bin/obj outputs. Only its
+handoff README is added; no C# app. API and ship order are in
+ docs/recorder-tray-server-handoff.md. STATUS and the single REC.0 task record
+preparation without a completed/live phase 2 claim.
+
+Verification is recorded below after final review/gates. Playwright headless
+launch was attempted and blocked by spawn EPERM; no actual 375/768/dark browser
+proof is claimed. Main session owns migration-first shipping, security/Opus
+review, deployment and live checks. No commit, push, migration apply, secret
+change or production data write was performed.
+
+**Final verification:** Fail-closed chain passed npm run type-check (exit 0),
+CI=1 npm run lint (exit 0, existing warnings), worker tsc --noEmit (exit 0),
+and sixteen touched/regression Vitest files, 344 tests passed (exit 0).
+The native-config sandbox runner avoids esbuild spawn restrictions. The
+first combined run saw two UI revoke fixture failures after the new viewport
+portal landed; adding the document stub and createPortal passthrough to the
+SSR harness fixed both. This was a fixture update, not a discarded flake.
+Raw final logs: .wrangler/rec0-tray-type-check.log,
+.wrangler/rec0-tray-lint.log, .wrangler/rec0-tray-worker-tsc.log and
+.wrangler/rec0-tray-vitest.log (all ignored).
+
+Independent backend/security and UIUX source reviews pass. Additional review
+repairs: device duplicate confirmation requires a stored body, mixed-case
+Bearer cannot widen to a session identity, actual PCM bytes enforce quotas,
+and upcoming calls retain ordinary Clerk callers' client scope. UI review
+improved dark error contrast, readable metadata, badge wrapping, 44px Settings
+navigation/confirm controls, long-name wrapping and loading locks. The new
+Settings revoke dialog portals outside its transformed pane. Existing overlay
+and invoice-action tests are included in the sixteen-file gate.
+
+CI=1 npm run build was attempted and stopped at spawn EPERM during creation
+of the optimized production build, exit 1; log .wrangler/rec0-tray-build.log.
+Playwright Chromium launch is likewise blocked by spawn EPERM. Neither is
+reported as passed. Main session still owns a real build outside the sandbox,
+security/Opus review, migration-first ship/apply, signed-in 375/768 desktop
+light/dark verification, deployment and live health/signed-in smoke. The
+separate C# client run owns pairing/capture/outbox integration and real calls.
+REC.0 remains open, with all changes uncommitted and no production operation.

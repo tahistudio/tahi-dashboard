@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+apps/recorder-tray/**/bin/
+apps/recorder-tray/**/obj/
 .pnp
 .pnp.js
 

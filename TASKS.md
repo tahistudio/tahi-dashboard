@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 phase 1 live per Liam, phase 1b committed through 807adc35, follow-up uncommitted).
+Last updated: 2026-10-14 (REC.0 phases 1 and 1b live per Liam; phase 2 dashboard prepared, uncommitted).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1328,42 +1328,20 @@ scheduled; each needs a scope before building.
   Reuse feedback-ball lessons; do not mix client-site QA with beta feedback.
   No delivery mechanism, guest policy or schema selected. Webflow comment
   intake remains an interim idea, not a built connector.
-- [ ] REC.0 - [BE/FE] Manual browser call recorder, phase 1 (Liam,
-  2026-10-13, Decision #071). Windows Chromium mic plus system audio,
-  independent 30-second tracks, durable chunk uploads/retries, Workers AI
-  transcription and explicit client/call linking into the human approval
-  inbox. Committed as 1608f4c6 on feat/rec0-manual-recorder, then reviewed by
-  Opus, with fixes in 989e31db (re-reviewed, PASS with notes).
-  Phase 1 is live at main 6f9f2170, confirmed by Liam's successful real call
-  on 2026-10-14. Initial phase 1b is committed as 3570d4e5 on feat/rec0-phase1b:
-  same-speaker paragraphs, creator/attendee/client names, named transcript
-  relink/refresh, opt-in Nova 3 group system audio (Whisper mic), PWA icons and
-  Record call shortcut, and scoped in-app two-minute call reminders/prefill.
-  Review repairs are committed as 807adc35: raw Nova R2 reuse, renewed
-  inference lease, 50 ms gap handling, automatic/manual Whisper fallback and
-  two-hour group cap, plus speaker/reminder/PWA/relink corrections. The two
-  PATCH mirror failures were stale mocks. Repair gates passed, 10 targeted
-  Vitest files / 245 tests. Opus re-review passed with notes. The follow-up is
-  uncommitted on top: fold short WAV tails, tolerate Nova cache write errors,
-  use long leases only for possible group attempts, delete cached Nova JSON
-  with audio, restrict manual Whisper fallback to admins, and return 400 for
-  malformed transcription JSON. Follow-up gates are in the 2026-10-14 run log.
-  No new migration. Main session owns deployment. Real Nova accuracy and
-  long-call latency, Windows install/background capture, and signed-in 375/768
-  and dark proof remain outstanding. Phase 1 excludes calendar detection,
-  a desktop app and a joining bot. Earlier scope retained below as future work:
-  Calendar-aware meeting audio and transcription beyond
-  Gemini (Liam clarified 2026-10-10, Decision #068): detect meetings in Liam's
-  calendar, capture PC system audio plus microphone so both sides are heard,
-  and produce highly accurate transcripts at very low cost across Google Meet,
-  Microsoft Teams and Zoom, including desktop apps. Windows PC support is
-  required. Transcript is the primary output; no video, screen recorder, Loom
-  replacement or video sharing. Compare local transcription with inexpensive
-  hosted options on real calls for accuracy and total cost. No provider or
-  recording automation chosen yet. Feed call_transcripts and the existing
-  human-approved suggestions flow. Audio upload is a fallback, not the main
-  workflow. Scope draft: SPECS/meeting-audio-capture.md, with accuracy/cost
-  benchmark and Windows capture proof before provider selection.
+- [ ] REC.0 - [BE/FE] Browser and Windows tray call recording (Liam,
+  2026-10-14, Decisions #071 and #072). Phases 1 and 1b are live per the
+  current brief at main 729cc282: manual mic/system capture, transcript
+  paragraphs and speaker names, durable uploads, optional Nova group mode,
+  transcript linking and PWA reminders. The live WAV probe passed both tracks;
+  retain Whisper vad_filter. Phase 2 dashboard changes are uncommitted on
+  feat/rec0-tray-server: migration 0114, device auth/pairing, idempotent creates,
+  owned slim reads, quotas, upcoming calls, Settings devices and blocked-designer
+  MCP list/revoke. Main session ships/applies the separable migration first,
+  then security/Opus review, server deploy and signed-in 375/768/dark proof.
+  The C# tray app is a separate run. Automatic known and unknown call capture,
+  no recording notice and the pairing MCP exception are approved in #072.
+  No commit, push, migration apply, deploy or secret change in this worktree.
+  See docs/recorder-tray-server-handoff.md and the 2026-10-14 run log.
 - [ ] LP.1 - [BE] Scope changes caught on a call: the suggester proposes a
   change request with the quote, included or billable, cost and days added
   (extends CN.1 and the scope-creep flag).

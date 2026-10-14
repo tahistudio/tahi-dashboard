@@ -12,6 +12,7 @@ export interface RecordingSegment {
 
 export interface MeetingRecording {
   id: string
+  source?: 'browser' | 'tray'
   title: string
   orgId: string | null
   callKind: 'discovery' | 'scheduled' | null
