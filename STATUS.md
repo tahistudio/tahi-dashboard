@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 server live per Liam; Windows client round 3 committed at 6964660b, round 4 follow-up in the worktree). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 server live per Liam; Windows client round 3 committed at 6964660b, round 4 committed at 93ce4c62). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## REC.0 phase 2 Windows client, prepared 2026-10-14
 
@@ -23,7 +23,7 @@ publishing. Round 3, committed as 6964660b, follows the failed Opus re-review of
 5e77adc5. It addresses gap auto-start hold-off, later-calendar
 suppression, process-key stability, bounded chunk IO failures, faulted-job cleanup,
 terminal recovery, render-outage logging and startup access guidance. Round 4 is
-the uncommitted follow-up for late-stop back-to-back capture, expiring calendar
+the follow-up (committed as 93ce4c62) for late-stop back-to-back capture, expiring calendar
 restart qualification, consecutive IO failure accounting, nonduplicated startup
 recovery guidance and resetting the render-outage report for each recording.
 No dashboard code, push, deploy, pairing, secret or production-data change was

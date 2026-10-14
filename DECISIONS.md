@@ -1726,7 +1726,7 @@ include the folder path and recovery steps. Core owns the capture and retry deci
 behavior tests. This repairs the approved client behavior without a new product
 decision. Verification is recorded in the running log; REC.0 remains open.
 
-Client round 4 follow-up, 2026-10-14: fixes to 6964660b remain uncommitted per
+Client round 4 follow-up, 2026-10-14: fixes to 6964660b are committed as 93ce4c62 per
 Liam's brief. Persist the stopped recording's start time with manual suppression.
 A calendar call starting after Stop can clear session suppression after five
 seconds of observed inactivity only if its window opened after the stopped

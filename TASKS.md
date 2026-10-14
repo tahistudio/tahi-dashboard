@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client round 3 committed at 6964660b, round 4 follow-up in the worktree).
+Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client round 3 committed at 6964660b, round 4 committed at 93ce4c62).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1349,7 +1349,7 @@ scheduled; each needs a scope before building.
   Opus re-review: gap auto-start hold-off, later-calendar suppression,
   process-key stability, bounded chunk IO failures, faulted-job cleanup, terminal
   recovery, render-outage logging and startup access guidance. Round 4 is the
-  uncommitted follow-up for late-stop back-to-back capture, expiring calendar
+  follow-up (committed as 93ce4c62) for late-stop back-to-back capture, expiring calendar
   restart qualification, consecutive IO failure accounting, nonduplicated startup
   recovery guidance and resetting the render-outage report for each recording.
   Verification is in the running log and review report. Round 2 Release build: zero warnings/errors;

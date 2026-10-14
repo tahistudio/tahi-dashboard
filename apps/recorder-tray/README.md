@@ -5,7 +5,7 @@ The server is live at `https://portal.tahi.studio` per Liam's 2026-10-14 brief.
 The exact API contract is [the server handoff](../../docs/recorder-tray-server-handoff.md).
 The initial Windows client is committed as `8665e762`, with first review fixes
 committed as `938bd68e`, round 2 fixes as `5e77adc5` and round 3 fixes as
-`6964660b`. Round 4 is the uncommitted follow-up in this worktree per Liam's
+`6964660b`. Round 4 is committed as `93ce4c62` per Liam's
 brief. No production operation was performed.
 
 ## Project layout
