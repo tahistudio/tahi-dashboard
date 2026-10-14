@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-13 (REC.0 review fixes prepared, not live).
+Last updated: 2026-10-14 (REC.0 phase 1 live per Liam, phase 1b uncommitted).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1334,12 +1334,14 @@ scheduled; each needs a scope before building.
   transcription and explicit client/call linking into the human approval
   inbox. Committed as 1608f4c6 on feat/rec0-manual-recorder, then reviewed by
   Opus, with fixes in 989e31db (re-reviewed, PASS with notes).
-  Migration 0113 is written but not applied; the main
-  session will apply it to production before merging because existing sweep,
-  rebuild, client delete/merge and ManyRequests cleanup paths read the table.
-  No push or deployment occurs in this review-fix session.
-  Real Windows capture, background recording, accuracy, 375/768 and dark
-  browser proof remain outstanding. Phase 1 excludes calendar detection,
+  Phase 1 is live at main 6f9f2170, confirmed by Liam's successful real call
+  on 2026-10-14. Phase 1b is prepared, uncommitted on feat/rec0-phase1b:
+  same-speaker paragraphs, creator/attendee/client names, named transcript
+  relink/refresh, opt-in Nova 3 group system audio (Whisper mic), PWA icons and
+  Record call shortcut, and scoped in-app two-minute call reminders/prefill.
+  No new migration. Main session commits and deploys. Real Nova accuracy and
+  long-call latency, Windows install/background capture, and signed-in 375/768
+  and dark proof remain outstanding. Phase 1 excludes calendar detection,
   a desktop app and a joining bot. Earlier scope retained below as future work:
   Calendar-aware meeting audio and transcription beyond
   Gemini (Liam clarified 2026-10-10, Decision #068): detect meetings in Liam's

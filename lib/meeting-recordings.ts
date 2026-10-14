@@ -1,7 +1,9 @@
 import type { MeetingRecordingChunk, RecordingSegment, ReserveRecordingChunk } from './meeting-recordings-types'
+import type { RecordingSpeakerNames } from './recording-speaker-names'
 
 export const RECORDING_MODEL = '@cf/openai/whisper-large-v3-turbo' as const
-export const MAX_RECORDING_CHUNK_BYTES = 2 * 1024 * 1024
+export const MAX_RECORDING_CHUNK_BYTES = 6 * 1024 * 1024
+export const MAX_COMPRESSED_RECORDING_CHUNK_BYTES = 2 * 1024 * 1024
 // Hidden Chromium tabs can delay recorder rotation while a desktop call runs.
 export const MAX_RECORDING_CHUNK_MS = 180_000
 export const MAX_RECORDING_DURATION_MS = 12 * 60 * 60 * 1000
@@ -36,11 +38,12 @@ export function validateChunk(value: unknown): ReserveRecordingChunk {
     throw new RecordingError('Audio chunks must be no longer than three minutes.')
   }
   if (startMs + durationMs > MAX_RECORDING_DURATION_MS) throw new RecordingError('Recording is too long.')
-  if (typeof size !== 'number' || !Number.isInteger(size) || size <= 0 || size > MAX_RECORDING_CHUNK_BYTES) {
-    throw new RecordingError('Audio chunks must be between one byte and 2 MB.')
-  }
   if (typeof mimeType !== 'string' || !/^audio\/(webm|ogg|wav|mp4)(;codecs=[A-Za-z0-9., -]+)?$/i.test(mimeType)) {
     throw new RecordingError('Unsupported audio chunk format.')
+  }
+  const sizeLimit = mimeType === 'audio/wav' ? MAX_RECORDING_CHUNK_BYTES : MAX_COMPRESSED_RECORDING_CHUNK_BYTES
+  if (typeof size !== 'number' || !Number.isInteger(size) || size <= 0 || size > sizeLimit) {
+    throw new RecordingError(`Audio chunks must be between one byte and ${sizeLimit / 1024 / 1024} MB.`)
   }
   return { track, sequence, startMs, durationMs, mimeType, size }
 }
@@ -55,18 +58,24 @@ export function parseSegments(value: unknown, durationMs: number): RecordingSegm
       || typeof row.text !== 'string' || !row.text.trim()) return []
     const ceiling = durationMs / 1000
     if (row.start > ceiling) return []
-    return [{ start: row.start, end: Math.min(row.end, ceiling), text: row.text.trim() }]
+    const speaker = typeof row.speaker === 'number' && Number.isInteger(row.speaker) && row.speaker >= 0 ? row.speaker : undefined
+    return [{ start: row.start, end: Math.min(row.end, ceiling), text: row.text.trim(), ...(speaker === undefined ? {} : { speaker }) }]
   })
 }
 
 /** Use absolute segment times; chunk sequence alone cannot order two tracks. */
-export function mergeRecordingTranscript(chunks: readonly Pick<MeetingRecordingChunk, 'track' | 'sequence' | 'startMs' | 'durationMs' | 'state' | 'text' | 'segments'>[]): string {
+export function mergeRecordingTranscript(
+  chunks: readonly Pick<MeetingRecordingChunk, 'track' | 'sequence' | 'startMs' | 'durationMs' | 'state' | 'text' | 'segments'>[],
+  names: RecordingSpeakerNames = { mic: 'Me', system: 'Them' },
+): string {
   const lines = chunks.filter(chunk => chunk.state === 'ready').flatMap(chunk => {
-    const segments = chunk.segments.length ? chunk.segments : chunk.text?.trim()
+    const segments: RecordingSegment[] = chunk.segments.length ? chunk.segments : chunk.text?.trim()
       ? [{ start: 0, end: chunk.durationMs / 1000, text: chunk.text.trim() }] : []
     return segments.map((segment, index) => ({
       at: chunk.startMs + segment.start * 1000,
+      end: chunk.startMs + segment.end * 1000,
       track: chunk.track,
+      speaker: chunk.track === 'system' ? segment.speaker : undefined,
       sequence: chunk.sequence,
       index,
       text: segment.text.trim(),
@@ -74,12 +83,22 @@ export function mergeRecordingTranscript(chunks: readonly Pick<MeetingRecordingC
   })
   lines.sort((a, b) => a.at - b.at || (a.track === b.track ? 0 : a.track === 'mic' ? -1 : 1)
     || a.sequence - b.sequence || a.index - b.index)
-  return lines.map(line => {
+  const paragraphs: typeof lines = []
+  for (const line of lines) {
+    if (!line.text) continue
+    const previous = paragraphs.at(-1)
+    if (previous && previous.track === line.track && previous.speaker === line.speaker && line.at - previous.end <= 4000) {
+      previous.text += ` ${line.text}`
+      previous.end = Math.max(previous.end, line.end)
+    } else paragraphs.push({ ...line })
+  }
+  return paragraphs.map(line => {
     const seconds = Math.floor(line.at / 1000)
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor(seconds / 60) % 60
     const stamp = `${hours ? `${String(hours).padStart(2, '0')}:` : ''}${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
-    return `[${stamp}] ${line.track === 'mic' ? 'Liam' : 'Them'}: ${line.text}`
+    const name = line.track === 'system' && line.speaker !== undefined ? `Them ${line.speaker + 1}` : names[line.track]
+    return `[${stamp}] ${name}: ${line.text}`
   }).join('\n')
 }
 

@@ -14,6 +14,8 @@ import { KeyboardShortcuts } from '@/components/tahi/keyboard-shortcuts'
 import { SidebarProvider } from '@/components/tahi/sidebar-context'
 import { SkipToContent } from '@/components/tahi/skip-to-content'
 import { FeedbackBall } from '@/components/tahi/feedback-ball'
+import { CallRecordingReminders } from '@/components/tahi/call-recording-reminders'
+import type { CallReminderIdentity } from '@/lib/call-recording-reminders'
 // Two imports on purpose, and they must stay apart. This file is a SERVER
 // component: a component may cross the client boundary, a plain function may
 // not. Next replaces every export of a 'use client' module with a stub that
@@ -292,6 +294,21 @@ export default async function DashboardLayout({
   }
   const pinnedCurrency = resolvePinnedCurrency(currencyEvidence, currencyOrgKey !== null)
 
+  let callReminderIdentity: CallReminderIdentity | null = null
+  if (isAdmin && !isPreviewingClient && perms.features.calls !== false) {
+    try {
+      const database = await db()
+      const [member] = await database
+        .select({ id: schema.teamMembers.id, email: schema.teamMembers.email })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.clerkUserId, userId))
+        .limit(1)
+      if (member) callReminderIdentity = { teamMemberId: member.id, userId, email: member.email }
+    } catch {
+      // Identity failures never turn every studio call into the caller's call.
+    }
+  }
+
   // Which mode the preview is in, read server-side for the same reason the org
   // id is: a tab that carries the cookie without this tab's sessionStorage
   // would otherwise paint the read-only strip over a session whose writes land.
@@ -362,6 +379,7 @@ export default async function DashboardLayout({
           <ProductTour isAdmin={isAdmin} />
           <KeyboardShortcuts />
           <FeedbackBall />
+          <CallRecordingReminders identity={callReminderIdentity} />
         </div>
       </SidebarProvider>
       </PrivateModeProvider>

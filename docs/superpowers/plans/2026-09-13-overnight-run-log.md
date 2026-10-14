@@ -1037,3 +1037,66 @@ link changes, UI confirmation/cancellation and MCP parity. Independent QA
 source/test review passed. Local visual review is in progress. TASKS.md and
 STATUS.md record the behavior; existing completion states remain unchanged.
 No schema, commit, push, deploy, production data or secret changes.
+
+## 2026-10-14, REC.0 phase 1b recorder polish and speaker naming
+
+Started clean on feat/rec0-phase1b from main 6f9f2170. Liam confirms the
+manual recorder is live at /calls/record and supplied his first real transcript.
+This worktree leaves changes uncommitted for the main session, as requested.
+No commit, push, deployment, production data, secret or migration operation.
+
+Merged transcript rendering now joins consecutive same-speaker segments across
+chunk edges, using the first timestamp and a more-than-four-second silence
+break. Raw chunk text/segments are unchanged by rendering. Speaker names resolve
+from recording.createdById against team id/Clerk id, sole external call attendee,
+then client, with Me/Them fallbacks. Link changes atomically save named text/hash
+and recording identity; only a matching recorder-owned discovery mirror updates.
+Refresh transcript and ready retries rebuild deterministically without another
+AI call, including retained transcripts after audio deletion. The existing
+suggester reads the named call_transcripts.text.
+
+Decision #071 records current Cloudflare catalogue/prices/inputs with dated
+source links. Nova 3 supports diarize and is hosted on Workers AI; USD 0.0052
+per audio minute over HTTP, USD 0.312/system hour, USD 0.34278/hour including
+Whisper mic. The group toggle defaults off and is fixed at recording creation.
+Options use backwards-compatible versioned tracks JSON with no schema change.
+Capture saves raw WebM locally first; upload converts only group system chunks
+to mono 16 kHz PCM WAV and persists replacement before reservation. One streamed
+whole-system inference retains speaker ids across chunks. WAV allows 6 MB for
+three-minute hidden-tab chunks; compressed audio remains limited to 2 MB.
+Group result writes use 25-chunk JSON updates in a transaction, keeping D1 query
+count bounded. Missing speaker labels fail explicitly, successful mic/group
+results survive retries, and partial results never enter task suggestions.
+
+The PWA manifest has stable id, explicit actual 192/512 PNG icons, standalone
+scope/start URL and a Record call shortcut. A team member's open recorder tab
+or installed app checks scoped scheduled/discovery reads every 30 seconds for
+calls starting in the next two minutes. Attendee/creator ownership, declines,
+mirrored tables and multiple tabs are handled. The existing in-app toast opens
+a validated title/call prefill on click. It never starts capture, emails,
+sends Slack or requests Notification permission. Scheduled time filters apply
+before the row cap using real offset-aware instants; creator identity is exposed
+by the existing reads. MCP list_calls forwards the filters and stays a designer
+read; recording descriptions reflect named/group output. No new tool or route.
+
+Final requested gate passes: npm run type-check exit 0; CI=1 npm run lint
+exit 0 (existing warnings, no touched-file warnings); worker tsc exit 0;
+9 touched Vitest files / 98 tests pass. Standard Vitest config loading hit
+esbuild spawn EPERM, so the ignored .wrangler/vitest-sandbox.config.mjs native
+TypeScript/thread runner was used. Initial scheduled-window test adapter lacked
+D1 raw() and was corrected; the final suite is green. A further 26-system-chunk
+API fixture proves both result batches persist each segment once, with one Nova
+call plus Whisper mic. Raw logs: .wrangler/phase1b-type-check.log,
+.wrangler/phase1b-lint.log, .wrangler/phase1b-worker-tsc.log and
+.wrangler/phase1b-vitest.log. All are ignored. npm run build was attempted and
+failed at process spawn EPERM; log .wrangler/phase1b-build.log.
+
+Independent backend QA and UIUX source review have no remaining findings.
+Source review covers rem/token/all-side borders, native keyboard checkbox,
+44-pixel label/actions and mobile wrapping. Actual browser proof is open:
+headless Chromium launch also hit spawn EPERM. The main session must run the
+production build outside this sandbox, Windows PWA installation/shortcut,
+signed-in 375/768 light/dark flows, raw-audio conversion/recovery, and real Nova
+speaker accuracy/representative long-call latency/provider limits. Browser
+timer throttling while minimized/asleep can delay an open-app reminder.
+REC.0 stays [ ]; no phase 1b live claim or completion flip.

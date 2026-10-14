@@ -2,14 +2,14 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, asc } from 'drizzle-orm'
+import { eq, and, asc, gte, lte, sql } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { orgColumnInScope } from '../_scoping/org-scope'
 import { normalizeCallInstant } from '@/lib/call-time'
 
 // GET /api/admin/calls - list calls
-// Query: ?orgId=xxx&status=scheduled
+// Query: ?orgId=xxx&status=scheduled&since=ISO&until=ISO
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
@@ -22,7 +22,15 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const filterOrgId = url.searchParams.get('orgId')
   const filterStatus = url.searchParams.get('status')
-  const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50'), 100)
+  const limitRaw = parseInt(url.searchParams.get('limit') ?? '50', 10)
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 50
+  const sinceRaw = url.searchParams.get('since')
+  const untilRaw = url.searchParams.get('until')
+  const since = sinceRaw ? normalizeCallInstant(sinceRaw) : null
+  const until = untilRaw ? normalizeCallInstant(untilRaw) : null
+  if (sinceRaw && !since || untilRaw && !until || since && until && since > until) {
+    return NextResponse.json({ error: 'Choose a valid call time range.' }, { status: 400 })
+  }
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -37,6 +45,9 @@ export async function GET(req: NextRequest) {
   if (filterStatus) {
     conditions.push(eq(schema.scheduledCalls.status, filterStatus))
   }
+  // julianday resolves explicit calendar offsets before applying the result cap.
+  if (since) conditions.push(gte(sql`julianday(${schema.scheduledCalls.scheduledAt})`, sql`julianday(${since})`))
+  if (until) conditions.push(lte(sql`julianday(${schema.scheduledCalls.scheduledAt})`, sql`julianday(${until})`))
 
   const calls = await drizzle
     .select({
@@ -56,11 +67,12 @@ export async function GET(req: NextRequest) {
       prepNote: schema.scheduledCalls.notes,
       recordingUrl: schema.scheduledCalls.recordingUrl,
       createdAt: schema.scheduledCalls.createdAt,
+      createdById: schema.scheduledCalls.createdById,
     })
     .from(schema.scheduledCalls)
     .leftJoin(schema.organisations, eq(schema.scheduledCalls.orgId, schema.organisations.id))
     .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(asc(schema.scheduledCalls.scheduledAt))
+    .orderBy(asc(sql`julianday(${schema.scheduledCalls.scheduledAt})`))
     .limit(limit)
 
   return NextResponse.json({ calls })

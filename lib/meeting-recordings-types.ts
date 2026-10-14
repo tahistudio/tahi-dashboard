@@ -7,6 +7,7 @@ export interface RecordingSegment {
   start: number
   end: number
   text: string
+  speaker?: number
 }
 
 export interface MeetingRecording {
@@ -17,6 +18,7 @@ export interface MeetingRecording {
   callId: string | null
   createdById: string
   tracks: RecordingTrack[]
+  separateSpeakers?: boolean
   state: RecordingState
   startedAt: string
   stoppedAt: string | null

@@ -1,4 +1,5 @@
 import type { RecordingTrack, ReserveRecordingChunk } from '@/lib/meeting-recordings-types'
+import { encodeRecordingPcmWav, RECORDING_PCM_SAMPLE_RATE } from '@/lib/recording-group-audio'
 
 export interface CallAudioStreams {
   mic: MediaStream
@@ -8,6 +9,28 @@ export interface CallAudioStreams {
 
 export interface RecordedAudioChunk extends ReserveRecordingChunk {
   blob: Blob
+}
+
+export async function convertRecordingGroupAudioBlob(blob: Blob, context?: AudioContext): Promise<Blob> {
+  const decoder = context ?? new AudioContext()
+  try {
+    const decoded = await decoder.decodeAudioData(await blob.arrayBuffer())
+    if (!Number.isFinite(decoded.duration) || decoded.duration <= 0 || decoded.duration > 180) {
+      throw new Error('System audio chunk is too long or has invalid timing. Keep the recorder open and retry.')
+    }
+    const frameCount = Math.max(1, Math.round(decoded.duration * RECORDING_PCM_SAMPLE_RATE))
+    const offline = new OfflineAudioContext(1, frameCount, RECORDING_PCM_SAMPLE_RATE)
+    const source = offline.createBufferSource()
+    source.buffer = decoded
+    source.connect(offline.destination)
+    source.start()
+    const mono = await offline.startRendering()
+    return new Blob([encodeRecordingPcmWav(mono.getChannelData(0))], { type: 'audio/wav' })
+  } catch (error) {
+    throw new Error(error instanceof Error ? `System audio conversion failed: ${error.message}` : 'System audio conversion failed. Retry the recording.')
+  } finally {
+    if (!context) await decoder.close()
+  }
 }
 
 export function releaseCallStreams(streams: CallAudioStreams): void {
@@ -72,6 +95,10 @@ interface ActiveChunk {
   complete: Promise<void>
 }
 
+export interface BrowserCallRecorderOptions {
+  separateSpeakers?: boolean
+}
+
 /** Each recorder produces an independently decodable WebM, including its header. */
 export class BrowserCallRecorder {
   private readonly active = new Map<RecordingTrack, ActiveChunk>()
@@ -87,11 +114,17 @@ export class BrowserCallRecorder {
   private ended = false
   private stopPromise: Promise<{ expectedChunks: { mic: number; system: number }; durationMs: number }> | null = null
 
-  constructor(private readonly streams: CallAudioStreams, private readonly callbacks: RecorderCallbacks) {}
+  constructor(
+    private readonly streams: CallAudioStreams,
+    private readonly callbacks: RecorderCallbacks,
+    private readonly options: BrowserCallRecorderOptions = {},
+  ) {}
 
   async start(): Promise<void> {
     const mimeType = ['audio/webm;codecs=opus', 'audio/webm'].find(type => MediaRecorder.isTypeSupported(type))
     if (!mimeType) throw new Error('This browser cannot record WebM audio. Use a Chromium browser on Windows.')
+    if (this.options.separateSpeakers && !this.streams.system) throw new Error('Speaker separation requires system audio. Share system audio or turn speaker separation off.')
+    if (this.options.separateSpeakers && typeof OfflineAudioContext === 'undefined') throw new Error('Speaker separation audio conversion is unavailable in this browser. Turn speaker separation off or use a current Windows Chromium browser.')
     this.context = new AudioContext()
     await this.context.resume()
     this.started = performance.now()
@@ -144,15 +177,13 @@ export class BrowserCallRecorder {
       recorder.ondataavailable = event => { if (event.data.size > 0) parts.push(event.data) }
       recorder.onstop = () => {
         const blob = new Blob(parts, { type: recorder.mimeType })
+        const durationMs = Math.max(1, Math.round(performance.now() - this.started) - startMs)
         if (blob.size === 0) {
           reject(new Error(`${track === 'mic' ? 'Microphone' : 'System audio'} produced an empty chunk.`))
           return
         }
-        void this.callbacks.onChunk({
-          track, sequence, startMs,
-          durationMs: Math.max(1, Math.round(performance.now() - this.started) - startMs),
-          mimeType: recorder.mimeType, size: blob.size, blob,
-        }).then(resolve, reject)
+        // Persist the original before upload preparation converts an opt-in system chunk.
+        void this.callbacks.onChunk({ track, sequence, startMs, durationMs, mimeType: blob.type, size: blob.size, blob }).then(resolve, reject)
       }
       recorder.onerror = () => {
         this.notifyEnded('Audio capture failed. Saved chunks remain available for recovery.')

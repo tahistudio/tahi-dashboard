@@ -37,7 +37,8 @@ Phase 1 review notes:
   Retry is clicked. This is acceptable for phase 1; a queue or cron comes later.
 - P2-3: Suggestions from a client-only recording (no callId) reach the dashboard
   inbox and do not send Slack DMs.
-- P3-3: The microphone speaker label is hard-coded as "Liam".
+- P3-3: The microphone speaker label was hard-coded as "Liam". Phase 1b
+  resolves the creator name, with Me as the fallback.
 - P3-4: Unlinked recordings are visible to any scoped seat, following the
   existing allow-if-any-scope rule. Revisit before the first scoped hire.
 - P3-6: Abandoned recordings keep their R2 audio under the open retention
@@ -47,7 +48,37 @@ This review-fix session performs no push, deploy, production migration or
 secret change. Windows system-audio capture, call accuracy, background/device behaviour
 and the signed-in responsive/dark round trip must be proven before release.
 
-## Earlier future scope
+## Phase 1b, paragraphs, speaker names and call prompts (2026-10-14)
+
+Phase 1 is live on main 6f9f2170, confirmed by Liam's real-call test. Phase 1b
+joins consecutive same-speaker segments across chunks with a four-second
+silence threshold and keeps the first timestamp. Rendering leaves raw chunk
+text and segments unchanged. The microphone name comes from the creator's
+team record (Me fallback); a sole non-team attendee supplies the remote name,
+then the client name as Them (client), then Them. Re-linking and Refresh
+transcript persist the named transcript used by task suggestions.
+
+Optional group separation uses Cloudflare-hosted Nova 3 only for system audio.
+One whole-system inference preserves speaker ids across chunks; Whisper still
+transcribes the mic. The option defaults off, costs about USD 0.34 per recorded
+hour before retries/storage/suggestions, and lives in backwards-compatible
+tracks JSON with no migration. Save original WebM locally before WAV upload
+conversion, retain failed audio for retry, and refuse unlabeled Nova text.
+See Decision #071 for checked model inputs, prices and sources.
+
+The PWA includes real 192/512 PNG icons and a Record call shortcut. An open
+recorder tab or installed app prompts a team member for their calls starting
+in the next two minutes. The in-app toast opens a pre-filled recorder through
+an explicit click. No automatic capture, browser permission request, email
+or Slack. Existing scoped call reads and MCP list_calls supply the time range
+and creator identity. Background/sleep timer throttling remains a browser limit.
+
+This worktree session leaves changes uncommitted. No migration, push, deploy,
+production data or secret operation. Local checks and independent source review
+are required; main-session Windows installation, real Nova/long-call tests and
+signed-in 375/768/dark proof remain release checks.
+
+## Earlier future scope (retained)
 
 Status: scoped for a feasibility spike, not implemented. REC.0 owns this work;
 LP.12 adds per-meeting controls after the capture path exists. Decision #068

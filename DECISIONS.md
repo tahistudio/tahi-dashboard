@@ -1518,7 +1518,8 @@ branch merges. Deploying first breaks these existing paths with no such table.
   Retry is clicked. This is acceptable for phase 1; a queue or cron comes later.
 - P2-3: Suggestions from a client-only recording (no callId) reach the dashboard
   inbox and do not send Slack DMs.
-- P3-3: The microphone speaker label is hard-coded as "Liam".
+- P3-3: The microphone speaker label was hard-coded as "Liam". Phase 1b
+  resolves the creator name, with Me as the fallback (prepared 2026-10-14).
 - P3-4: Unlinked recordings are visible to any scoped seat, following the
   existing allow-if-any-scope rule. Revisit before the first scoped hire.
 - P3-6: Abandoned recordings keep their R2 audio under the open retention
@@ -1543,11 +1544,84 @@ Sources: [Turbo model](https://developers.cloudflare.com/workers-ai/models/whisp
 [Cloudflare chunk tutorial](https://developers.cloudflare.com/workers-ai/guides/tutorials/build-a-workers-ai-whisper-with-chunking/),
 [Whisper model](https://developers.cloudflare.com/ai/models/%40cf/openai/whisper/).
 
+**Phase 1b follow-up (Liam, 2026-10-14):** Phase 1 is live at main 6f9f2170
+and Liam's first real recording worked. Replace the hard-coded microphone
+name with the recording creator's team name, falling back to Me. Resolve a
+sole external call attendee by team ids/emails; otherwise use Them (client)
+or Them. Consecutive same-speaker segments form a paragraph until a speaker
+change or more than four seconds of silence, retaining the first timestamp.
+Raw per-chunk text/segments are not changed by rendering. Re-linking and
+Refresh transcript save named text/hash for the existing suggester, and only
+refresh discovery mirrors that still match this recording's previous text.
+
+**Workers AI speaker research, checked 2026-10-14:** The current
+[catalogue](https://developers.cloudflare.com/workers-ai/models/) includes
+Cloudflare-hosted Deepgram Nova 3, model id `@cf/deepgram/nova-3`. Its
+[model schema](https://developers.cloudflare.com/workers-ai/models/nova-3/)
+documents `diarize: true`, with a numeric speaker on each output word.
+The Workers binding accepts `audio: { body, contentType }` (binary body,
+not Whisper's base64 string), with language and punctuation options. This
+implementation sends one streamed mono 16 kHz, signed 16-bit PCM WAV using
+`contentType: 'audio/wav'`, `diarize: true`, `language: 'en'`, and
+`punctuate: true`. Words provide start/end seconds and speaker numbers.
+
+| Workers AI candidate | USD per audio minute | Speaker support / outcome |
+| --- | --- | --- |
+| Nova 3, regular HTTP | 0.0052 | Documented diarize and word speaker numbers; selected for opt-in system audio |
+| Nova 3, WebSocket | 0.0092 | Higher transport price; no live stream required for this recorder |
+| Deepgram Flux | 0.0077 (WebSocket) | Voice-agent turn detection, raw linear16 stream; current Cloudflare schema has no diarize/speaker labels |
+| Whisper large v3 turbo | 0.000513 | Timed text segments, no speaker labels; retained for mic and default system mode |
+| Whisper | 0.000453 | No speaker labels in the Cloudflare output; not selected |
+
+Prices are from the model pages and
+[Cloudflare audio pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/).
+Candidate sources:
+[Nova 3](https://developers.cloudflare.com/workers-ai/models/nova-3/),
+[Flux](https://developers.cloudflare.com/workers-ai/models/flux/),
+[Whisper turbo](https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/),
+[Whisper](https://developers.cloudflare.com/workers-ai/models/whisper/).
+The general pricing table rounds both Whisper rates to USD 0.0005; use the
+precise model-page rates above. Nova HTTP costs USD 0.312 per system hour;
+adding the Whisper microphone costs USD 0.34278 per recorded hour, shown as
+USD 0.34 in the opt-in help. Retries, R2 and task suggestion costs are extra.
+This is a reasonable optional price, so no external service, new subscription
+or provider secret is introduced.
+
+**Group implementation:** Separate speakers (group call) is off by default
+and fixed when capture starts. Only the system track uses Nova. Store the
+explicit option in the existing tracks JSON as version 1 with a tracks array
+and separateSpeakers; existing array-only rows remain compatible and off.
+No schema change. Save raw browser WebM locally before conversion, then
+atomically replace that outbox entry with a complete PCM WAV before upload.
+WAV chunks allow up to 6 MB for the existing three-minute background rotation
+limit; compressed chunks retain 2 MB. Stream the whole system timeline once,
+padding real gaps, so speaker ids do not restart per chunk. Persist timed
+word segments under the existing recording lease and transactional batch,
+labelled Them 1, Them 2 and so on. Missing labels fail explicitly and retain
+audio. Successful group and mic results survive finalization retries.
+
+**PWA and reminder:** The manifest has explicit 192/512 PNG icons, root scope,
+standalone display, stable id, and a Record call shortcut. A scoped team
+member's recorder tab or open installed app polls their scheduled/discovery
+calls for the next two minutes, using attendee/creator identity. A deduplicated
+in-app toast opens the recorder with title and explicit call identity. It
+never starts recording. No Notification permission request, email or Slack.
+Existing read routes expose creator identity; list_calls MCP forwards its
+time window filters under the existing read classification.
+
+**Phase 1b verification open:** Real Nova inference, representative long-call
+latency/provider limits and Windows Chromium installation/capture must be
+checked by the main session. Local streamed fixtures and mocks do not prove
+speaker accuracy. Browser timers can be delayed while minimized or asleep.
+375/768 and dark-mode source review passes; actual signed-in render remains
+open because headless Chromium launch is blocked by sandbox spawn EPERM.
+All phase 1b changes stay uncommitted in feat/rec0-phase1b for the main session.
+
 **Open:** Choose an automatic audio-retention period after real-call validation.
 For now audio stays in R2 until an admin deletes it. Verify Windows audio
 sharing across Vivaldi/Chrome/Edge and Zoom/Teams/Meet, headphones/echo, input
 changes, browser Stop sharing, background tabs, sleep and network failures.
-Measure New Zealand speech and client/product-name accuracy. Migration 0113
-is written only; the main session owns its required production apply before
-merge. This review-fix session performs no production apply, deployment or
-secret change.
+Measure New Zealand speech and client/product-name accuracy. The 2026-10-13
+review recorded migration 0113 as written only, with its apply owned by the
+main session before deployment. Liam confirms phase 1 is live on 2026-10-14.
+This phase 1b worktree performs no migration apply, deployment or secret change.

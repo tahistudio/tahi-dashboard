@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { acquireCallStreams, BrowserCallRecorder, type CallAudioStreams, type RecordedAudioChunk } from '@/lib/browser-call-recorder'
+import { acquireCallStreams, BrowserCallRecorder, convertRecordingGroupAudioBlob, type CallAudioStreams, type RecordedAudioChunk } from '@/lib/browser-call-recorder'
+import { parseRecordingPcmWav } from '@/lib/recording-group-audio'
 
 class AudioTrack extends EventTarget {
   readyState: MediaStreamTrackState = 'live'
@@ -35,11 +36,23 @@ class Recorder {
 }
 
 const closeContext = vi.fn(async () => {})
+const decodeAudio = vi.fn(async () => ({ duration: 1 }))
 class TestAudioContext {
   resume = async () => {}
   close = closeContext
+  decodeAudioData = decodeAudio
   createMediaStreamSource = () => ({ connect: vi.fn(), disconnect: vi.fn() })
   createAnalyser = () => ({ fftSize: 256, getByteTimeDomainData: (array: Uint8Array) => array.fill(128), disconnect: vi.fn() })
+}
+
+class TestOfflineAudioContext {
+  static instances: TestOfflineAudioContext[] = []
+  destination = {}
+  constructor(readonly channels: number, readonly frames: number, readonly sampleRate: number) {
+    TestOfflineAudioContext.instances.push(this)
+  }
+  createBufferSource = () => ({ buffer: null, connect: vi.fn(), start: vi.fn() })
+  startRendering = async () => ({ getChannelData: () => new Float32Array(this.frames).fill(0.5) })
 }
 
 beforeEach(() => {
@@ -47,8 +60,11 @@ beforeEach(() => {
   events.length = 0
   Recorder.instances = []
   closeContext.mockClear()
+  decodeAudio.mockReset().mockResolvedValue({ duration: 1 })
+  TestOfflineAudioContext.instances = []
   vi.stubGlobal('MediaRecorder', Recorder)
   vi.stubGlobal('AudioContext', TestAudioContext)
+  vi.stubGlobal('OfflineAudioContext', TestOfflineAudioContext)
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   vi.stubGlobal('MediaStream', class { constructor(readonly tracks: AudioTrack[]) {} getAudioTracks() { return this.tracks } getTracks() { return this.tracks } })
@@ -168,5 +184,70 @@ describe('manual call audio capture', () => {
     expect(onEnded).toHaveBeenCalledOnce()
     expect(onEnded).toHaveBeenCalledWith('Screen sharing ended. Recording has stopped.')
     await recording.stop()
+  })
+
+  it('leaves both tracks as WebM with speaker separation off by default', async () => {
+    const chunks: RecordedAudioChunk[] = []
+    const recording = new BrowserCallRecorder({ mic: stream(), system: stream(), systemError: null }, {
+      onChunk: async entry => { chunks.push(entry) }, onLevels: vi.fn(), onEnded: vi.fn(),
+    })
+    await recording.start()
+    await recording.stop()
+    expect(chunks.map(entry => entry.mimeType)).toEqual(['audio/webm;codecs=opus', 'audio/webm;codecs=opus'])
+    expect(decodeAudio).not.toHaveBeenCalled()
+  })
+
+  it('persists original opt-in system WebM before upload conversion and retains mic Whisper input', async () => {
+    const chunks: RecordedAudioChunk[] = []
+    const recording = new BrowserCallRecorder({ mic: stream(), system: stream(), systemError: null }, {
+      onChunk: async entry => { chunks.push(entry) }, onLevels: vi.fn(), onEnded: vi.fn(),
+    }, { separateSpeakers: true })
+    await recording.start()
+    await vi.advanceTimersByTimeAsync(1250)
+    await recording.stop()
+    const mic = chunks.find(entry => entry.track === 'mic')
+    const system = chunks.find(entry => entry.track === 'system')
+    expect(mic?.mimeType).toBe('audio/webm;codecs=opus')
+    expect(await mic?.blob.text()).toBe('header:0:audio')
+    expect(system).toMatchObject({ mimeType: 'audio/webm;codecs=opus', durationMs: 1250 })
+    expect(await system?.blob.text()).toBe('header:1:audio')
+    expect(decodeAudio).not.toHaveBeenCalled()
+  })
+
+  it('keeps original completed WebM before a subsequent system conversion fails', async () => {
+    decodeAudio.mockRejectedValue(new Error('Invalid audio container'))
+    const chunks: RecordedAudioChunk[] = []
+    const recording = new BrowserCallRecorder({ mic: stream(), system: stream(), systemError: null }, {
+      onChunk: async entry => { chunks.push(entry) }, onLevels: vi.fn(), onEnded: vi.fn(),
+    }, { separateSpeakers: true })
+    await recording.start()
+    await recording.stop()
+    const system = chunks.find(entry => entry.track === 'system')
+    expect(system?.mimeType).toBe('audio/webm;codecs=opus')
+    expect(await system?.blob.text()).toBe('header:1:audio')
+    await expect(convertRecordingGroupAudioBlob(system!.blob)).rejects.toThrow('System audio conversion failed: Invalid audio container')
+    expect(await system?.blob.text()).toBe('header:1:audio')
+    expect(closeContext).toHaveBeenCalledTimes(2)
+  })
+
+  it('requires system audio and an available offline converter before opt-in capture starts', async () => {
+    const callbacks = { onChunk: async () => {}, onLevels: vi.fn(), onEnded: vi.fn() }
+    const micOnly = new BrowserCallRecorder({ mic: stream(), system: null, systemError: null }, callbacks, { separateSpeakers: true })
+    await expect(micOnly.start()).rejects.toThrow('requires system audio')
+    vi.stubGlobal('OfflineAudioContext', undefined)
+    const group = new BrowserCallRecorder({ mic: stream(), system: stream(), systemError: null }, callbacks, { separateSpeakers: true })
+    await expect(group.start()).rejects.toThrow('conversion is unavailable')
+    expect(Recorder.instances).toHaveLength(0)
+  })
+
+  it('retries saved WebM conversion independently and releases its temporary AudioContext', async () => {
+    const audio = await convertRecordingGroupAudioBlob(new Blob(['header:system:audio'], { type: 'audio/webm' }))
+    expect(audio.type).toBe('audio/wav')
+    expect(parseRecordingPcmWav(await audio.arrayBuffer()).sampleCount).toBe(16_000)
+    expect(TestOfflineAudioContext.instances[0]).toMatchObject({ channels: 1, frames: 16_000, sampleRate: 16_000 })
+    expect(closeContext).toHaveBeenCalledOnce()
+    decodeAudio.mockResolvedValue({ duration: 181 })
+    await expect(convertRecordingGroupAudioBlob(new Blob(['audio']))).rejects.toThrow('too long')
+    expect(closeContext).toHaveBeenCalledTimes(2)
   })
 })

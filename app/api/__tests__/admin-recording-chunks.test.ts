@@ -31,7 +31,11 @@ import { POST as transcribe } from '@/app/api/admin/recordings/[id]/transcribe/r
 import { GET as getRecording, DELETE as deleteRecording } from '@/app/api/admin/recordings/[id]/route'
 import { GET as getTranscript } from '@/app/api/admin/call-transcripts/[id]/route'
 import { PATCH as linkRecording } from '@/app/api/admin/recordings/[id]/link/route'
+import { POST as createRecording } from '@/app/api/admin/recordings/route'
 import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
+import { hashTranscript } from '@/lib/call-transcripts'
+import { RECORDING_MODEL } from '@/lib/meeting-recordings'
+import { encodeRecordingPcmWav, parseRecordingPcmWav, RECORDING_GROUP_MODEL } from '@/lib/recording-group-audio'
 
 interface SqlResult { results: Array<Record<string, unknown>>; success: boolean; meta: { changes: number } }
 interface SqlStatement {
@@ -101,8 +105,14 @@ beforeEach(() => {
   sqlite = new DatabaseSync(':memory:')
   sqlite.exec(MEETING_RECORDING_MIGRATION.join(';'))
   sqlite.exec(readFileSync(resolve(process.cwd(), 'drizzle/migrations/0105_call_transcripts.sql'), 'utf8'))
-  sqlite.exec('ALTER TABLE call_transcripts ADD COLUMN suggested_at text; CREATE TABLE organisations (id text PRIMARY KEY); CREATE TABLE task_suggestions (id text, transcript_id text); CREATE TABLE scheduled_calls (id text PRIMARY KEY,org_id text);')
-  sqlite.exec("INSERT INTO organisations VALUES ('client-a'), ('client-b')")
+  sqlite.exec(`ALTER TABLE call_transcripts ADD COLUMN suggested_at text;
+    CREATE TABLE organisations (id text PRIMARY KEY, name text);
+    CREATE TABLE task_suggestions (id text, transcript_id text);
+    CREATE TABLE team_members (id text PRIMARY KEY, clerk_user_id text, name text, email text);
+    CREATE TABLE scheduled_calls (id text PRIMARY KEY,org_id text,attendees text DEFAULT '[]');
+    CREATE TABLE discovery_calls (id text PRIMARY KEY,org_id text,attendees text DEFAULT '[]', transcript text, transcript_source text, updated_at text);`)
+  sqlite.exec("INSERT INTO organisations VALUES ('client-a', 'Acme'), ('client-b', 'Beta')")
+  sqlite.exec("INSERT INTO team_members VALUES ('member-liam','liam','Liam Miller','business@tahi.studio'), ('member-staci','staci','Staci Miller','staci@tahi.studio')")
   sqlite.exec("INSERT INTO meeting_recordings (id,title,org_id,created_by_id,tracks,state,started_at,created_at,updated_at) VALUES ('rec','A call','client-a','liam','[\"mic\",\"system\"]','recording','2026-10-13T00:00:00Z','2026-10-13T00:00:00Z','2026-10-13T00:00:00Z')")
   database = drizzle(adapter(sqlite) as unknown as AnyD1Database, { schema })
   h.database = database
@@ -128,6 +138,25 @@ beforeEach(() => {
 })
 
 afterEach(() => { sqlite.close(); vi.restoreAllMocks() })
+
+describe('recording speaker separation option', () => {
+  it('defaults to off and stores an explicit opt-in without a schema change', async () => {
+    const ordinary = await createRecording(req('', { title: 'Ordinary call', tracks: ['mic', 'system'], orgId: 'client-a' }))
+    expect(ordinary.status).toBe(201)
+    expect(await ordinary.json()).toMatchObject({ recording: { separateSpeakers: false, tracks: ['mic', 'system'] } })
+    const group = await createRecording(req('', { title: 'Group call', tracks: ['mic', 'system'], orgId: 'client-a', separateSpeakers: true }))
+    expect(group.status).toBe(201)
+    const body = await group.json() as { recording: { id: string; separateSpeakers: boolean } }
+    expect(body.recording.separateSpeakers).toBe(true)
+    const row = sqlite.prepare('SELECT tracks FROM meeting_recordings WHERE id = ?').get(body.recording.id)
+    expect(JSON.parse(String(row?.tracks))).toMatchObject({ version: 1, separateSpeakers: true })
+  })
+
+  it('rejects mic-only separation and untyped opt-in values', async () => {
+    expect((await createRecording(req('', { title: 'Mic only', tracks: ['mic'], separateSpeakers: true }))).status).toBe(400)
+    expect((await createRecording(req('', { title: 'Invalid option', tracks: ['mic', 'system'], separateSpeakers: 'true' }))).status).toBe(400)
+  })
+})
 
 describe('recording chunks route guards and uniqueness', () => {
   it('requires authentication, studio membership and the calls feature', async () => {
@@ -262,7 +291,7 @@ describe('recording transcription recovery', () => {
     const recovered = await transcribe(req('transcribe'), params)
     const ready = await recovered.json() as MeetingRecordingDetail
     expect(ready.recording.state).toBe('ready')
-    expect(ready.transcript.text).toBe('[00:01] Liam: Liam first\n[00:04] Them: Them later')
+    expect(ready.transcript.text).toBe('[00:01] Liam Miller: Liam first\n[00:04] Them (Acme): Them later')
     expect(ready.transcript.id).toBe('rec')
     await transcribe(req('transcribe'), params)
     expect(h.ai.run).toHaveBeenCalledTimes(3)
@@ -307,7 +336,7 @@ describe('recording transcription recovery', () => {
   it('keeps an explicitly chosen client immutable but allows attaching its real call', async () => {
     await stoppedTwoTracks(); await transcribe(req('transcribe'), params); await transcribe(req('transcribe'), params)
     expect((await linkRecording(req('link', { orgId: 'client-b' }, 'PATCH'), params)).status).toBe(409)
-    sqlite.prepare("INSERT INTO scheduled_calls VALUES ('call-a','client-a')").run()
+    sqlite.prepare("INSERT INTO scheduled_calls (id,org_id) VALUES ('call-a','client-a')").run()
     const linked = await linkRecording(req('link', { callKind: 'scheduled', callId: 'call-a' }, 'PATCH'), params)
     expect(linked.status).toBe(200)
     expect(sqlite.prepare('SELECT org_id,call_id FROM meeting_recordings').get()).toEqual({ org_id: 'client-a', call_id: 'call-a' })
@@ -316,11 +345,227 @@ describe('recording transcription recovery', () => {
 
   it('rolls back the transcript link if its recording identity write fails', async () => {
     await stoppedTwoTracks(); await transcribe(req('transcribe'), params); await transcribe(req('transcribe'), params)
-    sqlite.prepare("INSERT INTO scheduled_calls VALUES ('call-a','client-a')").run()
+    sqlite.prepare("INSERT INTO scheduled_calls (id,org_id) VALUES ('call-a','client-a')").run()
     failLinkBatch = true
     vi.spyOn(console, 'error').mockImplementationOnce(() => undefined)
     expect((await linkRecording(req('link', { callKind: 'scheduled', callId: 'call-a' }, 'PATCH'), params)).status).toBe(503)
     expect(sqlite.prepare('SELECT org_id,call_id FROM meeting_recordings').get()).toEqual({ org_id: 'client-a', call_id: null })
     expect(sqlite.prepare('SELECT call_kind,call_id FROM call_transcripts').get()).toEqual({ call_kind: null, call_id: null })
+  })
+
+  it('refreshes speaker names and the stored suggester input when linking a ready recording', async () => {
+    await stoppedTwoTracks(); await transcribe(req('transcribe'), params); await transcribe(req('transcribe'), params)
+    const raw = sqlite.prepare('SELECT text,segments FROM meeting_recording_chunks ORDER BY id').all()
+    sqlite.prepare('INSERT INTO scheduled_calls (id,org_id,attendees) VALUES (?, ?, ?)').run('call-a', 'client-a', JSON.stringify([
+      { id: 'member-liam', type: 'team_member', name: 'Liam Miller' },
+      { id: 'contact-a', type: 'contact', name: 'Michael Day', email: 'michael@giant.example' },
+    ]))
+    const linked = await linkRecording(req('link', { callKind: 'scheduled', callId: 'call-a' }, 'PATCH'), params)
+    expect(linked.status).toBe(200)
+    const detail = await linked.json() as MeetingRecordingDetail
+    expect(detail.transcript.text).toBe('[00:00] Liam Miller: Hello\n[00:00] Michael Day: Hello')
+    expect(sqlite.prepare('SELECT text,hash FROM call_transcripts').get()).toEqual({ text: detail.transcript.text, hash: hashTranscript(detail.transcript.text) })
+    expect(sqlite.prepare('SELECT text,segments FROM meeting_recording_chunks ORDER BY id').all()).toEqual(raw)
+    await linkRecording(req('link', { orgId: 'client-a' }, 'PATCH'), params)
+    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Liam Miller: Hello\n[00:00] Them (Acme): Hello' })
+    expect(h.ai.run).toHaveBeenCalledTimes(2)
+  })
+
+  it('re-merges a finished legacy transcript deterministically without another AI call', async () => {
+    await stoppedTwoTracks(); await transcribe(req('transcribe'), params); await transcribe(req('transcribe'), params)
+    sqlite.prepare("UPDATE call_transcripts SET text='[00:00] Liam: old text', hash='old'").run()
+    const first = await transcribe(req('transcribe'), params)
+    const second = await transcribe(req('transcribe'), params)
+    const once = await first.json() as MeetingRecordingDetail
+    const twice = await second.json() as MeetingRecordingDetail
+    expect(once.transcript.text).toBe('[00:00] Liam Miller: Hello\n[00:00] Them (Acme): Hello')
+    expect(twice.transcript).toEqual(once.transcript)
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
+    expect(h.ai.run).toHaveBeenCalledTimes(2)
+  })
+
+  it('names the microphone from its creator rather than the teammate viewing or retrying it', async () => {
+    sqlite.prepare("UPDATE meeting_recordings SET created_by_id='staci'").run()
+    await stoppedTwoTracks(); await transcribe(req('transcribe'), params); await transcribe(req('transcribe'), params)
+    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Staci Miller: Hello\n[00:00] Them (Acme): Hello' })
+    sqlite.prepare("UPDATE meeting_recordings SET created_by_id='missing-member'").run()
+    expect((await transcribe(req('transcribe'), params)).status).toBe(200)
+    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Me: Hello\n[00:00] Them (Acme): Hello' })
+    expect(h.ai.run).toHaveBeenCalledTimes(2)
+  })
+
+  it('re-renders the recorder-owned discovery mirror but preserves independently edited text', async () => {
+    await stoppedTwoTracks(); await transcribe(req('transcribe'), params); await transcribe(req('transcribe'), params)
+    const attendees = JSON.stringify([{ name: 'Michael Day', email: 'michael@giant.example' }])
+    sqlite.prepare('INSERT INTO discovery_calls (id,org_id,attendees) VALUES (?, ?, ?)').run('discovery-a', 'client-a', attendees)
+    const body = { callKind: 'discovery', callId: 'discovery-a' }
+    const first = await linkRecording(req('link', body, 'PATCH'), params)
+    expect(first.status).toBe(200)
+    expect(await first.json()).toMatchObject({ mirrored: true })
+    expect(sqlite.prepare('SELECT transcript FROM discovery_calls').get()).toEqual({ transcript: '[00:00] Liam Miller: Hello\n[00:00] Michael Day: Hello' })
+    sqlite.prepare('UPDATE discovery_calls SET attendees = ?').run(JSON.stringify([{ name: 'Mark Ramsey', email: 'mark@giant.example' }]))
+    expect((await linkRecording(req('link', body, 'PATCH'), params)).status).toBe(200)
+    expect(sqlite.prepare('SELECT transcript FROM discovery_calls').get()).toEqual({ transcript: '[00:00] Liam Miller: Hello\n[00:00] Mark Ramsey: Hello' })
+    sqlite.prepare("UPDATE discovery_calls SET transcript='Human correction'").run()
+    const again = await linkRecording(req('link', body, 'PATCH'), params)
+    expect(await again.json()).toMatchObject({ mirrored: false })
+    expect(sqlite.prepare('SELECT transcript FROM discovery_calls').get()).toEqual({ transcript: 'Human correction' })
+  })
+})
+
+describe('whole-system group recording transcription', () => {
+  async function groupRecording() {
+    const created = await createRecording(req('', { title: 'Group call', tracks: ['mic', 'system'], orgId: 'client-a', separateSpeakers: true }))
+    expect(created.status).toBe(201)
+    const { recording } = await created.json() as MeetingRecordingDetail
+    return { id: recording.id, params: { params: Promise.resolve({ id: recording.id }) } }
+  }
+
+  async function stoppedGroup() {
+    const group = await groupRecording()
+    const mic = await reserve(req('chunks', metadata), group.params)
+    expect(mic.status).toBe(200)
+    const micBody = await mic.json() as { uploadUrl: string }
+    expect((await upload(new NextRequest(`http://localhost${micBody.uploadUrl}`, { method: 'PUT', body: Uint8Array.from([1, 2, 3]) }), group.params)).status).toBe(200)
+    const audio = encodeRecordingPcmWav(new Float32Array(30 * 16_000).fill(0.1))
+    for (const sequence of [0, 1]) {
+      const reserved = await reserve(req('chunks', { track: 'system', sequence, startMs: sequence * 30_000, durationMs: 30_000, mimeType: 'audio/wav', size: audio.byteLength }), group.params)
+      expect(reserved.status).toBe(200)
+      const body = await reserved.json() as { uploadUrl: string }
+      expect((await upload(new NextRequest(`http://localhost${body.uploadUrl}`, { method: 'PUT', body: audio }), group.params)).status).toBe(200)
+    }
+    expect((await stop(req('stop', { expectedChunks: { mic: 1, system: 2 }, durationMs: 60_000 }), group.params)).status).toBe(200)
+    return group
+  }
+
+  function novaOutput() {
+    return { results: { channels: [{ alternatives: [{ transcript: 'Start continued. Another Back.', words: [
+      { start: 28.5, end: 29.8, word: 'Start', speaker: 0 },
+      { start: 30.1, end: 30.8, word: 'continued', punctuated_word: 'continued.', speaker: 0 },
+      { start: 32, end: 33, word: 'Another', speaker: 1 },
+      { start: 33.3, end: 34, word: 'Back', punctuated_word: 'Back.', speaker: 0 },
+    ] }] }] } }
+  }
+
+  function successfulModels() {
+    h.ai.run.mockImplementation(async (model: string, input: unknown) => {
+      if (model === RECORDING_MODEL) {
+        expect(input).toMatchObject({ audio: 'AQID', task: 'transcribe', language: 'en' })
+        return { text: 'Microphone speech', segments: [{ start: 1, end: 2, text: 'Microphone speech' }] }
+      }
+      expect(model).toBe(RECORDING_GROUP_MODEL)
+      expect(input).toMatchObject({ diarize: true, punctuate: true, language: 'en', audio: { contentType: 'audio/wav' } })
+      const { audio } = input as { audio: { body: ReadableStream<Uint8Array> } }
+      const combined = parseRecordingPcmWav(await new Response(audio.body).arrayBuffer())
+      expect(combined.sampleCount).toBe(60 * 16_000)
+      return novaOutput()
+    })
+  }
+
+  it('uses Whisper for mic and one streamed Nova inference, retaining speaker identity across stored chunk edges', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    const micResponse = await transcribe(req('transcribe'), group.params)
+    expect(await micResponse.json()).toMatchObject({ pending: true, recording: { separateSpeakers: true } })
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(0)
+    const finished = await transcribe(req('transcribe'), group.params)
+    expect(finished.status).toBe(200)
+    const detail = await finished.json() as MeetingRecordingDetail
+    expect(detail.recording.state).toBe('ready')
+    expect(detail.transcript.text).toBe('[00:01] Liam Miller: Microphone speech\n[00:28] Them 1: Start continued.\n[00:32] Them 2: Another\n[00:33] Them 1: Back.')
+    expect(detail.chunks.filter(chunk => chunk.track === 'system').map(chunk => chunk.segments.map(segment => segment.speaker))).toEqual([[0], [0, 1, 0]])
+    const stored = sqlite.prepare('SELECT sequence,text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ? ORDER BY sequence').all(group.id, 'system')
+    expect(stored.map(row => [row.sequence, row.text, row.attempts])).toEqual([[0, 'Start', 1], [1, 'continued. Another Back.', 1]])
+    expect(JSON.parse(String(stored[1].segments))).toEqual([
+      { start: expect.closeTo(0.1), end: expect.closeTo(0.8), text: 'continued.', speaker: 0 },
+      { start: 2, end: 3, text: 'Another', speaker: 1 }, { start: expect.closeTo(3.3), end: 4, text: 'Back.', speaker: 0 },
+    ])
+    const retried = await transcribe(req('transcribe'), group.params)
+    expect((await retried.json() as MeetingRecordingDetail).transcript).toEqual(detail.transcript)
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
+    expect(sqlite.prepare('SELECT sequence,text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ? ORDER BY sequence').all(group.id, 'system')).toEqual(stored)
+  })
+
+  it('retains successful mic text after Nova fails and retries only the whole system track', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    await transcribe(req('transcribe'), group.params)
+    const mic = sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')
+    h.ai.run.mockRejectedValueOnce(new Error('Temporary Nova failure'))
+    const failed = await transcribe(req('transcribe'), group.params)
+    const failure = await failed.json() as MeetingRecordingDetail
+    expect(failure.recording).toMatchObject({ state: 'failed', error: 'Temporary Nova failure', transcriptId: null })
+    expect(failure.chunks.filter(chunk => chunk.track === 'system').map(chunk => chunk.state)).toEqual(['failed', 'failed'])
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(0)
+    const retry = await transcribe(req('transcribe'), group.params)
+    expect((await retry.json() as MeetingRecordingDetail).recording.state).toBe('ready')
+    expect(sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')).toEqual(mic)
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL, RECORDING_GROUP_MODEL])
+    expect(sqlite.prepare('SELECT attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').all(group.id, 'system')).toEqual([{ attempts: 2 }, { attempts: 2 }])
+  })
+
+  it('retries failed finalization using saved group results without another Nova or Whisper inference', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    await transcribe(req('transcribe'), group.params)
+    failTranscript = true
+    const failed = await transcribe(req('transcribe'), group.params)
+    const failure = await failed.json() as MeetingRecordingDetail
+    expect(failure.recording.state).toBe('failed')
+    expect(failure.chunks.every(chunk => chunk.state === 'ready')).toBe(true)
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(0)
+    const retry = await transcribe(req('transcribe'), group.params)
+    expect((await retry.json() as MeetingRecordingDetail).recording.state).toBe('ready')
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
+  })
+
+  it('accepts a full three-minute PCM reservation above the compressed limit and rejects raw group WebM', async () => {
+    const group = await groupRecording()
+    const rejected = await reserve(req('chunks', { ...metadata, track: 'system' }), group.params)
+    expect(rejected.status).toBe(400)
+    expect(await rejected.json()).toMatchObject({ error: expect.stringContaining('requires WAV system audio') })
+    const accepted = await reserve(req('chunks', { track: 'system', sequence: 0, startMs: 0, durationMs: 180_000, mimeType: 'audio/wav', size: 44 + 180 * 16_000 * 2 }), group.params)
+    expect(accepted.status).toBe(200)
+    expect(sqlite.prepare('SELECT size,mime_type,duration_ms FROM meeting_recording_chunks WHERE recording_id = ?').get(group.id)).toEqual({ size: 5_760_044, mime_type: 'audio/wav', duration_ms: 180_000 })
+    expect(puts).not.toHaveBeenCalled()
+  })
+
+  it('persists every group result exactly once across the 25-chunk result batch boundary', async () => {
+    const group = await groupRecording()
+    const mic = await reserve(req('chunks', { ...metadata, durationMs: 1000 }), group.params)
+    expect(mic.status).toBe(200)
+    const micBody = await mic.json() as { uploadUrl: string }
+    expect((await upload(new NextRequest(`http://localhost${micBody.uploadUrl}`, { method: 'PUT', body: Uint8Array.from([1, 2, 3]) }), group.params)).status).toBe(200)
+    const audio = encodeRecordingPcmWav(new Float32Array(16_000).fill(0.1))
+    for (let sequence = 0; sequence < 26; sequence += 1) {
+      const reserved = await reserve(req('chunks', { track: 'system', sequence, startMs: sequence * 1000, durationMs: 1000, mimeType: 'audio/wav', size: audio.byteLength }), group.params)
+      expect(reserved.status).toBe(200)
+      const body = await reserved.json() as { uploadUrl: string }
+      expect((await upload(new NextRequest(`http://localhost${body.uploadUrl}`, { method: 'PUT', body: audio }), group.params)).status).toBe(200)
+    }
+    expect((await stop(req('stop', { expectedChunks: { mic: 1, system: 26 }, durationMs: 26_000 }), group.params)).status).toBe(200)
+    const words = Array.from({ length: 26 }, (_, sequence) => ({ start: sequence + 0.2, end: sequence + 0.3, word: `word${sequence}`, speaker: sequence % 2 }))
+    h.ai.run.mockImplementation(async (model: string, input: unknown) => {
+      if (model === RECORDING_MODEL) return { text: 'Mic', segments: [{ start: 0, end: 0.1, text: 'Mic' }] }
+      expect(model).toBe(RECORDING_GROUP_MODEL)
+      const { audio: systemAudio } = input as { audio: { body: ReadableStream<Uint8Array> } }
+      expect(parseRecordingPcmWav(await new Response(systemAudio.body).arrayBuffer()).sampleCount).toBe(26 * 16_000)
+      return { results: { channels: [{ alternatives: [{ transcript: words.map(word => word.word).join(' '), words }] }] } }
+    })
+    await transcribe(req('transcribe'), group.params)
+    const completed = await transcribe(req('transcribe'), group.params)
+    expect(completed.status).toBe(200)
+    expect((await completed.json() as MeetingRecordingDetail).recording.state).toBe('ready')
+    const stored = sqlite.prepare('SELECT sequence,state,text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ? ORDER BY sequence').all(group.id, 'system')
+    expect(stored).toHaveLength(26)
+    stored.forEach((row, sequence) => {
+      expect(row).toMatchObject({ sequence, state: 'ready', text: `word${sequence}`, attempts: 1 })
+      expect(JSON.parse(String(row.segments))).toEqual([{ start: expect.closeTo(0.2), end: expect.closeTo(0.3), text: `word${sequence}`, speaker: sequence % 2 }])
+    })
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
   })
 })

@@ -116,6 +116,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             flexDirection: 'column',
             gap: '0.5rem',
             maxWidth: '22rem',
+            width: 'calc(100vw - 2.5rem)',
             pointerEvents: 'none',
           }}
         >
@@ -133,7 +134,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   padding: '0.625rem 0.75rem 0.625rem 0.875rem',
                   background: 'var(--color-brand-deepest)',
                   borderRadius: 'var(--radius-md)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.28)',
+                  boxShadow: '0 0.5rem 1.5rem rgba(0, 0, 0, 0.28)',
                   color: 'var(--color-text-on-dark)',
                   fontSize: '0.8125rem',
                   lineHeight: 1.4,
@@ -163,9 +164,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   </span>
                   <span style={{
                     color: 'var(--color-text-dim-on-dark)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    overflowWrap: 'anywhere',
+                    whiteSpace: 'normal',
                   }}>
                     {toast.message}
                   </span>
@@ -173,6 +173,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 {toast.action && (
                   <button
                     type="button"
+                    className="tahi-focus-ring"
                     onClick={() => { toast.action!.onClick(); dismiss(toast.id) }}
                     style={{
                       position: 'relative',
@@ -181,6 +182,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                       color: 'var(--color-brand-bright)',
                       borderRadius: 'var(--radius-sm)',
                       padding: '0.25rem 0.5rem',
+                      minHeight: '2.75rem',
                       fontSize: '0.75rem',
                       fontWeight: 600,
                       cursor: 'pointer',
@@ -195,6 +197,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 )}
                 <button
                   type="button"
+                  className="tahi-focus-ring"
                   onClick={() => dismiss(toast.id)}
                   aria-label="Dismiss"
                   style={{
@@ -204,6 +207,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                     cursor: 'pointer',
                     color: 'rgba(220, 232, 217, 0.6)',
                     padding: '0.25rem',
+                    minHeight: '2.75rem',
+                    minWidth: '2.75rem',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',

@@ -1268,7 +1268,7 @@ export const TOOLS: ToolDef[] = [
 
   // Manual browser recordings: capture itself requires the dashboard browser.
   tool('list_meeting_recordings', 'List manual call recordings visible to this studio identity, with their processing state and explicit client or call link. Recording capture happens only in the dashboard browser. Returns { items }.'),
-  tool('get_meeting_recording', 'Read a manual call recording, its chunk processing states and its saved transcript. Speaker labels are Liam for microphone audio and Them for system audio. Returns { recording, chunks, transcript }.', {
+  tool('get_meeting_recording', 'Read a manual call recording, its chunk processing states, group speaker option and its saved named transcript. Microphone uses the creator name or Me; system uses the sole external attendee or client, or Them 1, Them 2 when group separation was explicitly enabled in the browser. Returns { recording, chunks, transcript }.', {
     id: prop('string', 'Meeting recording id'),
   }, ['id']),
   tool('link_meeting_recording', 'Link a manual call recording to the client or call explicitly selected by the person. Pass either orgId, or callKind plus callId, never both. Never infer a client from transcript content. Validates call ownership and client access. Linking makes its saved transcript eligible for the existing suggestions approval flow; it never applies a task or request.', {
@@ -1303,7 +1303,13 @@ export const TOOLS: ToolDef[] = [
   }, ['posts']),
 
   // ── Calls ─────────────────────────────────────────────────────────────
-  tool('list_calls', 'List all scheduled calls (legacy scheduled_calls table — client check-ins added manually). Use list_all_calls for the unified post-classifier list that also covers Google Calendar pull.'),
+  tool('list_calls', 'List scheduled calls from the legacy scheduled_calls table, including creator identity and attendees. Supports a bounded time range for call reminders. Use list_all_calls for Google Calendar calls.', {
+    orgId: prop('string', 'Optional client organisation id'),
+    status: prop('string', 'Optional call status, such as scheduled'),
+    since: prop('string', 'Optional earliest ISO datetime, inclusive'),
+    until: prop('string', 'Optional latest ISO datetime, inclusive'),
+    limit: prop('number', 'Maximum calls, default 50, capped at 100'),
+  }),
   tool('list_all_calls', 'Unified list of every call from discovery_calls (the post-classifier polymorphic table). Returns lead-attached + client check-ins + partnership + mentoring + other + unclassified rows with parent context (lead/deal/org name), classification, and prepNote (the pre-call prep field). Filters: type (discovery|client|partnership|mentoring|other|unclassified), since/until ISO dates.', {
     type: prop('string', 'Filter by meetingType: discovery | client | partnership | mentoring | other | unclassified'),
     since: prop('string', 'ISO datetime — earliest scheduledAt to include. Defaults to 60 days ago.'),
@@ -2877,8 +2883,14 @@ export async function executeTool(
     }
 
     // ── Calls ─────────────────────────────────────────────────────────
-    case 'list_calls':
-      return json(await apiGet('/api/admin/calls', token))
+    case 'list_calls': {
+      const qs = new URLSearchParams()
+      for (const key of ['orgId', 'status', 'since', 'until'] as const) {
+        if (typeof args[key] === 'string' && args[key]) qs.set(key, args[key])
+      }
+      if (typeof args.limit === 'number') qs.set('limit', String(args.limit))
+      return json(await apiGet(`/api/admin/calls${qs.size ? `?${qs}` : ''}`, token))
+    }
     case 'list_all_calls': {
       const qs = new URLSearchParams()
       if (typeof args.type === 'string' && args.type) qs.set('type', args.type)

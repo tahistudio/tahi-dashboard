@@ -55,6 +55,14 @@ describe('manual call recording MCP profiles', () => {
 })
 
 describe('manual call recording MCP dispatch', () => {
+  it('forwards scheduled reminder filters through the existing read tool', async () => {
+    const calls = interceptedCalls()
+    const args = { orgId: 'org-1', status: 'scheduled', since: '2026-10-14T21:00:00Z', until: '2026-10-14T21:02:00Z', limit: 100 }
+    await executeTool('list_calls', args, credentials, manyRequests)
+    expect(calls[0].url.pathname).toBe('/api/admin/calls')
+    for (const [key, value] of Object.entries(args)) expect(calls[0].url.searchParams.get(key)).toBe(String(value))
+    expect(classifyTool('list_calls', 'designer')).toBe('read')
+  })
   it('lists recordings through the guarded admin route', async () => {
     const calls = interceptedCalls()
     await executeTool('list_meeting_recordings', {}, credentials, manyRequests)

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, FileText, Mic, Monitor, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { PageHeader } from '@/components/tahi/page-header'
@@ -9,9 +10,11 @@ import { Card } from '@/components/tahi/card'
 import { Badge } from '@/components/tahi/badge'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { apiPath } from '@/lib/api'
-import { acquireCallStreams, BrowserCallRecorder, releaseCallStreams, type CallAudioStreams } from '@/lib/browser-call-recorder'
+import { acquireCallStreams, BrowserCallRecorder, convertRecordingGroupAudioBlob, releaseCallStreams, type CallAudioStreams } from '@/lib/browser-call-recorder'
 import { listRecordingChunks, removeRecordingChunk, storeRecordingChunk, type RecordingOutboxChunk } from '@/lib/recording-outbox'
 import type { MeetingRecording, MeetingRecordingDetail, RecordingTrack } from '@/lib/meeting-recordings-types'
+import { readRecordingPrefill } from '@/lib/call-recording-reminders'
+import { RECORDING_PCM_HEADER_BYTES, RECORDING_PCM_SAMPLE_RATE } from '@/lib/recording-group-audio'
 
 interface PickerCall { kind: 'discovery' | 'scheduled'; id: string; title: string; scheduledAt: string; orgId: string | null; orgName: string | null }
 interface PickerClient { id: string; name: string }
@@ -62,6 +65,7 @@ function InputMeter({ label, level, enabled }: { label: string; level: number; e
 }
 
 export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: string; canDeleteAudio: boolean }) {
+  const searchParams = useSearchParams()
   const [items, setItems] = useState<MeetingRecording[]>([])
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
@@ -77,6 +81,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
   const [preparing, setPreparing] = useState(false)
   const [systemWarning, setSystemWarning] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
+  const [separateSpeakers, setSeparateSpeakers] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [levels, setLevels] = useState({ mic: 0, system: 0 })
   const [busy, setBusy] = useState(false)
@@ -96,6 +101,20 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
   const startedAt = useRef(0)
   const volatileChunks = useRef(new Map<string, RecordingOutboxChunk>())
   const captureAttempt = useRef(0)
+  const appliedPrefill = useRef('')
+
+  useEffect(() => {
+    const queryKey = searchParams.toString()
+    if (appliedPrefill.current === queryKey || recording || preparing || busy || detail) return
+    appliedPrefill.current = queryKey
+    const prefill = readRecordingPrefill(searchParams)
+    if (!prefill) return
+    setTitle(prefill.title)
+    setCallKey(prefill.callKey)
+    setCallSearch(prefill.title)
+    // The scoped call picker resolves the client. Query parameters do not.
+    setClientId('')
+  }, [searchParams, recording, preparing, busy, detail])
 
   const loadItems = useCallback(async () => {
     try {
@@ -168,7 +187,21 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
     return () => { window.removeEventListener('beforeunload', beforeUnload); document.removeEventListener('click', click, true) }
   }, [shouldWarn])
 
-  async function upload(entry: RecordingOutboxChunk): Promise<void> {
+  async function upload(original: RecordingOutboxChunk): Promise<void> {
+    let entry = original
+    if (entry.track === 'system' && entry.mimeType !== 'audio/wav') {
+      const known = activeRecording.current?.id === entry.recordingId ? activeRecording.current
+        : detail?.recording.id === entry.recordingId ? detail.recording : items.find(item => item.id === entry.recordingId)
+      const saved = known ?? (await readJson<MeetingRecordingDetail>(`/api/admin/recordings/${entry.recordingId}`)).recording
+      if (saved.separateSpeakers) {
+        // Conversion failures retain the original WebM in the outbox for another retry.
+        const blob = await convertRecordingGroupAudioBlob(entry.blob)
+        const converted = { ...entry, blob, mimeType: 'audio/wav', size: blob.size,
+          durationMs: Math.max(1, Math.round((blob.size - RECORDING_PCM_HEADER_BYTES) / 2 / RECORDING_PCM_SAMPLE_RATE * 1000)) }
+        entry = await storeRecordingChunk(ownerId, entry.recordingId, converted)
+        volatileChunks.current.set(entry.key, entry)
+      }
+    }
     const { track, sequence, startMs, durationMs, mimeType, size } = entry
     let lastError: unknown
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -231,9 +264,11 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
       const selectedCall = calls.find(call => `${call.kind}:${call.id}` === callKey)
       if (callKey && !selectedCall) throw new Error('Search and select the call again before starting its recording.')
       const tracks: RecordingTrack[] = prepared.system ? ['mic', 'system'] : ['mic']
+      const groupEnabled = separateSpeakers && !!prepared.system
       const result = await readJson<{ recording: MeetingRecording }>('/api/admin/recordings', json('POST', {
         title: title.trim() || `Call ${new Date().toLocaleString()}`,
         ...(selectedCall ? { callKind: selectedCall.kind, callId: selectedCall.id } : { orgId: clientId || null }), tracks,
+        separateSpeakers: groupEnabled,
       }))
       created = result.recording
       if (!mounted.current || attempt !== captureAttempt.current) {
@@ -261,7 +296,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
           await refreshOutbox()
           queueUpload(entry)
         },
-      })
+      }, { separateSpeakers: groupEnabled })
       recorder.current = session
       await session.start()
       if (!mounted.current || attempt !== captureAttempt.current) { await session.stop(); return }
@@ -432,6 +467,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
     setCallKey('')
     setClientSearch('')
     setCallSearch('')
+    setSeparateSpeakers(false)
     setError(null)
     setNotice(null)
   }
@@ -458,7 +494,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
               <TahiButton variant="danger" style={BUTTON_STYLE} iconLeft={<Square className="h-4 w-4 shrink-0" />} onClick={() => void stopCapture()}>Stop recording</TahiButton>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <InputMeter label="Liam, microphone" level={levels.mic} enabled />
+              <InputMeter label="Me, microphone" level={levels.mic} enabled />
               <InputMeter label="Them, system audio" level={levels.system} enabled={activeRecording.current?.tracks.includes('system') ?? false} />
             </div>
             <p className="text-sm text-[var(--color-text-muted)]">Keep this page open. Audio is saved during the call. {outboxCount > 0 ? `${outboxCount} chunks waiting to upload.` : 'Saved chunks are uploaded.'}</p>
@@ -473,6 +509,14 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
               {detail && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled || !!systemWarning} onClick={newRecording}>New recording</TahiButton>}
             </div>
             <label className="block space-y-2 text-sm font-medium">Recording title<input className={INPUT_CLASS} style={INPUT_STYLE} value={title} onChange={event => setTitle(event.target.value)} placeholder="Client check-in" maxLength={200} disabled={disabled} /></label>
+            <label className="tahi-focus-ring flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] p-3 hover:bg-[var(--color-bg-secondary)]">
+              <input type="checkbox" className="mt-1 shrink-0 accent-[var(--color-brand-ink)]" checked={detail?.recording.separateSpeakers ?? separateSpeakers}
+                disabled={disabled || !!detail} onChange={event => setSeparateSpeakers(event.target.checked)} aria-describedby="group-speakers-help" />
+              <span className="min-w-0 space-y-1">
+                <span className="block text-sm font-medium">Separate speakers (group call)</span>
+                <span id="group-speakers-help" className="block text-sm text-[var(--color-text-muted)]">Labels the people on system audio as Them 1, Them 2 and so on. Estimated USD $0.34 per recorded hour including your microphone, before retries and storage. Off by default.</span>
+              </span>
+            </label>
             {systemWarning ? <div role="alert" className="space-y-3 rounded-lg p-4" style={{ background: 'var(--color-bg-secondary)', border: '0.0625rem solid var(--color-border)' }}>
               <p className="text-sm font-medium">{systemWarning}</p>
               <p className="text-sm text-[var(--color-text-muted)]">Mic only records your voice. The people you hear on the call will be missing.</p>
@@ -526,10 +570,11 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
           {busy && <p role="status" className="text-sm text-[var(--color-text-muted)]">Saving audio or transcribing a chunk. Keep this page open.</p>}
           {detail.recording.error && <p role="alert" className="break-words text-sm text-[var(--color-danger-ink)]">{detail.recording.error}</p>}
           {detail.transcript.text ? <pre data-private className="whitespace-pre-wrap break-words rounded-lg p-4 text-sm leading-relaxed" style={{ fontFamily: 'inherit', background: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>{detail.transcript.text}</pre> : <p className="text-sm text-[var(--color-text-muted)]">The transcript will appear here after the audio is processed.</p>}
-          {failedChunks.length > 0 && <ul className="space-y-2 break-words text-sm text-[var(--color-danger-ink)]" aria-label="Failed audio chunks">{failedChunks.map(chunk => <li key={chunk.id}>{chunk.track === 'mic' ? 'Liam' : 'Them'}, {formatElapsed(chunk.startMs)}: {chunk.error ?? 'Transcription failed.'}</li>)}</ul>}
+          {failedChunks.length > 0 && <ul className="space-y-2 break-words text-sm text-[var(--color-danger-ink)]" aria-label="Failed audio chunks">{failedChunks.map(chunk => <li key={chunk.id}>{chunk.track === 'mic' ? 'Me' : 'Them'}, {formatElapsed(chunk.startMs)}: {chunk.error ?? 'Transcription failed.'}</li>)}</ul>}
           <div className="flex flex-wrap gap-2">
             {!detail.recording.deletedAt && detail.recording.state === 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => { if (window.confirm('Finish this interrupted recording using its saved chunks? Audio since the last saved chunk may be missing.')) void recover(detail.recording.id, true) }}>Finish interrupted recording</TahiButton>}
             {!detail.recording.deletedAt && detail.recording.state !== 'ready' && detail.recording.state !== 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} iconLeft={<RefreshCw className="h-4 w-4 shrink-0" />} onClick={() => void recover(detail.recording.id)}>Retry saved audio and failed chunks</TahiButton>}
+            {detail.recording.state === 'ready' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} iconLeft={<RefreshCw className="h-4 w-4 shrink-0" />} onClick={() => void transcribe(detail.recording.id)}>Refresh transcript</TahiButton>}
             {detail.recording.state === 'ready' && <Link href="/calls" className="tahi-focus-ring flex max-w-full items-center rounded-md px-3 py-2 text-sm hover:bg-[var(--color-bg-secondary)]" style={{ minHeight: '2.75rem', color: 'var(--color-link)' }}>Open calls and task suggestions</Link>}
             {canDeleteAudio && !detail.recording.deletedAt && <TahiButton variant="ghost" style={BUTTON_STYLE} disabled={disabled} iconLeft={<Trash2 className="h-4 w-4 shrink-0" />} onClick={() => void deleteRecording(detail.recording.id, Boolean(detail.recording.transcriptId))}>Delete recording audio</TahiButton>}
           </div>

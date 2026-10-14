@@ -94,6 +94,7 @@ export async function GET(req: NextRequest) {
       googleCalendarEventId: schema.discoveryCalls.googleCalendarEventId,
       attendees: schema.discoveryCalls.attendees,
       status: schema.discoveryCalls.status,
+      createdById: schema.discoveryCalls.createdById,
       // Parent identifiers: all nullable; one will be set
       leadId: schema.discoveryCalls.leadId,
       dealId: schema.discoveryCalls.dealId,
@@ -244,6 +245,7 @@ export async function GET(req: NextRequest) {
     return {
       id: c.id,
       title: c.title,
+      createdById: c.createdById,
       scheduledAt: c.scheduledAt,
       durationMinutes: c.durationMinutes,
       meetingUrl: c.googleMeetUrl,

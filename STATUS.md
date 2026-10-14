@@ -1,7 +1,30 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-13** by Codex (REC.0 review fixes prepared, not live; per-person MCP connector remains LIVE). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 phase 1 live per Liam; phase 1b uncommitted, not deployed). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+
+## REC.0 phase 1b, prepared 2026-10-14
+
+Liam confirmed the manual recorder is live at /calls/record on main 6f9f2170
+and his first real test worked. This clean feat/rec0-phase1b worktree prepares
+paragraph joining, creator/attendee/client speaker names, deterministic saved
+transcript refresh and link re-rendering. The suggester reads the named text.
+Optional group separation uses one Cloudflare Nova 3 system-track inference
+while Whisper keeps the microphone. Off by default, about USD 0.34/hour before
+retries/storage/suggestions; model research is in Decision #071. Raw audio
+is durable before conversion, and retries retain completed AI results.
+
+The PWA now has explicit 192/512 PNG icons and a Record call shortcut. Open
+recorder tabs or installed app windows show deduplicated in-app prompts for
+the team member's calls within two minutes; clicking opens title/call prefill.
+No automatic recording or external notification. Existing scoped APIs/MCP
+provide creator identity and bounded call time filters. No new migration.
+
+Main session owns commit and deployment. Phase 1b is uncommitted and has not
+been deployed. Real Nova accuracy/long-call latency, Windows installation,
+and signed-in 375/768/dark checks remain open. Source QA/UIUX reviews pass;
+headless browser launch is blocked by sandbox spawn EPERM. Gate results and
+handoff notes are recorded in the run log.
 
 ## Next-20 items 2 to 7 hardening, 2026-10-13
 
@@ -90,7 +113,8 @@ rate herself).
 
 ## Work in progress, 2026-10-11
 
-REC.0 phase 1 was committed as 1608f4c6 on feat/rec0-manual-recorder, then
+Historical phase 1 preparation (now live per Liam on 2026-10-14): REC.0
+was committed as 1608f4c6 on feat/rec0-manual-recorder, then
 reviewed by Opus. Review fixes are in 989e31db (re-reviewed, PASS with notes). The
 build adds a manual Windows
 Chromium mic/system recorder at /calls/record, durable chunk uploads,
