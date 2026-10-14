@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { requireMigrationAccess } from '@/lib/require-migration-access'
 import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
+import { RECORDER_DEVICES_MIGRATION } from '@/lib/recorder-devices-migration'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -2469,6 +2470,11 @@ const MIGRATIONS: Migration[] = [
     name: '0113',
     description: 'Apply BEFORE deploying: the suggestion sweep, rebuild, client delete/merge and ManyRequests cleanup read this table.',
     statements: [...MEETING_RECORDING_MIGRATION],
+  },
+  {
+    name: '0114',
+    description: 'Apply BEFORE deploying the tray recorder server code.',
+    statements: [...RECORDER_DEVICES_MIGRATION],
   },
 ]
 
