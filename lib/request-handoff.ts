@@ -113,7 +113,10 @@ export async function loadWaitingOn(
         contactName: schema.contacts.name,
       })
       .from(schema.requests)
-      .leftJoin(schema.contacts, eq(schema.requests.waitingOnContactId, schema.contacts.id))
+      .leftJoin(schema.contacts, and(
+        eq(schema.requests.waitingOnContactId, schema.contacts.id),
+        eq(schema.contacts.orgId, schema.requests.orgId),
+      ))
       .where(and(
         inArray(schema.requests.id, ids),
         isNotNull(schema.requests.waitingOnContactId),

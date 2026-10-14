@@ -24,7 +24,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/server-auth', () => ({
-  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' }),
+  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi' }),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 
@@ -148,7 +148,7 @@ function reads(
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', 'org_tahi')
-  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' } as never)
+  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi' } as never)
   vi.mocked(requireFeature).mockResolvedValue(null)
   vi.mocked(callXeroAPI).mockResolvedValue({
     Invoices: [{ InvoiceID: 'xero-1', InvoiceNumber: 'INV-0001' }],

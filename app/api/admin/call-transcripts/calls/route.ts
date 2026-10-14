@@ -1,3 +1,5 @@
+import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/call-transcripts/calls?q=&limit=
  *
@@ -38,6 +40,8 @@ interface PickerCall {
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'calls')
+  if (featureDenied) return featureDenied
 
   const scope = await scopedOrgIds({ userId, orgId })
   if (scope.kind === 'none') return NextResponse.json({ items: [] })
@@ -52,7 +56,9 @@ export async function GET(req: NextRequest) {
   const since = new Date(Date.now() - WINDOW_DAYS * 86400_000).toISOString()
   const until = new Date(Date.now() + WINDOW_DAYS * 86400_000).toISOString()
 
+  const callScope = discoveryCallScopeCondition(scope)
   const discoveryConditions = [
+    ...(callScope ? [callScope] : []),
     gte(schema.discoveryCalls.scheduledAt, since),
     lte(schema.discoveryCalls.scheduledAt, until),
   ]

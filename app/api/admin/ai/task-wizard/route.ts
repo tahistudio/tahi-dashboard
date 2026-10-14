@@ -1,3 +1,5 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/ai/task-wizard
  *
@@ -640,10 +642,13 @@ async function wizardSpendTodayCents(database: Database): Promise<number | null>
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+
+  const featureDenied = await requireFeature({ userId, orgId }, 'tasks')
+  if (featureDenied) return featureDenied
 
   // Judged before the body is read, so an oversized upload is refused without
   // being paid for. A missing or unparseable header falls through to the
@@ -662,6 +667,10 @@ export async function POST(req: NextRequest) {
 
   const { messages, context } = body
   const ctx: WizardContext = context ?? {}
+  if (ctx.orgId) {
+    const scopeDenied = await requireAccessToOrg(await db(), userId, ctx.orgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json({ error: 'Messages array is required' }, { status: 400 })

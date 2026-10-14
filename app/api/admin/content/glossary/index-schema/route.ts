@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/glossary/index-schema
  *
@@ -29,8 +30,10 @@ const GLOSSARY_INDEX_URL = 'https://www.tahi.studio/resources/glossary'
 const GLOSSARY_SET_ID = `${GLOSSARY_INDEX_URL}#defined-term-set`
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const collectionId = await getGlossaryCollectionId()
   // Pull all terms so we can stamp each one into the DefinedTermSet's

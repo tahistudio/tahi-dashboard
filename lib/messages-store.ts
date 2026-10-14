@@ -35,6 +35,7 @@
 
 import { and, asc, desc, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { schema } from '@/db/d1'
+import type { OrgScope } from '@/lib/access-scope'
 import { chunkThreadIds } from '@/lib/request-thread'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import {
@@ -109,6 +110,8 @@ export interface InboxRequestScope {
   /** Client only, and only when they have brand links. Null means no narrowing. */
   brandIds: readonly string[] | null
   audience: 'client' | 'studio'
+  /** Prepared from authenticated studio auth, never from the recorded viewer. */
+  orgScope?: OrgScope
 }
 
 // ── Raw message rows ─────────────────────────────────────────────────────────
@@ -149,7 +152,7 @@ export interface NameBook {
   contact: Map<string, string>
 }
 
-async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[]): Promise<NameBook> {
+async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[], contactOrgIds?: readonly string[]): Promise<NameBook> {
   const teamIds = [...new Set(messages.filter(m => m.authorType === 'team_member').map(m => m.authorId))]
   // 'bot' is excluded here, not swept into the contact bucket: it has no
   // contacts row, and authorName below answers it from TAHI_BOT directly.
@@ -169,7 +172,8 @@ async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[]
     const rows = await database
       .select({ id: schema.contacts.id, name: schema.contacts.name })
       .from(schema.contacts)
-      .where(inArray(schema.contacts.id, slice))
+      .where(and(inArray(schema.contacts.id, slice),
+        contactOrgIds === undefined ? undefined : sql`${schema.contacts.orgId} IN (SELECT value FROM json_each(${JSON.stringify(contactOrgIds)}))`))
     for (const r of rows) contact.set(r.id, r.name)
   }
   return { team, contact }
@@ -240,10 +244,12 @@ export async function loadInboxThreads(
   },
 ): Promise<InboxListResult> {
   const { viewer, scope } = input
-  const orgIds = [...new Set(scope.orgIds.filter(Boolean))]
+  const orgIds = [...new Set(scope.orgIds.filter(id => !!id && (scope.audience !== 'studio'
+    || scope.orgScope?.kind !== 'some' || scope.orgScope.orgIds.includes(id))))]
   if (orgIds.length === 0) return { threads: [], channelsByOrg: input.channelsByOrg }
 
   const isClient = scope.audience === 'client'
+  if (!isClient && scope.orgScope?.kind === 'none') return { threads: [], channelsByOrg: input.channelsByOrg }
   const since = windowStart(input.now)
   const mine = selfIds(viewer)
 
@@ -277,10 +283,13 @@ export async function loadInboxThreads(
   // ── the messages behind them ───────────────────────────────────────────────
   const requestIds = requestRows.map(r => r.id)
   const windowMessages: WindowMessage[] = []
+  const unrestricted = !isClient && scope.orgScope?.kind === 'all'
+  const messageOrgFilter = unrestricted ? undefined : sql`${schema.messages.orgId} IN (SELECT value FROM json_each(${JSON.stringify(orgIds)}))`
 
   for (const slice of chunkThreadIds(requestIds)) {
     const conditions = [
       inArray(schema.messages.requestId, slice),
+      messageOrgFilter,
       isNull(schema.messages.deletedAt),
       gte(schema.messages.createdAt, since),
     ]
@@ -293,6 +302,7 @@ export async function loadInboxThreads(
   for (const slice of chunkThreadIds(channelIds)) {
     const conditions = [
       inArray(schema.messages.conversationId, slice),
+      messageOrgFilter,
       isNull(schema.messages.deletedAt),
       gte(schema.messages.createdAt, since),
     ]
@@ -410,7 +420,7 @@ export async function loadInboxThreads(
   // ── the previews ───────────────────────────────────────────────────────────
   const previewMessages = windowMessages.filter(m => lastIds.includes(m.id))
   const [book, voices] = await Promise.all([
-    loadNames(database, previewMessages),
+    loadNames(database, previewMessages, unrestricted ? undefined : orgIds),
     loadVoiceNotes(database, lastIds),
   ])
 
@@ -466,16 +476,23 @@ export async function loadThreadMessages(
     orgId: string
     viewer: InboxViewer
     audience: 'client' | 'studio'
+    /** Prepared from authenticated studio auth; omission keeps the owner-only fence. */
+    orgScope?: OrgScope
     limit?: number
   },
 ): Promise<ThreadMessage[]> {
   const isClient = input.audience === 'client'
+  const unrestricted = !isClient && input.orgScope?.kind === 'all'
   const limit = Math.min(Math.max(1, input.limit ?? THREAD_PAGE_SIZE), 200)
 
   const conditions = [
     input.source === 'request'
       ? eq(schema.messages.requestId, input.id)
       : eq(schema.messages.conversationId, input.id),
+    unrestricted ? undefined : !isClient && input.orgScope?.kind === 'none' ? sql`0 = 1`
+      : !isClient && input.orgScope?.kind === 'some'
+      ? sql`${schema.messages.orgId} IN (SELECT value FROM json_each(${JSON.stringify(input.orgScope.orgIds)}))`
+      : eq(schema.messages.orgId, input.orgId),
     isNull(schema.messages.deletedAt),
   ]
   if (isClient) conditions.push(eq(schema.messages.isInternal, false))
@@ -518,6 +535,7 @@ export async function loadThreadMessages(
       deletedAt: null,
       body: '',
     })),
+    unrestricted ? undefined : !isClient && input.orgScope?.kind === 'some' ? input.orgScope.orgIds : [input.orgId],
   )
   const voices = await loadVoiceNotes(database, ids)
 

@@ -1,3 +1,5 @@
+import { requireAdmin } from '@/lib/require-admin'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -8,10 +10,15 @@ type RouteParams = { params: Promise<{ id: string }> }
 
 // ── PATCH /api/admin/automations/[id] ────────────────────────────────────────
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'settings')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+
 
   const { id } = await params
   const body = await req.json() as {
@@ -52,10 +59,15 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
 // ── DELETE /api/admin/automations/[id] ───────────────────────────────────────
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'settings')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+
 
   const { id } = await params
   const database = await db()

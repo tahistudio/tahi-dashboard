@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 /**
  * POST /api/admin/integrations/google/sync-calendar
  *
@@ -42,6 +43,8 @@ export async function POST(req: NextRequest) {
     if (!isTahiAdmin(auth.orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const adminDenied = await requireAdmin(auth)
+    if (adminDenied) return adminDenied
     if (!auth.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

@@ -1,9 +1,11 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, and, sql } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import { draftStatusList, owedStatusList } from '@/lib/invoice-status'
@@ -43,6 +45,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied
 
   const database = await db()
+  const orgScope = await scopedOrgIds(auth)
   const drizzle = database as D1
 
   // Receivables are gated behind the invoices feature so a scoped team member
@@ -68,7 +71,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.invoices)
     .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
-    .where(inArray(schema.invoices.status, owedStatusList()))
+    .where(and(inArray(schema.invoices.status, owedStatusList()), internalOrgFilter(orgScope, schema.invoices.orgId)))
 
   // Drafts, reported beside the buckets rather than inside one. The studio
   // still wants to see the placeholders it has raised in Xero; they are simply
@@ -79,7 +82,7 @@ export async function GET(req: NextRequest) {
       currency: schema.invoices.currency,
     })
     .from(schema.invoices)
-    .where(inArray(schema.invoices.status, draftStatusList()))
+    .where(and(inArray(schema.invoices.status, draftStatusList()), internalOrgFilter(orgScope, schema.invoices.orgId)))
 
   const drafts = {
     count: draftRows.length,

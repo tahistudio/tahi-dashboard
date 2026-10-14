@@ -22,6 +22,10 @@ vi.mock('@/lib/server-auth', () => ({
 
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 
+// The cutover planner runs as an admin; explicit org query filters stay tested.
+vi.mock('@/lib/access-scope', () => ({ scopedOrgIds: vi.fn().mockResolvedValue({ kind: 'all' }) }))
+vi.mock('@/lib/require-access', () => ({ requireAccessToOrg: vi.fn().mockResolvedValue(null) }))
+
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
 import { db } from '@/lib/db'

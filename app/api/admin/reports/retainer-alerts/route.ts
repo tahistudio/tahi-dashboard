@@ -1,3 +1,5 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -32,6 +34,7 @@ export async function POST(req: NextRequest) {
   if (featureDenied) return featureDenied
 
   const drizzle = (await db()) as D1
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   // Find admin recipients (Tahi team members with role='admin')
   const admins = await drizzle
@@ -62,6 +65,7 @@ export async function POST(req: NextRequest) {
     FROM organisations o
     LEFT JOIN subscriptions s ON s.org_id = o.id AND s.status = 'active'
     WHERE o.status NOT IN ('archived', 'churned', 'completed')
+        AND ${internalOrgFilter(orgScope, sql`o.id`)}
   `)
   const retainerOrgs = (orgsRaw ?? []).filter(o =>
     (o.custom_mrr && o.custom_mrr > 0) || o.sub_status === 'active'
@@ -79,10 +83,10 @@ export async function POST(req: NextRequest) {
   const r30 = await drizzle
     .select({ orgId: schema.requests.orgId, c: sql<number>`COUNT(*)`.as('c') })
     .from(schema.requests)
-    .where(and(
+    .where(and(and(
       inArray(schema.requests.orgId, orgIds),
       gte(schema.requests.createdAt, d30),
-    ))
+    ), internalOrgFilter(orgScope, schema.requests.orgId)))
     .groupBy(schema.requests.orgId)
   const r30Map = new Map(r30.map(r => [r.orgId, Number(r.c)]))
 

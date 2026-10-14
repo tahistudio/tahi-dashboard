@@ -202,7 +202,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const [messages, lastReadAt, people] = await Promise.all([
     loadThreadMessages(database, {
-      source: t.source, id: t.id, orgId: t.orgId, viewer, audience: 'studio',
+      source: t.source, id: t.id, orgId: t.orgId, viewer, audience: 'studio', orgScope: scope,
     }),
     readThreadCursor(database, { source: t.source, id: t.id, viewer }),
     t.source === 'channel'

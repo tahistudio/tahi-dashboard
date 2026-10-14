@@ -1,3 +1,7 @@
+import { requireDealAccess } from '@/app/api/admin/deals/_access'
+import { requireDiscoveryCallAccess } from '@/lib/discovery-call-access'
+import { requireAdmin } from '@/lib/require-admin'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -11,17 +15,17 @@ type Params = { params: Promise<{ id: string }> }
 // Turn a qualified lead into a deal.
 //
 // Body (all optional):
-//   orgId         — attach the deal to an existing organisation. If
+//   orgId         , attach the deal to an existing organisation. If
 //                   omitted and `createOrg` is true, a new org is
 //                   spun up from the lead's company name.
-//   createOrg     — boolean. Default true when no orgId supplied.
-//   dealTitle     — override; defaults to "<lead.company> · <lead.name>"
+//   createOrg     , boolean. Default true when no orgId supplied.
+//   dealTitle     , override; defaults to "<lead.company> · <lead.name>"
 //                   or "<lead.name>" when no company is set
-//   stageId       — landing stage. Defaults to the first non-closed
+//   stageId       , landing stage. Defaults to the first non-closed
 //                   pipeline stage by position.
 //   upfrontValue
 //   monthlyValue
-//   currency      — defaults to the lead's currency
+//   currency      , defaults to the lead's currency
 //
 // Side effects:
 //   - Optional org create (when createOrg + no orgId)
@@ -58,6 +62,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
   const lead = leadRows[0]
   if (lead.status === 'promoted' && lead.promotedDealId) {
+    const denied = await requireDealAccess(database, { userId, orgId: tenantOrgId }, lead.promotedDealId)
+    if (denied) return denied
     return NextResponse.json({ error: 'Lead already promoted', dealId: lead.promotedDealId }, { status: 409 })
   }
 
@@ -84,6 +90,17 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // ── Resolve org ──
+  if (body.sourceCallId) {
+    const denied = await requireDiscoveryCallAccess(database, { userId, orgId: tenantOrgId }, body.sourceCallId)
+    if (denied) return denied
+  }
+  if (body.orgId) {
+    const denied = await requireAccessToOrg(database, userId, body.orgId)
+    if (denied) return denied
+  } else if (body.createOrg !== false) {
+    const denied = await requireAdmin({ userId, orgId: tenantOrgId })
+    if (denied) return denied
+  }
   let orgId = body.orgId ?? null
   if (!orgId && body.createOrg !== false) {
     const orgName = lead.company?.trim() || lead.name.trim()
@@ -199,7 +216,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         .set({ dealId, updatedAt: now })
         .where(eq(schema.discoveryCalls.id, body.sourceCallId))
     } catch {
-      // best-effort — promotion still succeeds even if the link fails
+      // best-effort , promotion still succeeds even if the link fails
     }
   }
 

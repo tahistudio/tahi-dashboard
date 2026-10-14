@@ -1,3 +1,5 @@
+import { requireAdmin } from '@/lib/require-admin'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -77,10 +79,14 @@ function isGateClosingWrite(key: string, value: string | null | undefined): bool
 // UI that showed empty boxes there would read as "no restriction" when the
 // truth is the opposite.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const database = await db()
 
@@ -134,6 +140,10 @@ export async function PATCH(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const adminDenied = await requireAdmin(auth)
+  if (adminDenied) return adminDenied
+  const featureDenied = await requireFeature(auth, 'settings')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     key?: string

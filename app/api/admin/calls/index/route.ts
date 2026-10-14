@@ -1,3 +1,5 @@
+import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/calls/index
  *
@@ -23,6 +25,8 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'calls')
+  if (featureDenied) return featureDenied
 
   const scope = await scopedOrgIds({ userId, orgId })
   if (scope.kind === 'none') return NextResponse.json({ items: [] })
@@ -46,7 +50,9 @@ export async function GET(req: NextRequest) {
   const defaultSince = new Date(Date.now() - 60 * 86400_000).toISOString()
   const defaultUntil = new Date(Date.now() + 60 * 86400_000).toISOString()
 
+  const callScope = discoveryCallScopeCondition(scope)
   const conditions = [
+    ...(callScope ? [callScope] : []),
     gte(schema.discoveryCalls.scheduledAt, since ?? defaultSince),
     lte(schema.discoveryCalls.scheduledAt, until ?? defaultUntil),
   ]

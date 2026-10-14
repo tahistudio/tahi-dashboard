@@ -1,8 +1,11 @@
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, sql } from 'drizzle-orm'
+import { eq, desc, and, sql, or } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { isOrgInScope } from '../_scoping/org-scope'
 import { resolveOrgChannel } from '@/lib/org-channel'
@@ -18,6 +21,8 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'messages')
+  if (featureDenied) return featureDenied
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -55,10 +60,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ conversations: [] })
   }
 
+  const scope = await scopedOrgIds({ userId, orgId })
+  const conversationConditions = [sql`${schema.conversations.id} IN (SELECT value FROM json_each(${JSON.stringify(convIds)}))`]
+  if (scope.kind !== 'all') {
+    const allowed = scope.kind === 'some' ? JSON.stringify(scope.orgIds) : '[]'
+    conversationConditions.push(sql`(${schema.conversations.orgId} IS NULL OR ${schema.conversations.orgId} IN (SELECT value FROM json_each(${allowed})))`)
+    conversationConditions.push(sql`(${schema.conversations.requestId} IS NULL OR EXISTS (SELECT 1 FROM requests WHERE requests.id = ${schema.conversations.requestId} AND requests.org_id IN (SELECT value FROM json_each(${allowed}))))`)
+  }
   // Get full conversation data
   let allConvs = await database
     .select()
     .from(schema.conversations)
+    .where(and(...conversationConditions))
     .orderBy(desc(schema.conversations.updatedAt))
 
   // Filter to only conversations the user participates in
@@ -69,7 +82,6 @@ export async function GET(req: NextRequest) {
   // A thread that carries an orgId is client data, so it additionally has to
   // clear the member's org scope (a participant row left behind after their
   // scope was narrowed must not keep the client thread readable).
-  const scope = await scopedOrgIds({ userId, orgId })
   allConvs = allConvs.filter(c => isOrgInScope(scope, c.orgId, 'allow'))
 
   // Apply type filter
@@ -100,12 +112,15 @@ export async function GET(req: NextRequest) {
           const ct = await database
             .select({ name: schema.contacts.name })
             .from(schema.contacts)
-            .where(eq(schema.contacts.id, p.participantId))
+            .where(and(eq(schema.contacts.id, p.participantId), scope.kind === 'all' ? undefined : orgColumnInScope(schema.contacts.orgId, scope.kind === 'some' ? scope.orgIds : [])))
             .limit(1)
           if (ct.length > 0) participantNames.push(ct[0].name)
         }
       }
 
+      const messageOrgFilter = scope.kind === 'all' ? undefined
+        : conv.orgId ? orgColumnInScope(schema.messages.orgId, scope.kind === 'some' ? scope.orgIds : [])
+          : or(orgColumnInScope(schema.messages.orgId, scope.kind === 'some' ? scope.orgIds : []), eq(schema.messages.orgId, orgId ?? 'tahi-internal'))
       // Get last message
       const lastMessages = await database
         .select({
@@ -116,7 +131,7 @@ export async function GET(req: NextRequest) {
           authorType: schema.messages.authorType,
         })
         .from(schema.messages)
-        .where(eq(schema.messages.conversationId, conv.id))
+        .where(and(eq(schema.messages.conversationId, conv.id), messageOrgFilter))
         .orderBy(desc(schema.messages.createdAt))
         .limit(1)
 
@@ -133,7 +148,7 @@ export async function GET(req: NextRequest) {
           const allMsgs = await database
             .select({ id: schema.messages.id })
             .from(schema.messages)
-            .where(eq(schema.messages.conversationId, conv.id))
+            .where(and(eq(schema.messages.conversationId, conv.id), messageOrgFilter))
           unreadCount = allMsgs.length
         } else if (lastMessage.createdAt > lastReadAt) {
           // Count messages after lastReadAt
@@ -143,7 +158,8 @@ export async function GET(req: NextRequest) {
             .where(
               and(
                 eq(schema.messages.conversationId, conv.id),
-                sql`${schema.messages.createdAt} > ${lastReadAt}`
+                sql`${schema.messages.createdAt} > ${lastReadAt}`,
+                messageOrgFilter
               )
             )
           unreadCount = unreadMsgs.length
@@ -241,6 +257,8 @@ export async function POST(req: NextRequest) {
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const featureDenied = await requireFeature({ userId, orgId }, 'messages')
+    if (featureDenied) return featureDenied
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -302,9 +320,17 @@ export async function POST(req: NextRequest) {
         .from(schema.requests)
         .where(eq(schema.requests.id, requestId))
         .limit(1)
-      if (linkedRequest && !isOrgInScope(scope, linkedRequest.orgId, 'allow')) {
+      if (!linkedRequest) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+      if (!isOrgInScope(scope, linkedRequest.orgId, 'allow')) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
+    }
+
+    for (const seed of normaliseParticipantSeeds(participantIds ?? [])) {
+      if (seed.type !== 'contact') continue
+      const [contact] = await database.select({ orgId: schema.contacts.orgId }).from(schema.contacts).where(eq(schema.contacts.id, seed.id)).limit(1)
+      const denied = await requireAccessToOrg(database, userId, contact?.orgId)
+      if (denied) return denied
     }
 
     // Resolve the current user's team member ID

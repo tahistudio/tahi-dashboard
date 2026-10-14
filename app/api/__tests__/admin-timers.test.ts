@@ -26,6 +26,9 @@ vi.mock('@/lib/require-feature', () => ({
   requirePortalFeature: vi.fn().mockResolvedValue(null),
 }))
 
+// The caller is an admin in these timer ownership and billing fixtures.
+vi.mock('@/lib/permissions', () => ({ resolvePermissions: vi.fn().mockResolvedValue({ isAdmin: true }) }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({ orgId: 'org_tahi', userId: 'clerk_admin', sessionId: 's' }),
   isTahiAdmin: (orgId: string | null) => orgId === 'org_tahi',

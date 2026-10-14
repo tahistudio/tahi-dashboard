@@ -50,7 +50,7 @@ function access(features: readonly string[]): ResolvedAccess {
     isSuperAdmin: false,
     canManagePermissions: false,
     viewableResources: new Set(),
-    overrides: new Map(features.map(feature => [feature, 'allow'] as const)),
+    overrides: new Map(['overview', ...features].map(feature => [feature, 'allow'] as const)),
   }
 }
 
@@ -241,7 +241,7 @@ describe('GET overview brief after the helper move', () => {
     expect(dialect.sqlToQuery(queries[0].condition!).params).toEqual([BRIEF_CACHE_KEY])
     expect(writes).toEqual([])
     expect(deletes).toEqual([])
-    expect(resolvePermissions).toHaveBeenCalledTimes(1)
+    expect(resolvePermissions).toHaveBeenCalledTimes(2)
     expect(resolveAccessScoping).toHaveBeenCalledTimes(1)
   })
 
@@ -259,7 +259,7 @@ describe('GET overview brief after the helper move', () => {
     expect(dialect.sqlToQuery(queries[0].condition!).params).toEqual([scopedKey])
     expect(writes.map(write => write.row.key)).toEqual([scopedKey])
     expect(cache.get(BRIEF_CACHE_KEY)).toEqual(ownerRow)
-    expect(resolvePermissions).toHaveBeenCalledTimes(1)
+    expect(resolvePermissions).toHaveBeenCalledTimes(2)
     expect(resolveAccessScoping).toHaveBeenCalledTimes(1)
   })
 

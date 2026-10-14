@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/posts/[id]/backfill
  *
@@ -17,8 +18,10 @@ export const dynamic = 'force-dynamic'
 type Params = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   if (!id) return NextResponse.json({ error: 'Item id required' }, { status: 400 })

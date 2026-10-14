@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -8,10 +9,12 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // GET /api/admin/planned-roles
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'team')
+  if (featureDenied) return featureDenied
 
   const database = await db() as unknown as D1
 
@@ -25,10 +28,12 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/planned-roles
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'team')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     title?: string

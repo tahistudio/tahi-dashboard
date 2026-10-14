@@ -1,3 +1,4 @@
+import { contactScopeCondition, requireContactAccess } from '@/lib/contact-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     })
     .from(schema.dealContacts)
     .leftJoin(schema.contacts, eq(schema.dealContacts.contactId, schema.contacts.id))
-    .where(eq(schema.dealContacts.dealId, dealId))
+    .where(and(eq(schema.dealContacts.dealId, dealId), await contactScopeCondition({ userId, orgId })))
 
   return NextResponse.json({ items })
 }
@@ -67,6 +68,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
   const denied = await requireDealAccess(database, { userId, orgId }, dealId)
   if (denied) return denied
+
+  const contactDenied = await requireContactAccess(database, { userId, orgId }, body.contactId.trim())
+  if (contactDenied) return contactDenied
 
   const id = crypto.randomUUID()
 
@@ -101,6 +105,9 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
   const denied = await requireDealAccess(database, { userId, orgId }, dealId)
   if (denied) return denied
+
+  const contactDenied = await requireContactAccess(database, { userId, orgId }, body.contactId.trim())
+  if (contactDenied) return contactDenied
 
   await database
     .delete(schema.dealContacts)

@@ -1,13 +1,17 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { attributedTeamMemberId } from '@/lib/mcp-actor'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc, and, ne, inArray } from 'drizzle-orm'
+import { eq, desc, and, ne, inArray, or } from 'drizzle-orm'
 import { createNotifications, notifyMentionedPerson, resolveParticipants } from '@/lib/notifications'
 import { parseMentions } from '@/lib/parse-mentions'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import { requireConversationAccess } from '../../_access'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -22,6 +26,8 @@ export async function GET(
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'messages')
+  if (featureDenied) return featureDenied
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -39,12 +45,17 @@ export async function GET(
   const access = await requireConversationAccess(database as unknown as D1, { userId, orgId }, conversationId)
   if (!access.ok) return access.response
   const { participantId } = access
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
+  const rowOrgFilter = scope.kind === 'all' ? undefined
+    : access.conversation.orgId ? orgColumnInScope(schema.messages.orgId, rowOrgIds)
+      : or(orgColumnInScope(schema.messages.orgId, rowOrgIds), eq(schema.messages.orgId, orgId ?? 'tahi-internal'))
 
   // Get messages
   const messages = await database
     .select()
     .from(schema.messages)
-    .where(eq(schema.messages.conversationId, conversationId))
+    .where(and(eq(schema.messages.conversationId, conversationId), rowOrgFilter))
     .orderBy(desc(schema.messages.createdAt))
     .limit(limit)
     .offset(offset)
@@ -80,7 +91,7 @@ export async function GET(
       ? database
           .select({ id: schema.contacts.id, name: schema.contacts.name })
           .from(schema.contacts)
-          .where(inArray(schema.contacts.id, contactAuthorIds))
+          .where(and(inArray(schema.contacts.id, contactAuthorIds), scope.kind === 'all' ? undefined : orgColumnInScope(schema.contacts.orgId, rowOrgIds)))
       : Promise.resolve([] as { id: string; name: string }[]),
   ])
 
@@ -160,6 +171,8 @@ export async function POST(
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const featureDenied = await requireFeature({ userId, orgId }, 'messages')
+    if (featureDenied) return featureDenied
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -230,6 +243,10 @@ export async function POST(
     // Use the Tahi org as a fallback for internal-only conversations.
     if (!msgOrgId) {
       msgOrgId = process.env.NEXT_PUBLIC_TAHI_ORG_ID ?? 'tahi-internal'
+    }
+    if (msgOrgId !== orgId) {
+      const messageOrgDenied = await requireAccessToOrg(database, userId, msgOrgId)
+      if (messageOrgDenied) return messageOrgDenied
     }
 
     await database.insert(schema.messages).values({
@@ -366,6 +383,8 @@ export async function PATCH(
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const featureDenied = await requireFeature({ userId, orgId }, 'messages')
+    if (featureDenied) return featureDenied
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -391,6 +410,11 @@ export async function PATCH(
     if (!access.ok) return access.response
 
     // Verify the message belongs to this conversation
+    const scope = await scopedOrgIds({ userId, orgId })
+    const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
+    const rowOrgFilter = scope.kind === 'all' ? undefined
+      : access.conversation.orgId ? orgColumnInScope(schema.messages.orgId, rowOrgIds)
+        : or(orgColumnInScope(schema.messages.orgId, rowOrgIds), eq(schema.messages.orgId, orgId ?? 'tahi-internal'))
     const msgRows = await database
       .select({ id: schema.messages.id })
       .from(schema.messages)
@@ -398,6 +422,7 @@ export async function PATCH(
         and(
           eq(schema.messages.id, body.messageId),
           eq(schema.messages.conversationId, conversationId),
+          rowOrgFilter,
         )
       )
       .limit(1)

@@ -1,3 +1,4 @@
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 /**
  * GET /api/admin/crons
  *
@@ -147,6 +148,8 @@ const CRONS: CronDef[] = [
 export async function GET(req: NextRequest) {
   const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const roleDenied = await requireStudioAdmin({ userId, orgId }, 'settings')
+  if (roleDenied) return roleDenied
   const denied = await requireFeature({ userId, orgId }, 'settings')
   if (denied) return denied
 

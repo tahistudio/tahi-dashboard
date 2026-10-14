@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/server-auth', () => ({
-  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' }),
+  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi' }),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 
@@ -61,7 +61,7 @@ const SWEPT = { deleted: 12, cutoff: '2026-09-19T18:00:00.000Z' }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' } as never)
+  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi' } as never)
   vi.mocked(writeCurrentSnapshot).mockResolvedValue({ month: '2026-09' } as never)
   vi.mocked(sweepSlackEventsSeen).mockResolvedValue(SWEPT)
   vi.mocked(logCronRun).mockResolvedValue(undefined as never)

@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/content/drafts/[id]/pipeline
  *
@@ -40,8 +41,10 @@ import { checkServiceStatus } from '@/lib/round-table'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   if (!id) return NextResponse.json({ error: 'Missing draft id' }, { status: 400 })

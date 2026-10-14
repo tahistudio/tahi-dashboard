@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET + POST /api/admin/requests/[id]/calls
  *
@@ -39,13 +40,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
   const { id } = await params
   const database = await db()
 
   const denied = await guardRequestAccess(database as Drizzle, userId, id)
   if (denied) return denied
 
-  const calls = await listCallsForParent(database, 'request', id)
+  const calls = await listCallsForParent(database, 'request', id, { userId, orgId })
   return NextResponse.json({ calls })
 }
 
@@ -54,6 +57,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

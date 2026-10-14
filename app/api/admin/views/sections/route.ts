@@ -1,3 +1,4 @@
+import { requireAdminResource } from '@/lib/require-admin-resource'
 /**
  * GET /api/admin/views/sections
  *
@@ -16,7 +17,7 @@ import { and, eq } from 'drizzle-orm'
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const url = new URL(req.url)
@@ -27,6 +28,8 @@ export async function GET(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
+  const denied = await requireAdminResource(database, { userId, orgId }, resourceType, resourceId)
+  if (denied) return denied
 
   // Pull all section view rows for this resource. Capped at 5000 in case
   // a hyperactive viewer somehow logged tens of thousands of events.

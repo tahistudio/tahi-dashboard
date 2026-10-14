@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { drizzle, type AnyD1Database } from 'drizzle-orm/d1'
 
 vi.mock('@/lib/server-auth', () => ({
-  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' }),
+  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi' }),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))

@@ -1,7 +1,10 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
+import { eq, or, isNull } from 'drizzle-orm'
 
 // GET /api/admin/forms/resolve?category=design&orgId=xxx
 // Resolves the most specific form for a category + org combination.
@@ -11,10 +14,12 @@ import { schema } from '@/db/d1'
 //   3. category global form (no orgId)
 //   4. global default form (isDefault=1, no category, no orgId)
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const category = url.searchParams.get('category')
@@ -23,10 +28,16 @@ export async function GET(req: NextRequest) {
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
+  if (filterOrgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, filterOrgId)
+    if (scopeDenied) return scopeDenied
+  }
+
   // Fetch all forms (the table should not be huge)
   const allForms = await drizzle
     .select()
     .from(schema.requestForms)
+    .where(filterOrgId ? or(eq(schema.requestForms.orgId, filterOrgId), isNull(schema.requestForms.orgId)) : isNull(schema.requestForms.orgId))
 
   type FormRow = typeof allForms[number]
   let resolved: FormRow | null = null

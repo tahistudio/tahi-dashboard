@@ -1,3 +1,5 @@
+import { requireCalculationAccess } from '@/lib/calculation-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -19,6 +21,9 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'calculator')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json().catch(() => ({})) as {
     calculationId?: string
@@ -28,6 +33,10 @@ export async function POST(req: NextRequest) {
   if (!body.target) return NextResponse.json({ error: 'target required' }, { status: 400 })
 
   const database = await db() as unknown as D1
+  const sourceDenied = await requireCalculationAccess(database, { userId, orgId }, body.calculationId)
+  if (sourceDenied) return sourceDenied
+  const artifactDenied = await requireFeature({ userId, orgId }, body.target === 'proposal' ? 'proposals' : body.target === 'schedule' ? 'schedules' : 'contracts')
+  if (artifactDenied) return artifactDenied
   const [calc] = await database
     .select()
     .from(schema.projectCalculations)
@@ -48,7 +57,7 @@ export async function POST(req: NextRequest) {
   const dealId = calc.dealId
   const orgIdForArtefact = calc.orgId
 
-  // Resolve client + deal context for nicer naming. Best-effort — we
+  // Resolve client + deal context for nicer naming. Best-effort , we
   // don't fail the draft if the lookup misses.
   let dealTitle: string | null = null
   if (dealId) {
@@ -100,7 +109,7 @@ async function draftProposal(
     updatedAt: now,
   })
 
-  // Three variants — Standard, Standard + Care (featured if retainer
+  // Three variants , Standard, Standard + Care (featured if retainer
   // applies), Premium. Pulled from outputs.recommendation tiers.
   const ccy = inputs.client.currency
   const target = outputs.recommendation.target

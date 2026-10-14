@@ -42,6 +42,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!sub) {
     return NextResponse.json({ error: 'Subscription not found' }, { status: 404 })
   }
+  const scopeDenied = await requireAccessToOrg(drizzle, userId, sub.orgId)
+  if (scopeDenied) return scopeDenied
 
   // Get org name
   const [org] = await drizzle
@@ -129,7 +131,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   // Verify subscription exists
   const [existing] = await drizzle
-    .select({ id: schema.subscriptions.id })
+    .select({ id: schema.subscriptions.id, orgId: schema.subscriptions.orgId })
     .from(schema.subscriptions)
     .where(eq(schema.subscriptions.id, id))
     .limit(1)
@@ -137,6 +139,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!existing) {
     return NextResponse.json({ error: 'Subscription not found' }, { status: 404 })
   }
+
+  const scopeDenied = await requireAccessToOrg(drizzle, userId, existing.orgId)
+  if (scopeDenied) return scopeDenied
 
   const now = new Date().toISOString()
   const patch: Record<string, unknown> = { updatedAt: now }
@@ -221,6 +226,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!sub) {
     return NextResponse.json({ error: 'Subscription not found' }, { status: 404 })
   }
+  const scopeDenied = await requireAccessToOrg(drizzle, userId, sub.orgId)
+  if (scopeDenied) return scopeDenied
   if (sub.manyrequestsId) {
     // Imported plans are the client's billing history, and the invoices that
     // belong to them predate invoices.subscription_id, so the invoice check

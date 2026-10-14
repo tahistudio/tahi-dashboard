@@ -24,6 +24,7 @@ import { db } from '@/lib/db'
 import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { computeBrief, writeBriefCache, readBriefCache, BRIEF_CACHE_KEY, type D1 } from '@/lib/overview-brief'
 import { resolveBriefCacheKey } from '@/lib/brief-cache-key'
+import { requireFeature } from '@/lib/require-feature'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,6 +54,8 @@ export async function POST(req: NextRequest) {
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)
     if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const denied = await requireFeature(auth, 'overview')
+    if (denied) return denied
     sessionAuth = auth
   }
 

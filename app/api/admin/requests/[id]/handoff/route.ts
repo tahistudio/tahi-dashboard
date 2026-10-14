@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * /api/admin/requests/[id]/handoff
  *
@@ -93,6 +94,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   const auth = await getRequestAuth(req)
   const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
 
@@ -127,6 +130,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { orgId, userId } = auth
   const actorUserId = attributedUserId(auth)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
 

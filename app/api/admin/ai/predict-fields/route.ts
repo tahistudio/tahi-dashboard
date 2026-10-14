@@ -1,3 +1,6 @@
+import { scopedOrgIds, type OrgScope } from '@/lib/access-scope'
+import { orgLiteralInScope as orgColumnInScope } from '@/lib/route-org-filter'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/ai/predict-fields
  *
@@ -23,26 +26,13 @@
  * Nothing is written. The dialog fills its own fields and a human presses
  * Create, exactly as with the wizards.
  *
- * ACCESS SCOPING, and why three reads here are not filtered by it (CLAUDE.md
- * rule 11). The named client is gated by requireAccessToOrg, and every
- * grounding statement that touches a client's work is filtered to that one
- * org. Three reads are not:
- *
- *   1. The studio-wide turnaround cohort. It runs only when the named client's
- *      own cohort is under COHORT_FLOOR, and only a median in days leaves the
- *      route: no row, no id, no title, nothing attributable to a client the
- *      caller cannot see. A scoped operator learns how long the studio takes,
- *      which is a fact about the studio.
- *   2. The reads on the no-client path. hasEnoughContext only lets an absent
- *      orgId through for `subject: 'task'` with `level: 'tahi_internal'`, and
- *      a tahi_internal task carries no client by construction, so the cohort
- *      and the billed hours there are the studio's own internal work.
- *   3. The team roster. It is the vocabulary an assigneeId is validated
- *      against, so a partial roster would silently drop valid suggestions, and
- *      team members are not one of the three things rule 11 names.
- *
- * Every one of those is an aggregate or a colleague's name. Anything
- * row-level about a client stays behind the org filter.
+ * ACCESS SCOPING (CLAUDE.md rule 11). The named client is checked with
+ * requireAccessToOrg. Every request/task cohort, billed-hours query and
+ * participant query also follows the authenticated caller's org scope before
+ * LIMIT, including studio benchmark fallback cohorts. Org-less internal tasks
+ * follow the existing studio-work convention. The team roster supplies
+ * assignee vocabulary and contains no client data. Admin and service callers
+ * retain the full studio cohort.
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -290,10 +280,14 @@ interface GroundingInput {
 async function loadStudioFacts(
   database: Database,
   input: GroundingInput,
+  scope: OrgScope,
 ): Promise<StudioFacts> {
   const { subject, orgId, level, category } = input
   const since = isoDaysAgo(COHORT_LOOKBACK_DAYS)
   const facts = emptyStudioFacts()
+  const requestScope = scope.kind === 'all' ? undefined : scope.kind === 'none' ? sql`0 = 1` : orgColumnInScope(schema.requests.orgId, scope.orgIds)
+  const taskScope = scope.kind === 'all' ? undefined : scope.kind === 'none' ? isNull(schema.tasks.orgId) : orgColumnInScope(schema.tasks.orgId, scope.orgIds, { includeNull: true })
+  const timeScope = scope.kind === 'all' ? undefined : scope.kind === 'none' ? isNull(schema.timeEntries.orgId) : orgColumnInScope(schema.timeEntries.orgId, scope.orgIds, { includeNull: true })
 
   const requestCohort = (scopedToOrg: boolean) => database
     .select({
@@ -305,6 +299,7 @@ async function loadStudioFacts(
     })
     .from(schema.requests)
     .where(and(
+      requestScope,
       sql`${schema.requests.deliveredAt} IS NOT NULL`,
       gte(schema.requests.createdAt, since),
       sql`julianday(${schema.requests.deliveredAt}) - julianday(${schema.requests.createdAt}) >= 0`,
@@ -322,6 +317,7 @@ async function loadStudioFacts(
     })
     .from(schema.tasks)
     .where(and(
+      taskScope,
       sql`${schema.tasks.completedAt} IS NOT NULL`,
       gte(schema.tasks.createdAt, since),
       sql`julianday(${schema.tasks.completedAt}) - julianday(${schema.tasks.createdAt}) >= 0`,
@@ -350,6 +346,7 @@ async function loadStudioFacts(
       .innerJoin(schema.requests, eq(schema.timeEntries.requestId, schema.requests.id))
       .where(and(
         sql`${schema.requests.deliveredAt} IS NOT NULL`,
+        timeScope,
         eq(schema.timeEntries.billable, true),
         gte(schema.requests.createdAt, since),
         category ? eq(schema.requests.category, category) : undefined,
@@ -382,6 +379,7 @@ async function loadStudioFacts(
       .from(schema.requestParticipants)
       .innerJoin(schema.requests, eq(schema.requestParticipants.requestId, schema.requests.id))
       .where(and(
+        requestScope,
         eq(schema.requestParticipants.role, 'assignee'),
         eq(schema.requestParticipants.participantType, 'team_member'),
         isNull(schema.requestParticipants.removedAt),
@@ -635,6 +633,8 @@ export async function POST(req: NextRequest) {
   if (!subject) {
     return NextResponse.json({ error: 'subject must be "request" or "task"' }, { status: 400 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: callerOrgId }, subject === 'task' ? 'tasks' : 'requests')
+  if (featureDenied) return featureDenied
   const title = typeof body.title === 'string' ? body.title : ''
   const orgId = typeof body.orgId === 'string' && body.orgId ? body.orgId : null
   const level = typeof body.level === 'string' && body.level ? body.level : null
@@ -702,7 +702,7 @@ export async function POST(req: NextRequest) {
   let facts: StudioFacts = emptyStudioFacts()
   if (database) {
     try {
-      facts = await loadStudioFacts(database, { subject, orgId, level, category })
+      facts = await loadStudioFacts(database, { subject, orgId, level, category }, await scopedOrgIds({ userId, orgId: callerOrgId }))
     } catch {
       facts = emptyStudioFacts()
     }

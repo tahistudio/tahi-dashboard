@@ -1,3 +1,4 @@
+import { requireAccessToOrg } from '@/lib/require-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -48,6 +49,11 @@ export async function POST(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
+  if (body.orgId) {
+    const denied = await requireAccessToOrg(database, userId, body.orgId)
+    if (denied) return denied
+  }
+
   // Determine which invoices to sync
   let invoiceIds: string[] = []
   if (body.invoiceIds?.length) {
@@ -62,6 +68,16 @@ export async function POST(req: NextRequest) {
     invoiceIds = orgInvoices.map(i => i.id)
   } else {
     return NextResponse.json({ error: 'invoiceId, invoiceIds, or orgId required' }, { status: 400 })
+  }
+
+  // Validate every requested target before any invoice payload or external call.
+  for (const invoiceId of invoiceIds) {
+    const [owner] = await database.select({ orgId: schema.invoices.orgId })
+      .from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).limit(1)
+    if (owner) {
+      const denied = await requireAccessToOrg(database, userId, owner.orgId)
+      if (denied) return denied
+    }
   }
 
   // Only contact-linked invoices can reach Xero, including read-only calls.

@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
@@ -25,6 +26,9 @@ export async function POST(
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'announcements')
+  if (featureDenied) return featureDenied
+
 
   const { id } = await params
   const database = await db()

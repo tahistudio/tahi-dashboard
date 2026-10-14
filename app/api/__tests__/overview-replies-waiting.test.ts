@@ -46,6 +46,13 @@ const queue: Row[][] = []
  *  there is no row shape a behavioural test could feed it instead. */
 const eqCalls: Array<[unknown, unknown]> = []
 
+vi.mock('@/lib/permissions', () => ({
+  resolvePermissions: async () => ({ isAdmin: true }),
+  can: () => true,
+}))
+vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
+vi.mock('@/lib/internal-route-access', () => ({ internalFeatureOrgFilter: () => undefined, internalMessageFilter: () => undefined, internalTimerFilter: () => undefined }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: async () => ({ orgId: 'tahi-org', userId: 'user_1' }),
   isTahiAdmin: () => true,
@@ -64,6 +71,7 @@ vi.mock('drizzle-orm', () => ({
   inArray: () => ({}),
   gte: () => ({}),
   desc: () => ({}),
+  sql: () => ({}),
 }))
 
 /** One chainable, awaitable builder that answers with the next queued rows. */

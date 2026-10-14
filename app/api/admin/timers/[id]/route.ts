@@ -1,3 +1,4 @@
+import { requireTimerAccess } from '@/lib/timer-access'
 /**
  * /api/admin/timers/[id]
  *
@@ -48,6 +49,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .where(and(eq(schema.activeTimers.id, id), eq(schema.activeTimers.userId, attributedUserId(auth) ?? userId)))
     .limit(1)
   if (!timer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const scopeDenied = await requireTimerAccess(drizzle, { userId, orgId }, timer)
+  if (scopeDenied) return scopeDenied
 
   const now = new Date()
   const nowIso = now.toISOString()
@@ -115,6 +118,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     .where(and(eq(schema.activeTimers.id, id), eq(schema.activeTimers.userId, timerOwnerId)))
     .limit(1)
   if (!timer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const scopeDenied = await requireTimerAccess(drizzle, { userId, orgId }, timer)
+  if (scopeDenied) return scopeDenied
 
   if (action === 'discard') {
     await drizzle.delete(schema.activeTimers).where(eq(schema.activeTimers.id, id))

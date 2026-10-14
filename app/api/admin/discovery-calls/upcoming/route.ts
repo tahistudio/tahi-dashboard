@@ -1,3 +1,5 @@
+import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/discovery-calls/upcoming
  *
@@ -46,6 +48,9 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'calls')
+  if (featureDenied) return featureDenied
+
 
   const scope = await scopedOrgIds({ userId, orgId })
   if (scope.kind === 'none') return NextResponse.json({ calls: [] })
@@ -80,6 +85,8 @@ export async function GET(req: NextRequest) {
   // deal / request / task are re-checked in JS below, same shape as the
   // calls/index route.
   const conditions = [gte(schema.discoveryCalls.scheduledAt, lexCutoff)]
+  const callScope = discoveryCallScopeCondition(scope)
+  if (callScope) conditions.push(callScope)
   if (scope.kind === 'some') {
     conditions.push(orgColumnInScope(schema.discoveryCalls.orgId, scope.orgIds, { includeNull: true }))
   }
@@ -159,15 +166,15 @@ export async function GET(req: NextRequest) {
   const [leadRows, dealRows, orgRows] = await Promise.all([
     leadIds.length > 0
       ? database.select({ id: schema.leads.id, name: schema.leads.name, company: schema.leads.company })
-          .from(schema.leads)
+          .from(schema.leads).where(columnInIds(schema.leads.id, leadIds))
       : Promise.resolve([] as Array<{ id: string; name: string; company: string | null }>),
     dealIds.length > 0
       ? database.select({ id: schema.deals.id, title: schema.deals.title, orgId: schema.deals.orgId })
-          .from(schema.deals)
+          .from(schema.deals).where(columnInIds(schema.deals.id, dealIds))
       : Promise.resolve([] as Array<{ id: string; title: string; orgId: string | null }>),
     orgIds.length > 0
       ? database.select({ id: schema.organisations.id, name: schema.organisations.name })
-          .from(schema.organisations)
+          .from(schema.organisations).where(columnInIds(schema.organisations.id, orgIds))
       : Promise.resolve([] as Array<{ id: string; name: string }>),
   ])
 
@@ -180,7 +187,7 @@ export async function GET(req: NextRequest) {
   const dealOrgIds = dealRows.filter(d => dealIds.includes(d.id) && d.orgId).map(d => d.orgId as string)
   const dealOrgs = dealOrgIds.length > 0
     ? await database.select({ id: schema.organisations.id, name: schema.organisations.name })
-        .from(schema.organisations)
+        .from(schema.organisations).where(columnInIds(schema.organisations.id, dealOrgIds))
     : []
   const dealOrgById = new Map(dealOrgs.filter(o => dealOrgIds.includes(o.id)).map(o => [o.id, o]))
 

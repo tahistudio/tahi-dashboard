@@ -1,3 +1,5 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -48,16 +50,23 @@ async function listForOrg(drizzle: Drizzle, orgId: string) {
 // Query: ?orgId=xxx - org-specific columns; falls back to the global set with
 // inherited:true so the settings UI can render inheritance honestly.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const filterOrgId = url.searchParams.get('orgId')
 
   const database = await db()
   const drizzle = database as Drizzle
+
+  if (filterOrgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, filterOrgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   if (filterOrgId) {
     const orgColumns = await listForOrg(drizzle, filterOrgId)
@@ -81,10 +90,12 @@ export async function GET(req: NextRequest) {
 //                                       the table is empty. Returns the set.
 //   { label, ... }                    - create a single column.
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     cloneFromGlobal?: boolean
@@ -98,6 +109,11 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as Drizzle
+
+  if (body.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, body.orgId)
+    if (scopeDenied) return scopeDenied
+  }
   const now = new Date().toISOString()
 
   if (body.cloneFromGlobal) {
@@ -172,10 +188,12 @@ export async function POST(req: NextRequest) {
 // PATCH /api/admin/kanban-columns - bulk reorder
 // Body: { positions: [{ id, position }] }
 export async function PATCH(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     positions?: Array<{ id?: string; position?: number }>
@@ -195,9 +213,15 @@ export async function PATCH(req: NextRequest) {
 
   // Only touch rows that actually exist; ignore stale ids from a racing edit.
   const existing = await drizzle
-    .select({ id: schema.kanbanColumns.id })
+    .select({ id: schema.kanbanColumns.id, orgId: schema.kanbanColumns.orgId })
     .from(schema.kanbanColumns)
     .where(inArray(schema.kanbanColumns.id, pairs.map(p => p.id)))
+  for (const row of existing) {
+    if (row.orgId) {
+      const scopeDenied = await requireAccessToOrg(drizzle, userId, row.orgId)
+      if (scopeDenied) return scopeDenied
+    }
+  }
   const known = new Set(existing.map(r => r.id))
 
   for (const p of pairs) {

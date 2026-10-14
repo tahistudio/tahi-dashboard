@@ -1,3 +1,7 @@
+// The thread business recorder has unrestricted scope; real row scoping is tested with SQLite.
+vi.mock('@/lib/access-scope', () => ({ scopedOrgIds: vi.fn(async () => ({ kind: 'all' })) }))
+// Business fixtures grant the owning feature; real scoped-seat gates are covered by nested-client-scope-sqlite.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn(async () => null) }))
 /**
  * GET /api/admin/requests/[id]/messages - the studio half of the request
  * thread.

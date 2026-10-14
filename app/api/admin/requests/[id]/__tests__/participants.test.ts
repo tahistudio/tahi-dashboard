@@ -1,3 +1,5 @@
+// Business fixtures grant the owning feature; real scoped-seat gates are covered by nested-client-scope-sqlite.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn(async () => null) }))
 /**
  * POST /api/admin/requests/[id]/participants
  *
@@ -92,7 +94,7 @@ describe('POST participants, contact roles', () => {
     'accepts a contact as %s',
     async (role) => {
       // select request, select actor (skipped: team_member branch only), select existing (none)
-      const { handle } = makeDb([[REQUEST], []])
+      const { handle } = makeDb([[REQUEST], [{ orgId: REQUEST.orgId }], []])
       vi.mocked(db).mockResolvedValue(handle as never)
 
       const res = await POST(
@@ -183,7 +185,7 @@ describe('POST participants, refusals unrelated to the role/type pairing', () =>
   })
 
   it('does not notify anyone when the new participant is a contact', async () => {
-    const { handle } = makeDb([[REQUEST], []])
+    const { handle } = makeDb([[REQUEST], [{ orgId: REQUEST.orgId }], []])
     vi.mocked(db).mockResolvedValue(handle as never)
 
     await POST(

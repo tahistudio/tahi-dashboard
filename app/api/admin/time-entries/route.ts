@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/time-entries
  *
@@ -32,8 +33,9 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and, sql } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { attributedUserId } from '@/lib/mcp-actor'
 import { resolveTimerOrgId } from '@/lib/timer-helpers'
 import { INTERNAL_ORG_ID } from '@/lib/internal-org'
@@ -59,6 +61,8 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'time')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const taskId = url.searchParams.get('taskId')
@@ -98,6 +102,10 @@ export async function GET(req: NextRequest) {
     const denied = await requireAccessToOrg(drizzle, userId, targetOrgId)
     if (denied) return denied
   }
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgFilter = scope.kind === 'all' ? undefined
+    : sql`(${schema.timeEntries.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope.kind === 'some' ? scope.orgIds : [])}))
+      ${taskId && !targetOrgId ? sql`OR ${schema.timeEntries.orgId} = ${INTERNAL_ORG_ID}` : sql``})`
 
   const items = await drizzle
     .select({
@@ -113,7 +121,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.timeEntries)
     .leftJoin(schema.teamMembers, timeEntryLoggerJoin())
-    .where(taskId ? eq(schema.timeEntries.taskId, taskId) : eq(schema.timeEntries.requestId, requestId as string))
+    .where(and(taskId ? eq(schema.timeEntries.taskId, taskId) : eq(schema.timeEntries.requestId, requestId as string), rowOrgFilter))
     .orderBy(desc(schema.timeEntries.date))
 
   const totalHours = items.reduce((sum, e) => sum + (e.hours ?? 0), 0)
@@ -125,6 +133,8 @@ export async function POST(req: NextRequest) {
   const auth = await getRequestAuth(req)
   const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'time')
+  if (featureDenied) return featureDenied
   if (!userId) return NextResponse.json({ error: 'No user' }, { status: 400 })
 
   const body = await req.json().catch(() => null) as {

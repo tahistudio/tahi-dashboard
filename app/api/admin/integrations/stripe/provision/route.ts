@@ -6,6 +6,7 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import Stripe from 'stripe'
 import { stripeSecretKey } from '@/lib/stripe-key'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,6 +49,9 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  const database = await db()
+  const accessDenied = await requireAccessToOrg(database, userId, body.orgId)
+  if (accessDenied) return accessDenied
   const stripe = getStripe()
   if (!stripe) {
     return NextResponse.json({
@@ -55,8 +59,6 @@ export async function POST(req: NextRequest) {
       error: 'STRIPE_SECRET_KEY not configured',
     }, { status: 503 })
   }
-
-  const database = await db()
 
   // Check if org already has a Stripe customer
   const [org] = await database
@@ -126,12 +128,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 })
   }
 
+  const database = await db()
+  const [target] = await database.select({ orgId: schema.invoices.orgId })
+    .from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).limit(1)
+  const accessDenied = await requireAccessToOrg(database, userId, target?.orgId)
+  if (accessDenied) return accessDenied
   const stripe = getStripe()
   if (!stripe) {
     return NextResponse.json({ payUrl: null, error: 'Stripe not configured' }, { status: 503 })
   }
 
-  const database = await db()
   const [invoice] = await database
     .select({ stripeInvoiceId: schema.invoices.stripeInvoiceId })
     .from(schema.invoices)

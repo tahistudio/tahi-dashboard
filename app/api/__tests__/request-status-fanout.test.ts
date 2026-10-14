@@ -1,3 +1,5 @@
+// Business fixtures grant the owning feature; real scoped-seat gates are covered by nested-client-scope-sqlite.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn(async () => null) }))
 /**
  * What a status change tells the client, from both PATCH doors.
  *

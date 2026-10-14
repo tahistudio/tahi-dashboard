@@ -1552,3 +1552,32 @@ apps/recorder-tray/.build-logs/round4-build.log, round4-tests.log and
 round4-tests.trx. Independent source QA and source UX review passed with no
 findings. No code changed after the successful gate. No folder publish,
 installation, recorder launch or real-call proof is claimed for this follow-up.
+
+
+## 2026-10-14, next-20 batch D, T1.6 admin route audit (uncommitted)
+
+Started clean on chore/next20-n20d at 749b56b4. Audited all 419 admin route
+files and 593 exported HTTP handlers. Baseline methods: 148 scoped, 164
+intentional internal/admin, 281 gaps across 215 files. After repairs: 303
+scoped, 290 intentional internal/admin, zero remaining gaps in this inventory.
+309 handlers were repaired or additionally tightened. Full method inventory,
+all handler file:line anchors, helper changes and 22 explicit exceptions are
+in docs/superpowers/audits/2026-10-14-t1-6-route-audit.md.
+
+Fixed owning feature/role gates, SQL scope before LIMIT, source/destination
+and polymorphic parent checks, malformed message/file/contact/time rows,
+permission grants (P3-7), current timer access, and manual workspace jobs.
+Admin/super_admin/api-service behavior is preserved, including orphan timers
+and legacy unrestricted studio messages. Recorded MCP actors never authorize.
+No schema, migration, production data, TASKS.md or STATUS.md changes.
+
+Final fail-closed local gate passed: type-check zero errors; CI=1 npm run lint
+zero errors (79 warnings); runner ESLint clean; sandbox Vitest
+83 files and 1715 tests passed in 38.31 seconds. Native esbuild/Cloudflare
+dev-proxy startup hit sandbox EPERM, so the tracked worker-thread/TypeScript
+runner is scripts/run-vitest-sandbox.mjs and lint uses the existing CI skip.
+All new security assertions run actual permission and SQLite guards, with
+legacy business fixtures updated to state their intended admin/feature scope.
+Independent source review cleared the final diff. No commit, push, build,
+deploy or live production/browser proof is claimed. Integrating batch still
+owns merge/deploy and real scoped-seat proof; this work remains uncommitted.

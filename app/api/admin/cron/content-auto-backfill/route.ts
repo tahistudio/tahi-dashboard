@@ -1,3 +1,4 @@
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 /**
  * POST /api/admin/cron/content-auto-backfill
  *
@@ -50,8 +51,10 @@ async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 export async function POST(req: NextRequest) {
   const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
-    const { orgId } = await getRequestAuth(req)
+    const { orgId, userId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const roleDenied = await requireStudioAdmin({ userId, orgId }, 'settings')
+    if (roleDenied) return roleDenied
   }
 
   const startedAt = Date.now()

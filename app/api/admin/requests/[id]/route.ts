@@ -1,3 +1,6 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { attributedUserId } from '@/lib/mcp-actor'
 import { NextRequest, NextResponse } from 'next/server'
@@ -20,6 +23,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -95,7 +100,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     ? new Map((await drizzle.select({ id: schema.teamMembers.id, name: schema.teamMembers.name, avatar: schema.teamMembers.avatarUrl }).from(schema.teamMembers).where(inArray(schema.teamMembers.id, memberIds))).map(m => [m.id, m]))
     : new Map()
   const contactMap = contactIds.length
-    ? new Map((await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(inArray(schema.contacts.id, contactIds))).map(c => [c.id, c]))
+    ? new Map((await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(and(inArray(schema.contacts.id, contactIds), eq(schema.contacts.orgId, request.orgId)))).map(c => [c.id, c]))
     : new Map()
 
   const participants = participantRows.map(p => ({
@@ -126,7 +131,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     })
     .from(schema.requests)
     .leftJoin(schema.teamMembers, eq(schema.requests.assigneeId, schema.teamMembers.id))
-    .where(eq(schema.requests.parentRequestId, id))
+    .where(and(eq(schema.requests.parentRequestId, id), eq(schema.requests.orgId, request.orgId)))
     .orderBy(asc(schema.requests.subPosition), asc(schema.requests.createdAt))
 
   // Parent (if this request has one)
@@ -135,11 +140,13 @@ export async function GET(req: NextRequest, { params }: Params) {
     const [p] = await drizzle
       .select({ id: schema.requests.id, title: schema.requests.title, requestNumber: schema.requests.requestNumber })
       .from(schema.requests)
-      .where(eq(schema.requests.id, request.parentRequestId))
+      .where(and(eq(schema.requests.id, request.parentRequestId), eq(schema.requests.orgId, request.orgId)))
       .limit(1)
     parent = p ?? null
   }
 
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
   // Unread count — messages created after this user's lastReadAt on this request.
   let unreadCount = 0
   if (userId) {
@@ -159,6 +166,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       .where(and(
         eq(schema.messages.requestId, id),
         gt(schema.messages.createdAt, since),
+        scope.kind === 'all' ? undefined : orgColumnInScope(schema.messages.orgId, rowOrgIds),
       ))
     unreadCount = Number(cnt?.n ?? 0)
   }
@@ -216,6 +224,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const body = await req.json() as RequestPatchInput
@@ -242,6 +252,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()

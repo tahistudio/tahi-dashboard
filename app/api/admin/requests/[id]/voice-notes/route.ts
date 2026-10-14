@@ -1,3 +1,6 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -30,6 +33,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
   const database = await db()
@@ -38,11 +43,13 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await guardRequestAccess(drizzle, userId, requestId)
   if (denied) return denied
 
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
   // Get voice notes for messages belonging to this request
   const messages = await drizzle
     .select({ id: schema.messages.id })
     .from(schema.messages)
-    .where(eq(schema.messages.requestId, requestId))
+    .where(and(eq(schema.messages.requestId, requestId), scope.kind === 'all' ? undefined : orgColumnInScope(schema.messages.orgId, rowOrgIds)))
 
   const messageIds = messages.map(m => m.id)
   if (messageIds.length === 0) {
@@ -68,6 +75,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
   const body = await req.json().catch(() => null) as {
@@ -89,12 +98,15 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // The message has to be on the request in the path, or a note could be
   // hung off another client's message through an in-scope request id.
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
   const [message] = await drizzle
     .select({ id: schema.messages.id })
     .from(schema.messages)
     .where(and(
       eq(schema.messages.id, body.messageId),
       eq(schema.messages.requestId, requestId),
+      scope.kind === 'all' ? undefined : orgColumnInScope(schema.messages.orgId, rowOrgIds),
     ))
     .limit(1)
   if (!message) {

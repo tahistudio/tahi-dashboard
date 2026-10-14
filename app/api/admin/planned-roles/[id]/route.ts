@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -12,10 +13,12 @@ interface RouteContext {
 
 // PATCH /api/admin/planned-roles/[id]
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'team')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   const body = await req.json() as {
@@ -52,10 +55,12 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
 // DELETE /api/admin/planned-roles/[id]
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'team')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1

@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/requests/[id]/reads
  *
@@ -30,6 +31,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   const auth = await getRequestAuth(req)
   const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
   if (!userId) return NextResponse.json({ error: 'No user' }, { status: 400 })
   // The read cursor belongs to the person behind a worker MCP call.
   const readerId = attributedUserId(auth) ?? userId
@@ -80,6 +83,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 export async function GET(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -109,7 +114,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const contactRows = clerkIds.length > 0 ? await drizzle
     .select({ clerkUserId: schema.contacts.clerkUserId, name: schema.contacts.name })
     .from(schema.contacts)
-    .where(inArray(schema.contacts.clerkUserId, clerkIds)) : []
+    .where(and(inArray(schema.contacts.clerkUserId, clerkIds), eq(schema.contacts.orgId, request.orgId))) : []
   const memberRows = clerkIds.length > 0 ? await drizzle
     .select({ clerkUserId: schema.teamMembers.clerkUserId, name: schema.teamMembers.name })
     .from(schema.teamMembers)

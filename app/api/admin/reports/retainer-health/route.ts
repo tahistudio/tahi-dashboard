@@ -1,3 +1,5 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -33,6 +35,7 @@ export async function GET(req: NextRequest) {
   if (featureDenied) return featureDenied
 
   const drizzle = (await db()) as D1
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   // Apply team-member scoping so a restricted PM only sees their clients here
   const scope = await getOrgScope(drizzle, userId)
@@ -77,6 +80,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN subscriptions s
         ON s.org_id = o.id AND s.status = 'active'
       WHERE o.status NOT IN ('archived', 'churned', 'completed')
+        AND ${internalOrgFilter(orgScope, sql`o.id`)}
     `)
   } catch {
     // billing_model / retainer_end_date columns don't exist yet (pre-0016)
@@ -89,6 +93,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN subscriptions s
         ON s.org_id = o.id AND s.status = 'active'
       WHERE o.status NOT IN ('archived', 'churned', 'completed')
+        AND ${internalOrgFilter(orgScope, sql`o.id`)}
     `)
   }
 
@@ -127,26 +132,26 @@ export async function GET(req: NextRequest) {
     drizzle
       .select({ orgId: schema.requests.orgId, c: sql<number>`COUNT(*)`.as('c') })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         inArray(schema.requests.orgId, orgIds),
         sql`${schema.requests.status} NOT IN ('delivered', 'archived', 'cancelled')`,
-      ))
+      ), internalOrgFilter(orgScope, schema.requests.orgId)))
       .groupBy(schema.requests.orgId),
     drizzle
       .select({ orgId: schema.requests.orgId, c: sql<number>`COUNT(*)`.as('c') })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         inArray(schema.requests.orgId, orgIds),
         gte(schema.requests.createdAt, d30),
-      ))
+      ), internalOrgFilter(orgScope, schema.requests.orgId)))
       .groupBy(schema.requests.orgId),
     drizzle
       .select({ orgId: schema.requests.orgId, c: sql<number>`COUNT(*)`.as('c') })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         inArray(schema.requests.orgId, orgIds),
         gte(schema.requests.createdAt, d90),
-      ))
+      ), internalOrgFilter(orgScope, schema.requests.orgId)))
       .groupBy(schema.requests.orgId),
   ])
 

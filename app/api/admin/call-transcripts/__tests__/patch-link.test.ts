@@ -1,3 +1,11 @@
+// Keep the queue-backed business fixture scope driven by its explicit allow/deny ids, without unrelated permission-table reads.
+vi.mock('@/lib/access-scope', async () => {
+  const { resolveAccessScoping } = await import('@/lib/access-scoping')
+  return { scopedOrgIds: async (auth: { userId: string | null }) => {
+    const ids = await resolveAccessScoping({} as never, auth.userId)
+    return ids === null ? { kind: 'all' } : ids.length ? { kind: 'some', orgIds: ids } : { kind: 'none' }
+  } }
+})
 /**
  * PATCH /api/admin/call-transcripts/[id]: attaching parked call notes.
  *

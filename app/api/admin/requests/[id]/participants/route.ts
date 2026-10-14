@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * /api/admin/requests/[id]/participants
  *
@@ -49,6 +50,8 @@ const TEAM_ROLES: readonly RequestParticipantRole[] = ['pm', 'assignee', 'follow
 export async function GET(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -77,7 +80,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     ? await drizzle.select({ id: schema.teamMembers.id, name: schema.teamMembers.name, avatar: schema.teamMembers.avatarUrl }).from(schema.teamMembers).where(inList(schema.teamMembers.id, memberIds))
     : []
   const contacts = contactIds.length
-    ? await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(inList(schema.contacts.id, contactIds))
+    ? await drizzle.select({ id: schema.contacts.id, name: schema.contacts.name, email: schema.contacts.email }).from(schema.contacts).where(and(inList(schema.contacts.id, contactIds), eq(schema.contacts.orgId, request.orgId)))
     : []
 
   const memberMap = new Map(members.map(m => [m.id, m]))
@@ -104,6 +107,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = auth
   const actorUserId = attributedUserId(auth)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const body = await req.json().catch(() => null) as {
@@ -146,6 +151,14 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!request) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
   if (denied) return denied
+
+  if (body.participantType === 'contact') {
+    const [contact] = await drizzle.select({ orgId: schema.contacts.orgId }).from(schema.contacts).where(eq(schema.contacts.id, body.participantId)).limit(1)
+    if (!contact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 })
+    const contactDenied = await requireAccessToOrg(drizzle, userId, contact?.orgId)
+    if (contactDenied) return contactDenied
+    if (contact.orgId !== request.orgId) return NextResponse.json({ error: 'Contact must belong to the request client' }, { status: 400 })
+  }
 
   // If role is 'pm', soft-delete any existing active PM for this request first.
   if (body.role === 'pm') {

@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import { permissionSqlite } from './helpers/permission-sqlite'
 
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
+vi.mock('@clerk/nextjs/server', () => ({ clerkClient: vi.fn(), auth: vi.fn(), currentUser: vi.fn() }))
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn(),
   isTahiAdmin: (orgId: string | null) => orgId === 'org_tahi',
@@ -27,6 +28,48 @@ import { PUT as reorder } from '@/app/api/admin/tracks/[trackId]/reorder/route'
 import { GET as delivery } from '@/app/api/admin/engagements/delivery-status/route'
 import { GET as offTrack } from '@/app/api/admin/engagements/off-track/route'
 import { GET as audit } from '@/app/api/admin/audit/route'
+import * as forms from '@/app/api/admin/forms/route'
+import { GET as resolveForm } from '@/app/api/admin/forms/resolve/route'
+import * as form from '@/app/api/admin/forms/[id]/route'
+import * as columns from '@/app/api/admin/kanban-columns/route'
+import * as column from '@/app/api/admin/kanban-columns/[id]/route'
+import * as templates from '@/app/api/admin/task-templates/route'
+import * as template from '@/app/api/admin/task-templates/[id]/route'
+import { POST as fromTemplate } from '@/app/api/admin/tasks/from-template/route'
+import { GET as subscriptions } from '@/app/api/admin/subscriptions/route'
+import * as subscription from '@/app/api/admin/subscriptions/[id]/route'
+import { POST as changeCycle } from '@/app/api/admin/subscriptions/[id]/change-cycle/route'
+import { POST as stampInvoiced } from '@/app/api/admin/time/stamp-invoiced/route'
+import * as timers from '@/app/api/admin/timers/route'
+import * as timer from '@/app/api/admin/timers/[id]/route'
+import { POST as pingTimer } from '@/app/api/admin/timers/ping/route'
+import { POST as normalizeTimes } from '@/app/api/admin/calls/normalize-times/route'
+import { GET as views } from '@/app/api/admin/views/route'
+import { GET as sectionViews } from '@/app/api/admin/views/sections/route'
+import { GET as transcripts } from '@/app/api/admin/call-transcripts/route'
+import * as transcript from '@/app/api/admin/call-transcripts/[id]/route'
+import { GET as callIndex } from '@/app/api/admin/calls/index/route'
+import { GET as transcriptCalls } from '@/app/api/admin/call-transcripts/calls/route'
+import * as conversations from '@/app/api/admin/conversations/route'
+import * as conversationMessages from '@/app/api/admin/conversations/[id]/messages/route'
+import * as taskBlockers from '@/app/api/admin/tasks/[id]/blockers/route'
+import * as taskDependencies from '@/app/api/admin/tasks/[id]/dependencies/route'
+import { GET as blockerSearch } from '@/app/api/admin/blockers/search/route'
+import * as requestSteps from '@/app/api/admin/requests/[id]/steps/route'
+import * as requestStep from '@/app/api/admin/requests/[id]/steps/[stepId]/route'
+import * as requestParticipants from '@/app/api/admin/requests/[id]/participants/route'
+import { POST as bulkAssign } from '@/app/api/admin/requests/bulk-assign/route'
+import { GET as subRequests } from '@/app/api/admin/requests/[id]/sub-requests/route'
+import { PATCH as reorderSubRequests } from '@/app/api/admin/requests/[id]/sub-requests/reorder/route'
+import { GET as requestDetail } from '@/app/api/admin/requests/[id]/route'
+import { GET as timeEntryList } from '@/app/api/admin/time-entries/route'
+import { GET as requestTimeEntryList } from '@/app/api/admin/requests/[id]/time-entries/route'
+import { INTERNAL_ORG_ID } from '@/lib/internal-org'
+import * as requestMessages from '@/app/api/admin/requests/[id]/messages/route'
+import { GET as requestFiles } from '@/app/api/admin/requests/[id]/files/route'
+import * as requestVoiceNotes from '@/app/api/admin/requests/[id]/voice-notes/route'
+import { loadThreadMessages, loadInboxThreads } from '@/lib/messages-store'
+import { scopedOrgIds } from '@/lib/access-scope'
 
 const A = 'org-a'
 const B = 'org-b'
@@ -38,7 +81,10 @@ const TABLES = [
   schema.roles, schema.teamMemberRoles, schema.permissions, schema.rolePermissions,
   schema.featureVisibility, schema.projectSchedules, schema.scheduleRows,
   schema.projects, schema.timeEntries, schema.invoices, schema.pipelineStages,
-  schema.auditLog,
+  schema.auditLog, schema.requestForms, schema.kanbanColumns, schema.taskTemplates, schema.activeTimers,
+  schema.shareViewEvents, schema.shareSectionViews, schema.proposals, schema.contractDocuments, schema.callTranscripts,
+  schema.conversations, schema.conversationParticipants, schema.messages, schema.meetingRecordings, schema.scheduledCalls, schema.workBlockers, schema.requestSteps, schema.requestParticipants, schema.requestReads,
+  schema.files, schema.voiceNotes,
 ]
 let fixture: ReturnType<typeof permissionSqlite>
 
@@ -79,13 +125,17 @@ beforeEach(() => {
   fixture.insert(schema.teamMembers, { id: 'super', clerk_user_id: 'user_super', name: 'Super admin', role: 'admin' })
   fixture.insert(schema.teamMemberRoles, { id: 'member-role', team_member_id: 'member', role_id: 'role-member', ended_at: null })
   fixture.insert(schema.teamMemberRoles, { id: 'super-role', team_member_id: 'super', role_id: 'role-super', ended_at: null })
-  for (const resource of ['organisations', 'requests', 'schedules', 'deals', 'leads']) {
+  for (const resource of ['organisations', 'requests', 'schedules', 'deals', 'leads', 'settings', 'tasks', 'billing', 'time_entries', 'calls', 'proposals', 'contracts', 'invoices']) {
     fixture.insert(schema.permissions, { id: resource, resource, action: 'view' })
     fixture.insert(schema.rolePermissions, { id: resource, role_id: 'role-member', permission_id: resource })
   }
   fixture.insert(schema.teamMemberAccess, { id: 'scope', team_member_id: 'member', role: 'task_handler', scope_type: 'specific_clients' })
   fixture.insert(schema.teamMemberAccessOrgs, { access_id: 'scope', org_id: A })
   for (const [org, suffix] of [[A, 'a'], [B, 'b']] as const) {
+    fixture.insert(schema.requestForms, { id: `form-${suffix}`, org_id: org, name: suffix, questions: '[]' })
+    fixture.insert(schema.kanbanColumns, { id: `column-${suffix}`, org_id: org, label: suffix, status_value: 'custom', position: 0 })
+    fixture.insert(schema.taskTemplates, { id: `template-${suffix}`, org_id: org, name: suffix, type: 'client_task', subtasks: '[]' })
+    fixture.insert(schema.proposals, { id: `proposal-${suffix}`, org_id: org, title: suffix })
     fixture.insert(schema.organisations, { id: org, name: org, status: 'active', billing_model: 'manual', custom_mrr: null })
     fixture.insert(schema.contacts, { id: `contact-${suffix}`, org_id: org, name: suffix, email: `${suffix}@example.test` })
     fixture.insert(schema.brands, { id: `brand-${suffix}`, org_id: org, name: suffix })
@@ -116,7 +166,6 @@ const CASES: Array<{ name: string; method: string; handler: IdHandler; feature: 
   { name: 'tracks GET', method: 'GET', handler: tracks.GET, feature: 'clients', id: suffix => `org-${suffix}` },
   { name: 'tracks POST', method: 'POST', handler: tracks.POST, feature: 'clients', id: suffix => `org-${suffix}`, body: { subscriptionId: 'sub-a', planType: 'maintain' } },
   { name: 'pm GET', method: 'GET', handler: pm.GET, feature: 'clients', id: suffix => `org-${suffix}` },
-  { name: 'pm PUT', method: 'PUT', handler: pm.PUT, feature: 'clients', id: suffix => `org-${suffix}`, body: { pmId: 'member' } },
   { name: 'auto-derive POST', method: 'POST', handler: derive.POST, feature: 'clients', id: suffix => `org-${suffix}`, body: { clearOverrides: { billingModel: true } } },
   { name: 'brands GET', method: 'GET', handler: brands.GET, feature: 'clients', id: suffix => `brand-${suffix}` },
   { name: 'brands PATCH', method: 'PATCH', handler: brands.PATCH, feature: 'clients', id: suffix => `brand-${suffix}`, body: { name: 'Updated' } },
@@ -392,5 +441,451 @@ describe('audit requires permission management', () => {
     })
     expect((await audit(req('GET'))).status).toBe(200)
     expect((await contacts.GET(req('GET'), { params: Promise.resolve({ id: B }) })).status).toBe(200)
+  })
+})
+
+describe('T1.6 permission-granted seats still require the target client', () => {
+  it.each([
+    { handler: forms.GET, query: '?orgId=org-b', method: 'GET' },
+    { handler: resolveForm, query: '?orgId=org-b', method: 'GET' },
+    { handler: templates.GET, query: '?orgId=org-b', method: 'GET' },
+    { handler: columns.GET, query: '?orgId=org-b', method: 'GET' },
+    { handler: forms.POST, method: 'POST', body: { name: 'Foreign', orgId: B } },
+    { handler: templates.POST, method: 'POST', body: { name: 'Foreign', orgId: B, type: 'client_task' } },
+    { handler: columns.POST, method: 'POST', body: { label: 'Foreign', orgId: B } },
+    { handler: columns.PATCH, method: 'PATCH', body: { positions: [{ id: 'column-b', position: 1 }] } },
+    { handler: fromTemplate, method: 'POST', body: { templateId: 'template-b', orgId: A } },
+    { handler: timers.POST, method: 'POST', body: { requestId: 'request-b' } },
+    { handler: timers.POST, method: 'POST', body: { taskId: 'task-b' } },
+    { handler: timers.POST, method: 'POST', body: { orgId: B } },
+    { handler: stampInvoiced, method: 'POST', body: { orgId: B, before: '2026-10-14' } },
+  ])('refuses $method on a foreign client before writing', async scenario => {
+    const before = dataState()
+    const response = await scenario.handler(req(scenario.method, scenario.body, scenario.query))
+    expect(response.status).toBe(403)
+    expect(dataState()).toEqual(before)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it.each([
+    { handler: form.PATCH, id: 'form-b', method: 'PATCH', body: { name: 'Foreign' } },
+    { handler: form.DELETE, id: 'form-b', method: 'DELETE' },
+    { handler: column.PATCH, id: 'column-b', method: 'PATCH', body: { label: 'Foreign' } },
+    { handler: column.DELETE, id: 'column-b', method: 'DELETE' },
+    { handler: template.PATCH, id: 'template-b', method: 'PATCH', body: { name: 'Foreign' } },
+    { handler: template.DELETE, id: 'template-b', method: 'DELETE' },
+    { handler: subscription.GET, id: 'sub-b', method: 'GET' },
+    { handler: subscription.PUT, id: 'sub-b', method: 'PUT', body: { discountPercent: 1 } },
+    { handler: subscription.DELETE, id: 'sub-b', method: 'DELETE' },
+    { handler: changeCycle, id: 'sub-b', method: 'POST', body: { newCycle: 'quarterly' } },
+  ])('refuses $method for stored foreign target $id', async scenario => {
+    const before = dataState()
+    const response = await scenario.handler(req(scenario.method, scenario.body), { params: Promise.resolve({ id: scenario.id }) })
+    expect(response.status).toBe(403)
+    expect(dataState()).toEqual(before)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('does not move a permitted form to a foreign client', async () => {
+    const before = dataState()
+    expect((await form.PATCH(req('PATCH', { orgId: B }), { params: Promise.resolve({ id: 'form-a' }) })).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('filters the subscription index before returning any client names', async () => {
+    const response = await subscriptions(req('GET'))
+    expect(response.status).toBe(200)
+    expect((await response.json() as { items: Array<{ orgId: string }> }).items.map(item => item.orgId)).toEqual([A])
+  })
+
+  it('requires permission management to grant or clear a project manager rule', async () => {
+    for (const pmId of ['member', null]) {
+      const before = dataState()
+      expect((await pm.PUT(req('PUT', { pmId }), { params: Promise.resolve({ id: A }) })).status).toBe(403)
+      expect(dataState()).toEqual(before)
+    }
+    for (const userId of ['user_super', 'api-service']) {
+      vi.mocked(getRequestAuth).mockResolvedValue({ userId, orgId: 'org_tahi', sessionId: 'test' })
+      expect((await pm.PUT(req('PUT', { pmId: 'member' }), { params: Promise.resolve({ id: A }) })).status).toBe(200)
+    }
+  })
+
+  it('requires a real admin role for workspace-wide call-time repair', async () => {
+    const before = dataState()
+    expect((await normalizeTimes(req('POST', { dryRun: true }))).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it.each([views, sectionViews])('refuses analytics on a foreign artifact and unknown resource kinds', async handler => {
+    expect((await handler(req('GET', undefined, '?resourceType=proposal&resourceId=proposal-b'))).status).toBe(403)
+    expect((await handler(req('GET', undefined, '?resourceType=unrecognised&resourceId=proposal-b'))).status).toBe(400)
+    const response = await handler(req('GET', undefined, '?resourceType=proposal&resourceId=proposal-a'))
+    expect(response.status).toBe(200)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it.each([
+    { handler: timers.GET, method: 'GET' },
+    { handler: pingTimer, method: 'POST' },
+  ])('refuses $method for a timer after its client scope is revoked', async scenario => {
+    fixture.insert(schema.activeTimers, { id: 'timer-b', user_id: 'user_member', request_id: 'request-b', org_id: B, started_at: '2026-10-14T00:00:00Z' })
+    const before = dataState()
+    expect((await scenario.handler(req(scenario.method))).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it.each([
+    { handler: timer.PATCH, method: 'PATCH', body: { action: 'pause' } },
+    { handler: timer.DELETE, method: 'DELETE' },
+  ])('refuses $method against a stored foreign timer', async scenario => {
+    fixture.insert(schema.activeTimers, { id: 'timer-b', user_id: 'user_member', request_id: 'request-b', org_id: B, started_at: '2026-10-14T00:00:00Z' })
+    const before = dataState()
+    expect((await scenario.handler(req(scenario.method, scenario.body), { params: Promise.resolve({ id: 'timer-b' }) })).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('does not return or auto-stop an existing foreign timer when starting permitted work', async () => {
+    fixture.insert(schema.activeTimers, { id: 'timer-b', user_id: 'user_member', request_id: 'request-b', org_id: B, started_at: '2026-10-14T00:00:00Z' })
+    const before = dataState()
+    expect((await timers.POST(req('POST', { requestId: 'request-a' }, '?confirmed=true'))).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('checks a timer client inherited from an org-less client task request', async () => {
+    fixture.insert(schema.tasks, { id: 'inherited-task', org_id: null, type: 'internal_client_task', request_id: 'request-b' })
+    const before = dataState()
+    expect((await timers.POST(req('POST', { taskId: 'inherited-task' }))).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('filters linked transcript clients before LIMIT, including conflicting call parents', async () => {
+    for (const suffix of ['a', 'b']) fixture.insert(schema.callTranscripts, {
+      id: `transcript-${suffix}`, call_kind: 'discovery', call_id: `call-${suffix}`, source: 'drive', external_id: suffix,
+      text: suffix, received_at: '2026-10-13T00:00:00Z',
+    })
+    for (let index = 0; index < 25; index++) fixture.insert(schema.callTranscripts, {
+      id: `foreign-transcript-${index}`, call_kind: 'discovery', call_id: 'call-b', source: 'drive', external_id: `foreign-${index}`,
+      text: 'Foreign', received_at: '2099-01-01T00:00:00Z',
+    })
+    const response = await transcripts(req('GET', undefined, '?limit=1'))
+    expect(response.status).toBe(200)
+    expect((await response.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toEqual(['transcript-a'])
+    await fixture.database.update(schema.discoveryCalls).set({ requestId: 'request-b' }).where(eq(schema.discoveryCalls.id, 'call-a'))
+    expect((await transcripts(req('GET', undefined, '?limit=1'))).status).toBe(200)
+    expect((await (await transcripts(req('GET', undefined, '?limit=1'))).json() as { items: unknown[] }).items).toEqual([])
+    expect(fixture.errors).toEqual([])
+  })
+
+  it.each([callIndex, transcriptCalls])('filters every parent of discovery call list rows', async handler => {
+    await fixture.database.update(schema.discoveryCalls).set({ requestId: 'request-b' }).where(eq(schema.discoveryCalls.id, 'call-a'))
+    const response = await handler(req('GET', undefined, '?since=2026-01-01&until=2027-01-01'))
+    expect(response.status).toBe(200)
+    expect((await response.json() as { items: unknown[] }).items).toEqual([])
+    expect(fixture.errors).toEqual([])
+  })
+
+  it.each(['GET', 'PATCH'] as const)('refuses transcript %s when any source call parent is foreign', async method => {
+    fixture.insert(schema.callTranscripts, { id: 'transcript-a', call_kind: 'discovery', call_id: 'call-a', source: 'drive', external_id: 'a', text: 'Source' })
+    await fixture.database.update(schema.discoveryCalls).set({ requestId: 'request-b' }).where(eq(schema.discoveryCalls.id, 'call-a'))
+    const before = dataState()
+    const response = await transcript[method](req(method, method === 'PATCH' ? { callKind: 'discovery', callId: 'call-a' } : undefined), { params: Promise.resolve({ id: 'transcript-a' }) })
+    expect(response.status).toBe(403)
+    expect(dataState()).toEqual(before)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('refuses attaching permitted notes to a call with a foreign parent', async () => {
+    fixture.insert(schema.callTranscripts, { id: 'transcript-a', source: 'drive', external_id: 'a', text: 'Source' })
+    await fixture.database.update(schema.discoveryCalls).set({ requestId: 'request-b' }).where(eq(schema.discoveryCalls.id, 'call-a'))
+    const before = dataState()
+    expect((await transcript.PATCH(req('PATCH', { callKind: 'discovery', callId: 'call-a' }), { params: Promise.resolve({ id: 'transcript-a' }) })).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('requires access to every contact added to a new conversation', async () => {
+    const before = dataState()
+    const response = await conversations.POST(req('POST', { type: 'group', visibility: 'internal', participantIds: [{ id: 'contact-b', type: 'contact' }] }))
+    expect(response.status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it.each(['GET', 'POST', 'PATCH'] as const)('refuses conversation message %s with a foreign linked request', async method => {
+    fixture.insert(schema.conversations, { id: 'conversation-a', org_id: A, request_id: 'request-b', type: 'request_thread', visibility: 'internal' })
+    fixture.insert(schema.conversationParticipants, { id: 'participation', conversation_id: 'conversation-a', participant_id: 'member', participant_type: 'team_member' })
+    const before = dataState()
+    const response = await conversationMessages[method](req(method, method === 'POST' ? { content: 'Denied' } : method === 'PATCH' ? { messageId: 'message-a' } : undefined), { params: Promise.resolve({ id: 'conversation-a' }) })
+    expect(response.status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('filters conversation requests before reading any message metadata', async () => {
+    fixture.insert(schema.conversations, { id: 'conversation-a', org_id: A, request_id: 'request-b', type: 'request_thread', visibility: 'internal' })
+    fixture.insert(schema.conversationParticipants, { id: 'participation', conversation_id: 'conversation-a', participant_id: 'member', participant_type: 'team_member' })
+    const response = await conversations.GET(req('GET'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ conversations: [] })
+    expect(fixture.errors).toEqual([])
+  })
+
+  it.each([taskBlockers.GET, taskDependencies.GET])('redacts request metadata when only the owning tasks feature is allowed', async handler => {
+    await fixture.database.update(schema.requests).set({ title: 'Hidden request title', requestNumber: 321 }).where(eq(schema.requests.id, 'request-a'))
+    fixture.insert(schema.workBlockers, { id: 'blocker', blocked_type: 'task', blocked_id: 'task-a', blocker_type: 'request', blocker_id: 'request-a' })
+    denyFeature('requests')
+    const response = await handler(req('GET'), { params: Promise.resolve({ id: 'task-a' }) })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { blockedBy: Array<{ otherTitle?: string; taskTitle?: string; otherRef?: string | null; otherOrgName?: string | null; ref?: string | null }> }
+    expect(body.blockedBy).toHaveLength(1)
+    expect(body.blockedBy[0].otherTitle ?? body.blockedBy[0].taskTitle).toBe("Another client's work")
+    expect(body.blockedBy[0].otherRef ?? body.blockedBy[0].ref ?? null).toBeNull()
+    expect(JSON.stringify(body)).not.toContain('Hidden request title')
+    expect(JSON.stringify(body)).not.toContain('321')
+    expect(JSON.stringify(body)).not.toContain(A)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('keeps the tasks picker available while excluding a denied request feature', async () => {
+    await fixture.database.update(schema.requests).set({ title: 'Matching request' }).where(eq(schema.requests.id, 'request-a'))
+    await fixture.database.update(schema.tasks).set({ title: 'Matching task' }).where(eq(schema.tasks.id, 'task-a'))
+    denyFeature('requests')
+    const response = await blockerSearch(req('GET', undefined, '?q=Matching'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ candidates: [{ type: 'task', id: 'task-a', label: 'Matching task' }] })
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('preserves full blocker metadata for the super admin and service caller', async () => {
+    await fixture.database.update(schema.requests).set({ title: 'Allowed request title', requestNumber: 321 }).where(eq(schema.requests.id, 'request-b'))
+    fixture.insert(schema.workBlockers, { id: 'blocker', blocked_type: 'task', blocked_id: 'task-a', blocker_type: 'request', blocker_id: 'request-b' })
+    for (const userId of ['user_super', 'api-service']) {
+      vi.mocked(getRequestAuth).mockResolvedValue({ userId, orgId: 'org_tahi', sessionId: 'test' })
+      const response = await taskBlockers.GET(req('GET'), { params: Promise.resolve({ id: 'task-a' }) })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ blockedBy: [{ otherTitle: 'Allowed request title', otherOrgName: B }] })
+    }
+  })
+
+  it('refuses single and bulk request participant writes naming foreign contacts', async () => {
+    const before = dataState()
+    expect((await requestParticipants.POST(req('POST', { participantId: 'contact-b', participantType: 'contact', role: 'follower' }), { params: Promise.resolve({ id: 'request-a' }) })).status).toBe(403)
+    expect((await bulkAssign(req('POST', { requestIds: ['request-a'], participants: [{ participantId: 'contact-b', participantType: 'contact', role: 'follower' }] }))).status).toBe(403)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('redacts foreign contact metadata and foreign parent/child request titles', async () => {
+    fixture.insert(schema.requestParticipants, { id: 'foreign-contact', request_id: 'request-a', participant_id: 'contact-b', participant_type: 'contact', role: 'follower' })
+    await fixture.database.update(schema.requests).set({ parentRequestId: 'request-b' }).where(eq(schema.requests.id, 'request-a'))
+    await fixture.database.update(schema.requests).set({ parentRequestId: 'request-a', title: 'Foreign child title' }).where(eq(schema.requests.id, 'request-b'))
+    const response = await requestDetail(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ parent: null, subRequests: [], participants: [{ name: null, email: null }] })
+    expect(await (await requestParticipants.GET(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })).json()).toMatchObject({ participants: [{ name: null, email: null }] })
+    expect(await (await subRequests(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })).json()).toEqual({ subRequests: [] })
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('does not reorder a foreign request that carries a permitted parent id', async () => {
+    await fixture.database.update(schema.requests).set({ parentRequestId: 'request-a', subPosition: 7 }).where(eq(schema.requests.id, 'request-b'))
+    expect((await reorderSubRequests(req('PATCH', { order: [{ id: 'request-b', subPosition: 1 }] }), { params: Promise.resolve({ id: 'request-a' }) })).status).toBe(200)
+    expect(fixture.rows(schema.requests).find(row => row.id === 'request-b')?.sub_position).toBe(7)
+  })
+
+  it('does not disclose a foreign contact name from a legacy handoff pointer', async () => {
+    await fixture.database.update(schema.contacts).set({ name: 'Hidden foreign contact' }).where(eq(schema.contacts.id, 'contact-b'))
+    await fixture.database.update(schema.requests).set({ waitingOnContactId: 'contact-b', waitingReason: 'approval', waitingSince: '2026-10-14T00:00:00Z' }).where(eq(schema.requests.id, 'request-a'))
+    const response = await requestDetail(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { request: { waitingOn: { contactName: string | null } } }
+    expect(body.request.waitingOn.contactName).toBeNull()
+    expect(JSON.stringify(body)).not.toContain('Hidden foreign contact')
+  })
+
+  it('refuses creating or moving a request step below another request parent', async () => {
+    fixture.insert(schema.requestSteps, { id: 'step-a', request_id: 'request-a', title: 'Allowed' })
+    fixture.insert(schema.requestSteps, { id: 'step-b', request_id: 'request-b', title: 'Foreign' })
+    const before = dataState()
+    expect((await requestSteps.POST(req('POST', { title: 'Invalid', parentStepId: 'step-b' }), { params: Promise.resolve({ id: 'request-a' }) })).status).toBe(404)
+    expect((await requestStep.PATCH(req('PATCH', { parentStepId: 'step-b' }), { params: Promise.resolve({ id: 'request-a', stepId: 'step-a' }) })).status).toBe(404)
+    expect(dataState()).toEqual(before)
+  })
+
+  it('keeps step-tree deletion inside the owning request even with a foreign child link', async () => {
+    fixture.insert(schema.requestSteps, { id: 'step-a', request_id: 'request-a', title: 'Allowed' })
+    fixture.insert(schema.requestSteps, { id: 'step-b', request_id: 'request-b', title: 'Foreign', parent_step_id: 'step-a' })
+    expect((await requestStep.DELETE(req('DELETE'), { params: Promise.resolve({ id: 'request-a', stepId: 'step-a' }) })).status).toBe(200)
+    expect(fixture.rows(schema.requestSteps).map(row => row.id)).toEqual(['step-b'])
+  })
+
+  it.each(['user_super', 'user_admin', 'api-service'])('keeps orphan timer reads, edits and deletion working for %s', async userId => {
+    if (userId === 'user_admin') {
+      fixture.insert(schema.roles, { id: 'role-admin', name: 'admin' })
+      fixture.insert(schema.teamMembers, { id: 'admin', clerk_user_id: userId, name: 'Admin', role: 'admin' })
+      fixture.insert(schema.teamMemberRoles, { id: 'admin-role', team_member_id: 'admin', role_id: 'role-admin', ended_at: null })
+    }
+    const owner = userId === 'api-service' ? 'user_member' : userId
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId, orgId: 'org_tahi', sessionId: 'test',
+      ...(userId === 'api-service' ? { mcpActor: { teamMemberId: 'member', clerkUserId: 'user_member', profile: 'full' as const } } : {}),
+    })
+    fixture.insert(schema.activeTimers, { id: 'orphan', user_id: owner, task_id: 'deleted-task', org_id: B, started_at: '2026-10-14T00:00:00Z' })
+    expect((await timers.GET(req('GET'))).status).toBe(200)
+    expect((await timer.PATCH(req('PATCH', { action: 'pause' }), { params: Promise.resolve({ id: 'orphan' }) })).status).toBe(200)
+    expect((await timer.DELETE(req('DELETE', undefined, '?action=discard'), { params: Promise.resolve({ id: 'orphan' }) })).status).toBe(200)
+    expect(fixture.rows(schema.activeTimers)).toEqual([])
+    expect((await timers.POST(req('POST', { taskId: 'deleted-task' }))).status).toBe(404)
+    expect(fixture.errors).toEqual([])
+  })
+
+  it.each(['requestId', 'taskId'] as const)('filters a foreign time row that carries an allowed %s', async field => {
+    fixture.insert(schema.timeEntries, { id: 'allowed-time', org_id: A, [field === 'requestId' ? 'request_id' : 'task_id']: field === 'requestId' ? 'request-a' : 'task-a', notes: 'Allowed time', hours: 1 })
+    fixture.insert(schema.timeEntries, { id: 'foreign-time', org_id: B, [field === 'requestId' ? 'request_id' : 'task_id']: field === 'requestId' ? 'request-a' : 'task-a', notes: 'Hidden foreign time', hours: 99 })
+    const response = await timeEntryList(req('GET', undefined, `?${field}=${field === 'requestId' ? 'request-a' : 'task-a'}`))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ items: [{ id: 'allowed-time', hours: 1 }], totalHours: 1 })
+    if (field === 'requestId') {
+      const nested = await requestTimeEntryList(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
+      expect(nested.status).toBe(200)
+      expect(await nested.json()).toMatchObject({ items: [{ id: 'allowed-time', hours: 1 }] })
+    }
+    expect(fixture.errors).toEqual([])
+  })
+
+  it('retains internal-task time while excluding foreign client entries, including an empty client scope', async () => {
+    fixture.insert(schema.tasks, { id: 'studio-task', org_id: null, type: 'tahi_internal' })
+    fixture.insert(schema.timeEntries, { id: 'studio-time', org_id: INTERNAL_ORG_ID, task_id: 'studio-task', notes: 'Studio time', hours: 1 })
+    fixture.insert(schema.timeEntries, { id: 'foreign-time', org_id: B, task_id: 'studio-task', notes: 'Hidden foreign time', hours: 99 })
+    await fixture.database.delete(schema.teamMemberAccessOrgs).where(eq(schema.teamMemberAccessOrgs.accessId, 'scope'))
+    const response = await timeEntryList(req('GET', undefined, '?taskId=studio-task'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ items: [{ id: 'studio-time', hours: 1 }], totalHours: 1 })
+    expect(fixture.errors).toEqual([])
+  })
+
+  describe('message and attachment row ownership', () => {
+    beforeEach(() => {
+      fixture.insert(schema.conversations, { id: 'conversation-a', org_id: A, request_id: 'request-a', type: 'request_thread', visibility: 'internal' })
+      fixture.insert(schema.conversationParticipants, { id: 'participation', conversation_id: 'conversation-a', participant_id: 'member', participant_type: 'team_member' })
+      for (const [id, org, internal] of [['allowed-message', A, false], ['internal-message', A, true], ['foreign-message', B, false]] as const) {
+        fixture.insert(schema.messages, { id, org_id: org, request_id: 'request-a', conversation_id: 'conversation-a', author_id: 'super', author_type: 'team_member', body: id, is_internal: internal ? 1 : 0, created_at: '2026-10-14T00:00:00Z' })
+        fixture.insert(schema.voiceNotes, { id: `voice-${id}`, message_id: id, storage_key: `${id}.webm` })
+      }
+      fixture.insert(schema.files, { id: 'allowed-file', org_id: A, request_id: 'request-a', message_id: 'allowed-message', filename: 'Allowed', storage_key: 'allowed-key' })
+      fixture.insert(schema.files, { id: 'foreign-file', org_id: B, request_id: 'request-a', message_id: 'allowed-message', filename: 'Hidden foreign file', storage_key: 'hidden-foreign-key' })
+    })
+
+    it('filters messages and attached file orgs while keeping internal request notes', async () => {
+      const response = await requestMessages.GET(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
+      expect(response.status).toBe(200)
+      const body = await response.json() as { items: Array<{ id: string; files: Array<{ id: string }> }> }
+      expect(body.items.map(item => item.id).sort()).toEqual(['allowed-message', 'internal-message'])
+      expect(body.items.find(item => item.id === 'allowed-message')?.files.map(file => file.id)).toEqual(['allowed-file'])
+      expect(JSON.stringify(body)).not.toContain('foreign-message')
+      expect(JSON.stringify(body)).not.toContain('hidden-foreign-key')
+      expect(fixture.errors).toEqual([])
+    })
+
+    it('filters request files, voice-note messages and unread metadata by their own org', async () => {
+      expect(await (await requestFiles(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })).json()).toMatchObject({ items: [{ id: 'allowed-file' }] })
+      const voices = await requestVoiceNotes.GET(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
+      const body = await voices.json() as { items: Array<{ id: string }> }
+      expect(body.items.map(item => item.id).sort()).toEqual(['voice-allowed-message', 'voice-internal-message'])
+      expect(await (await requestDetail(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })).json()).toMatchObject({ unreadCount: 2 })
+      expect(fixture.errors).toEqual([])
+    })
+
+    it('refuses a voice note write to a foreign message carrying an allowed request id', async () => {
+      const before = dataState()
+      expect((await requestVoiceNotes.POST(req('POST', { messageId: 'foreign-message', storageKey: 'new-key' }), { params: Promise.resolve({ id: 'request-a' }) })).status).toBe(404)
+      expect(dataState()).toEqual(before)
+    })
+
+    it('filters conversation messages before pagination and refuses mutations on a foreign message row', async () => {
+      const response = await conversationMessages.GET(req('GET'), { params: Promise.resolve({ id: 'conversation-a' }) })
+      expect(response.status).toBe(200)
+      const body = await response.json() as { items: Array<{ id: string }> }
+      expect(body.items.map(item => item.id).sort()).toEqual(['allowed-message', 'internal-message'])
+      const before = dataState()
+      expect((await conversationMessages.PATCH(req('PATCH', { messageId: 'foreign-message', deleted: true }), { params: Promise.resolve({ id: 'conversation-a' }) })).status).toBe(404)
+      expect(dataState()).toEqual(before)
+      expect(fixture.errors).toEqual([])
+    })
+
+    it('filters conversation index previews and unread counts by each message org', async () => {
+      await fixture.database.update(schema.messages).set({ createdAt: '2099-01-01T00:00:00Z' }).where(eq(schema.messages.id, 'foreign-message'))
+      const response = await conversations.GET(req('GET'))
+      expect(response.status).toBe(200)
+      const body = await response.json() as { conversations: Array<{ unreadCount: number; lastMessage: { body: string } }> }
+      expect(body.conversations[0].unreadCount).toBe(2)
+      expect(body.conversations[0].lastMessage.body).not.toBe('foreign-message')
+      expect(fixture.errors).toEqual([])
+    })
+
+    it('preserves studio-internal conversation messages stored under the Tahi org', async () => {
+      await fixture.database.update(schema.conversations).set({ orgId: null, requestId: null }).where(eq(schema.conversations.id, 'conversation-a'))
+      fixture.insert(schema.messages, { id: 'studio-message', org_id: 'org_tahi', conversation_id: 'conversation-a', author_id: 'member', author_type: 'team_member', body: 'Studio note', is_internal: 1 })
+      const response = await conversationMessages.GET(req('GET'), { params: Promise.resolve({ id: 'conversation-a' }) })
+      expect(response.status).toBe(200)
+      expect((await response.json() as { items: Array<{ id: string }> }).items.map(item => item.id).sort()).toEqual(['allowed-message', 'internal-message', 'studio-message'])
+      expect(fixture.errors).toEqual([])
+    })
+
+    it('holds the shared inbox thread reader to its resolved org before LIMIT', async () => {
+      for (let index = 0; index < 5; index++) fixture.insert(schema.messages, { id: `foreign-new-${index}`, org_id: B, request_id: 'request-a', author_id: 'member', author_type: 'team_member', body: 'Hidden newest message', created_at: '2099-01-01T00:00:00Z' })
+      const items = await loadThreadMessages(fixture.database, { source: 'request', id: 'request-a', orgId: A, viewer: { clerkUserId: 'user_member', domainId: 'member', userType: 'team_member' }, audience: 'studio', limit: 1 })
+      expect(items).toHaveLength(1)
+      expect(items[0].body).not.toContain('Hidden')
+      expect(items[0].body).not.toBe('foreign-message')
+      expect(fixture.errors).toEqual([])
+    })
+
+    it.each(['request', 'channel'] as const)('filters %s inbox preview rows by each message org', async source => {
+      if (source === 'channel') await fixture.database.update(schema.messages).set({ requestId: null }).where(eq(schema.messages.conversationId, 'conversation-a'))
+      await fixture.database.update(schema.messages).set({ createdAt: '2099-01-01T00:00:00Z', body: 'Hidden newest body' }).where(eq(schema.messages.id, 'foreign-message'))
+      const result = await loadInboxThreads(fixture.database, {
+        viewer: { clerkUserId: 'user_member', domainId: 'member', userType: 'team_member' },
+        scope: { orgIds: [A], brandIds: null, audience: 'studio' },
+        channelsByOrg: source === 'channel' ? new Map([[A, 'conversation-a']]) : new Map(),
+        orgNames: new Map([[A, A]]), now: new Date('2026-10-14T00:00:00Z'),
+      })
+      const thread = result.threads.find(item => item.source === source)
+      expect(thread?.unreadCount).toBe(2)
+      expect(JSON.stringify(thread)).not.toContain('Hidden newest body')
+      expect(fixture.errors).toEqual([])
+    })
+
+    it('does not expose foreign contact-author names on an allowed message or inbox preview', async () => {
+      await fixture.database.update(schema.contacts).set({ name: 'Hidden foreign author' }).where(eq(schema.contacts.id, 'contact-b'))
+      await fixture.database.update(schema.messages).set({ authorId: 'contact-b', authorType: 'contact', createdAt: '2099-01-01T00:00:00Z' }).where(eq(schema.messages.id, 'allowed-message'))
+      const viewer = { clerkUserId: 'user_member', domainId: 'member', userType: 'team_member' as const }
+      const items = await loadThreadMessages(fixture.database, { source: 'request', id: 'request-a', orgId: A, viewer, audience: 'studio' })
+      expect(items.find(item => item.id === 'allowed-message')?.authorName).toBeNull()
+      const inbox = await loadInboxThreads(fixture.database, { viewer, scope: { orgIds: [A], brandIds: null, audience: 'studio' }, channelsByOrg: new Map(), orgNames: new Map([[A, A]]), now: new Date('2026-10-14T00:00:00Z') })
+      expect(JSON.stringify(inbox)).not.toContain('Hidden foreign author')
+      expect(fixture.errors).toEqual([])
+    })
+
+    it('refuses posting an allowed request message into a foreign conversation', async () => {
+      fixture.insert(schema.conversations, { id: 'conversation-b', org_id: B, request_id: 'request-b', type: 'request_thread', visibility: 'external' })
+      const before = dataState()
+      expect((await requestMessages.POST(req('POST', { body: 'Denied', conversationId: 'conversation-b' }), { params: Promise.resolve({ id: 'request-a' }) })).status).toBe(403)
+      expect(dataState()).toEqual(before)
+    })
+
+    it.each(['user_super', 'api-service'])('preserves unrestricted request metadata access for %s', async userId => {
+      vi.mocked(getRequestAuth).mockResolvedValue({ userId, orgId: 'org_tahi', sessionId: 'test' })
+      const response = await requestMessages.GET(req('GET'), { params: Promise.resolve({ id: 'request-a' }) })
+      expect(response.status).toBe(200)
+      expect((await response.json() as { items: Array<{ id: string }> }).items.map(item => item.id).sort()).toEqual(['allowed-message', 'foreign-message', 'internal-message'])
+    })
+
+    it.each(['user_super', 'api-service'])('keeps legacy message rows visible to authenticated unrestricted %s, independently of the recorded viewer', async userId => {
+      const orgScope = await scopedOrgIds({ userId, orgId: 'org_tahi' })
+      const viewer = { clerkUserId: 'user_member', domainId: 'member', userType: 'team_member' as const }
+      const thread = await loadThreadMessages(fixture.database, { source: 'request', id: 'request-a', orgId: A, viewer, audience: 'studio', orgScope })
+      expect(thread.map(item => item.id).sort()).toEqual(['allowed-message', 'foreign-message', 'internal-message'])
+      await fixture.database.update(schema.messages).set({ createdAt: '2099-01-01T00:00:00Z', body: 'Legacy foreign preview' }).where(eq(schema.messages.id, 'foreign-message'))
+      const inbox = await loadInboxThreads(fixture.database, { viewer, scope: { orgIds: [A], brandIds: null, audience: 'studio', orgScope }, channelsByOrg: new Map(), orgNames: new Map([[A, A]]), now: new Date('2026-10-14T00:00:00Z') })
+      expect(JSON.stringify(inbox)).toContain('Legacy foreign preview')
+      const clientThread = await loadThreadMessages(fixture.database, { source: 'request', id: 'request-a', orgId: A, viewer: { clerkUserId: 'client-user', domainId: null, userType: 'contact' }, audience: 'client', orgScope })
+      expect(clientThread.map(item => item.id)).toEqual(['allowed-message'])
+    })
   })
 })

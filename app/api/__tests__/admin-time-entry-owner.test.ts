@@ -45,6 +45,10 @@ vi.mock('@/lib/require-access', () => ({
   requireAccessToOrg: vi.fn().mockResolvedValue(null),
 }))
 
+// These ownership cases use a permitted admin; scope enforcement is separate.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+vi.mock('@/lib/access-scope', () => ({ scopedOrgIds: vi.fn().mockResolvedValue({ kind: 'all' }) }))
+
 vi.mock('@/lib/internal-org', () => ({
   INTERNAL_ORG_ID: 'org_tahi_internal',
   ensureInternalOrg: vi.fn().mockResolvedValue('org_tahi_internal'),

@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * /api/admin/requests/[id]/scope-flag
  *
@@ -21,6 +22,8 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const body = await req.json().catch(() => null) as { reason?: string } | null
@@ -52,6 +55,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 export async function DELETE(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()

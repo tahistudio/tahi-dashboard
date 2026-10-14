@@ -1,3 +1,7 @@
+import { scopedOrgIds, type OrgScope } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { calculationScopeCondition, requireCalculationAccess, requireCalculationTarget } from '@/lib/calculation-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -16,17 +20,22 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * surfaced in the deal detail; everything else is history.
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'calculator')
+  if (featureDenied) return featureDenied
+
   const url = new URL(req.url)
   const dealId = url.searchParams.get('dealId')
   const filterOrgId = url.searchParams.get('orgId')
   const database = await db() as unknown as D1
-  const where = dealId
+  const scope = await scopedOrgIds({ userId, orgId })
+  const targetWhere = dealId
     ? eq(schema.projectCalculations.dealId, dealId)
     : filterOrgId
       ? eq(schema.projectCalculations.orgId, filterOrgId)
       : undefined
+  const where = and(targetWhere, calculationScopeCondition(scope, schema.projectCalculations.orgId, schema.projectCalculations.dealId))
   const rows = where
     ? await database.select().from(schema.projectCalculations).where(where).orderBy(desc(schema.projectCalculations.updatedAt))
     : await database.select().from(schema.projectCalculations).orderBy(desc(schema.projectCalculations.updatedAt))
@@ -42,6 +51,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'calculator')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json().catch(() => ({})) as {
     name?: string
@@ -53,6 +65,9 @@ export async function POST(req: NextRequest) {
   if (!body.inputs) return NextResponse.json({ error: 'inputs are required' }, { status: 400 })
 
   const database = await db() as unknown as D1
+  const targetDenied = await requireCalculationTarget(database, { userId, orgId }, body)
+  if (targetDenied) return targetDenied
+  const scope = await scopedOrgIds({ userId, orgId })
 
   // ── Pull live context for the math ───────────────────────────
   // Booked hours in the calc window = sum of scheduleRows where the
@@ -63,8 +78,8 @@ export async function POST(req: NextRequest) {
   // other deals) and neither uses the other's result, so resolve them
   // concurrently rather than back to back.
   const [bookedHoursInWindow, similarDeals] = await Promise.all([
-    estimateBookedHours(database, body.inputs),
-    fetchSimilarDeals(database),
+    estimateBookedHours(database, body.inputs, scope),
+    fetchSimilarDeals(database, scope),
   ])
 
   const outputs = compute(body.inputs, { bookedHoursInWindow, similarDeals })
@@ -103,13 +118,14 @@ export async function POST(req: NextRequest) {
 /**
  * Estimate hours booked between [startDate, startDate + durationWeeks)
  * across all active schedules. Each schedule_rows row contributes
- * (endWeek - startWeek + 1) * 8 hours (rough heuristic — 8h per
+ * (endWeek - startWeek + 1) * 8 hours (rough heuristic , 8h per
  * gantt-week for a row marked by the team). Section header rows are
  * skipped (rowType !== 'section').
  */
 async function estimateBookedHours(
   database: D1,
   inputs: CalculationInputs,
+  scope: OrgScope,
 ): Promise<number> {
   // For now: sum across all rows of all schedules. Refining to a
   // per-week overlap requires joining with schedules.startDate which
@@ -121,6 +137,8 @@ async function estimateBookedHours(
       endWeek: schema.scheduleRows.endWeek,
     })
     .from(schema.scheduleRows)
+    .innerJoin(schema.projectSchedules, eq(schema.scheduleRows.scheduleId, schema.projectSchedules.id))
+    .where(calculationScopeCondition(scope, schema.projectSchedules.orgId, schema.projectSchedules.dealId))
   let hours = 0
   for (const r of rows) {
     if (r.rowType === 'section') continue
@@ -128,7 +146,7 @@ async function estimateBookedHours(
     const weeks = Math.max(1, r.endWeek - r.startWeek + 1)
     hours += weeks * 8
   }
-  // Voice of caution — only count a fraction since most schedules
+  // Voice of caution , only count a fraction since most schedules
   // span many months. The math wants "competing for THIS calc's
   // window" hours, and we don't know per-row dates yet.
   const calcWeeks = Math.max(1, inputs.timeline.durationWeeks)
@@ -138,6 +156,7 @@ async function estimateBookedHours(
 
 async function fetchSimilarDeals(
   database: D1,
+  scope: OrgScope,
 ): Promise<Array<{ dealId: string; title: string; value: number; currency: string; closedAt: string | null }>> {
   // Heuristic: same currency, won status, last 24 months. Pull top 10
   // by value, return those within 50% of the calc's target ballpark.
@@ -155,6 +174,7 @@ async function fetchSimilarDeals(
       stageId: schema.deals.stageId,
     })
     .from(schema.deals)
+    .where(scope.kind === 'all' ? undefined : scope.kind === 'none' ? sql`0 = 1` : orgColumnInScope(schema.deals.orgId, scope.orgIds, { includeNull: true }))
     .limit(50)
   // Filter heuristic: any deal with closedAt in the past 24 months
   // and a non-zero value or upfrontValue. Pipeline stages don't have
@@ -181,8 +201,11 @@ async function fetchSimilarDeals(
 }
 
 export async function PATCH(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'calculator')
+  if (featureDenied) return featureDenied
+
   const body = await req.json().catch(() => ({})) as {
     id?: string
     name?: string
@@ -192,6 +215,9 @@ export async function PATCH(req: NextRequest) {
   }
   if (!body.id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
   const database = await db() as unknown as D1
+  const sourceDenied = await requireCalculationAccess(database, { userId, orgId }, body.id)
+  if (sourceDenied) return sourceDenied
+  const scope = await scopedOrgIds({ userId, orgId })
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
   if (body.name) updates.name = body.name.trim()
   if (body.linkedArtefactRef !== undefined) updates.linkedArtefactRef = body.linkedArtefactRef
@@ -200,8 +226,8 @@ export async function PATCH(req: NextRequest) {
     // Re-run math whenever inputs change. The two estimators are independent
     // reads, so resolve them concurrently.
     const [bookedHoursInWindow, similarDeals] = await Promise.all([
-      estimateBookedHours(database, body.inputs),
-      fetchSimilarDeals(database),
+      estimateBookedHours(database, body.inputs, scope),
+      fetchSimilarDeals(database, scope),
     ])
     const outputs = compute(body.inputs, { bookedHoursInWindow, similarDeals })
     updates.inputs = JSON.stringify(body.inputs)
@@ -216,14 +242,21 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'calculator')
+  if (featureDenied) return featureDenied
+
   const url = new URL(req.url)
   const ids = url.searchParams.get('ids')?.split(',') ?? []
   const single = url.searchParams.get('id')
   const targets = single ? [single] : ids
   if (targets.length === 0) return NextResponse.json({ error: 'id or ids is required' }, { status: 400 })
   const database = await db() as unknown as D1
+  for (const id of targets) {
+    const denied = await requireCalculationAccess(database, { userId, orgId }, id)
+    if (denied) return denied
+  }
   await database.delete(schema.projectCalculations).where(inArray(schema.projectCalculations.id, targets))
   return NextResponse.json({ deleted: targets.length })
 }

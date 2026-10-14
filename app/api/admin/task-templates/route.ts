@@ -1,3 +1,5 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -15,10 +17,12 @@ const VALID_PRIORITIES = ['none', 'low', 'medium', 'standard', 'high', 'urgent']
 //   - orgId: that client's templates PLUS the inherited global ones (each row
 //     carries its own orgId so the UI can tell overrides from globals)
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'tasks')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const type = url.searchParams.get('type')
@@ -26,6 +30,11 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  if (filterOrgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, filterOrgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   const conditions = []
   if (type && type !== 'all') {
@@ -61,10 +70,12 @@ export async function GET(req: NextRequest) {
 // POST /api/admin/task-templates - create a new task template
 export async function POST(req: NextRequest) {
   const auth = await getRequestAuth(req)
-  const { orgId } = auth
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'tasks')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     name?: string
@@ -92,6 +103,11 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  if (body.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, auth.userId, body.orgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   const id = crypto.randomUUID()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')

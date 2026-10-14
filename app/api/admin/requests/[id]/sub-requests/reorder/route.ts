@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * PATCH /api/admin/requests/[id]/sub-requests/reorder
  *
@@ -21,6 +22,8 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: parentId } = await params
   const body = await req.json().catch(() => null) as {
@@ -51,6 +54,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       .where(and(
         eq(schema.requests.id, row.id),
         eq(schema.requests.parentRequestId, parentId),
+        eq(schema.requests.orgId, parent.orgId),
       ))
     updated++
   }

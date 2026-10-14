@@ -30,6 +30,7 @@ import { schema } from '@/db/d1'
 import { guardTask } from '@/lib/task-access'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { resolveAccessScoping } from '@/lib/access-scoping'
+import { can, resolvePermissions } from '@/lib/permissions'
 import {
   ORPHAN_STATUS,
   isBlockerOpen,
@@ -118,17 +119,19 @@ interface SubjectFacts {
   ref: string | null
   orgName: string | null
   orgId: string | null
+  redacted?: boolean
 }
 
 /** What a row says when the caller may not see the far end. Neutral on
  *  purpose: it names no client and reveals no work. */
 const REDACTED_TITLE = 'Another client\'s work'
 
-/** Two queries at most per type, whatever the mix. Order is preserved. */
+/** Only status crosses a denied feature or client boundary. Order is preserved. */
 async function hydrateSubjects(
   drizzle: Drizzle,
   refs: readonly SubjectRef[],
   scope: OrgScope,
+  visible: Record<BlockerSubjectType, boolean>,
 ): Promise<BlockerRow[]> {
   const taskIds = [...new Set(refs.filter(r => r.type === 'task').map(r => r.id))]
   const requestIds = [...new Set(refs.filter(r => r.type === 'request').map(r => r.id))]
@@ -136,6 +139,12 @@ async function hydrateSubjects(
 
   const loadTasks = async () => {
     for (const batch of chunkIds(taskIds)) {
+      const statuses = await drizzle.select({ id: schema.tasks.id, status: schema.tasks.status })
+        .from(schema.tasks).where(inArray(schema.tasks.id, batch))
+      for (const row of statuses) facts.set(subjectKey('task', row.id), {
+        title: REDACTED_TITLE, status: row.status, ref: null, orgName: null, orgId: null, redacted: true,
+      })
+      if (!visible.task) continue
       const rows = await drizzle
         .select({
           id: schema.tasks.id,
@@ -146,7 +155,8 @@ async function hydrateSubjects(
         })
         .from(schema.tasks)
         .leftJoin(schema.organisations, eq(schema.tasks.orgId, schema.organisations.id))
-        .where(inArray(schema.tasks.id, batch))
+        .where(and(inArray(schema.tasks.id, batch), scope === null ? undefined
+          : sql`(${schema.tasks.orgId} IS NULL OR ${schema.tasks.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope)})))`))
       for (const row of rows) {
         facts.set(subjectKey('task', row.id), {
           title: row.title,
@@ -161,6 +171,12 @@ async function hydrateSubjects(
 
   const loadRequests = async () => {
     for (const batch of chunkIds(requestIds)) {
+      const statuses = await drizzle.select({ id: schema.requests.id, status: schema.requests.status })
+        .from(schema.requests).where(inArray(schema.requests.id, batch))
+      for (const row of statuses) facts.set(subjectKey('request', row.id), {
+        title: REDACTED_TITLE, status: row.status, ref: null, orgName: null, orgId: null, redacted: true,
+      })
+      if (!visible.request) continue
       const rows = await drizzle
         .select({
           id: schema.requests.id,
@@ -172,7 +188,8 @@ async function hydrateSubjects(
         })
         .from(schema.requests)
         .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
-        .where(inArray(schema.requests.id, batch))
+        .where(and(inArray(schema.requests.id, batch), scope === null ? undefined
+          : sql`${schema.requests.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope)}))`))
       for (const row of rows) {
         facts.set(subjectKey('request', row.id), {
           title: row.title,
@@ -196,7 +213,7 @@ async function hydrateSubjects(
   // both sides of the wire.
   return refs.map(ref => {
     const found = facts.get(subjectKey(ref.type, ref.id))
-    if (found && !withinScope(scope, ref.type, found.orgId)) {
+    if (found && (found.redacted || !withinScope(scope, ref.type, found.orgId))) {
       return {
         linkId: ref.linkId,
         otherType: ref.type,
@@ -239,8 +256,9 @@ export async function listBlockers(
   drizzle: Drizzle,
   userId: string | null,
   subject: BlockerSubject,
+  auth: { userId: string | null; orgId: string | null },
 ): Promise<BlockerLists> {
-  const [blockedByLinks, blocksLinks, scope] = await Promise.all([
+  const [blockedByLinks, blocksLinks, scope, access] = await Promise.all([
     drizzle
       .select({
         id: schema.workBlockers.id,
@@ -264,6 +282,7 @@ export async function listBlockers(
         eq(schema.workBlockers.blockerId, subject.id),
       )),
     resolveAccessScoping(drizzle, userId),
+    resolvePermissions(drizzle, auth),
   ])
 
   const toRefs = (rows: Array<{ id: string; type: string; subjectId: string }>): SubjectRef[] =>
@@ -272,8 +291,8 @@ export async function listBlockers(
       .map(r => ({ linkId: r.id, type: r.type as BlockerSubjectType, id: r.subjectId }))
 
   const [blockedBy, blocks] = await Promise.all([
-    hydrateSubjects(drizzle, toRefs(blockedByLinks), scope),
-    hydrateSubjects(drizzle, toRefs(blocksLinks), scope),
+    hydrateSubjects(drizzle, toRefs(blockedByLinks), scope, { task: can(access, 'tasks'), request: can(access, 'requests') }),
+    hydrateSubjects(drizzle, toRefs(blocksLinks), scope, { task: can(access, 'tasks'), request: can(access, 'requests') }),
   ])
 
   return { blockedBy, blocks }
@@ -522,12 +541,14 @@ export async function searchBlockerCandidates(
   userId: string | null,
   query: string,
   exclude: BlockerSubject | null,
+  auth: { userId: string | null; orgId: string | null },
   perType = 8,
 ): Promise<BlockerCandidate[]> {
   const trimmed = query.trim()
   if (!trimmed) return []
   const pattern = `%${trimmed.toLowerCase()}%`
   const scopedOrgIds = await resolveAccessScoping(drizzle, userId)
+  const access = await resolvePermissions(drizzle, auth)
 
   // Tasks. A client-less task is the studio's own list, which every team
   // member on this surface may reach, matching the tasks list route.
@@ -546,7 +567,7 @@ export async function searchBlockerCandidates(
     taskConditions.push(sql`${schema.tasks.id} <> ${exclude.id}`)
   }
 
-  const taskRows = await drizzle
+  const taskRows = can(access, 'tasks') ? await drizzle
     .select({
       id: schema.tasks.id,
       title: schema.tasks.title,
@@ -556,7 +577,7 @@ export async function searchBlockerCandidates(
     .from(schema.tasks)
     .leftJoin(schema.organisations, eq(schema.tasks.orgId, schema.organisations.id))
     .where(and(...taskConditions))
-    .limit(perType)
+    .limit(perType) : []
 
   // Requests. No null-org case: every request has a client.
   const numeric = Number.parseInt(trimmed.replace(/^#/, ''), 10)
@@ -571,6 +592,7 @@ export async function searchBlockerCandidates(
     requestMatch,
     sql`${schema.requests.status} NOT IN ('delivered', 'cancelled', 'archived')`,
   ]
+  if (!can(access, 'requests')) return mapTasks(taskRows)
   if (scopedOrgIds !== null) {
     if (scopedOrgIds.length === 0) return mapTasks(taskRows)
     requestConditions.push(inArray(schema.requests.orgId, scopedOrgIds))

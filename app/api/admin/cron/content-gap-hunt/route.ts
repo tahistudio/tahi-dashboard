@@ -1,3 +1,4 @@
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 /**
  * POST /api/admin/cron/content-gap-hunt
  *
@@ -19,8 +20,10 @@ export const dynamic = 'force-dynamic'
 export async function POST(req: NextRequest) {
   const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
-    const { orgId } = await getRequestAuth(req)
+    const { orgId, userId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const roleDenied = await requireStudioAdmin({ userId, orgId }, 'settings')
+    if (roleDenied) return roleDenied
   }
 
   const startedAt = Date.now()

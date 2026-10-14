@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/cover/generate
  *
@@ -60,6 +61,8 @@ export async function POST(req: NextRequest) {
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+    if (featureDenied) return featureDenied
 
     const body = (await req.json().catch(() => ({}))) as RequestBody
     const title = (body.title ?? '').trim()

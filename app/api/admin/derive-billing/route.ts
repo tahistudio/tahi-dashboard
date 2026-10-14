@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest) {
   }
   const featureDenied = await requireFeature({ userId, orgId }, ['clients', 'financial_reports'])
   if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
 
   const database = (await db()) as unknown as AnyDb
   const results = await applyBillingDerivationToAllOrgs(database)

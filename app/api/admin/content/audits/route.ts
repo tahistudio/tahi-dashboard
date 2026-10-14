@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET  /api/admin/content/audits
  *   List all audit shadow drafts with their score + status.
@@ -91,8 +92,10 @@ interface CreateAuditBody {
 }
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const rows = await database
@@ -115,8 +118,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const body = (await req.json().catch(() => ({}))) as CreateAuditBody
   const slug = body.slug?.trim().replace(/^\//, '').replace(/^blog\//, '')

@@ -1,3 +1,6 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/requests/[id]/draft-reply
  *
@@ -24,7 +27,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, and } from 'drizzle-orm'
 import { loadAiContext } from '@/lib/ai-context'
 import { SONNET_MODEL } from '@/lib/ai-models'
 import { requireAccessToOrg } from '@/lib/require-access'
@@ -86,6 +89,8 @@ export async function POST(
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -113,6 +118,8 @@ export async function POST(
   const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
   if (denied) return denied
 
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
   // Recent thread history (public + internal), oldest-first for the prompt.
   const recent = await drizzle
     .select({
@@ -124,7 +131,7 @@ export async function POST(
     })
     .from(schema.messages)
     .leftJoin(schema.teamMembers, eq(schema.messages.authorId, schema.teamMembers.id))
-    .where(eq(schema.messages.requestId, id))
+    .where(and(eq(schema.messages.requestId, id), scope.kind === 'all' ? undefined : orgColumnInScope(schema.messages.orgId, rowOrgIds)))
     .orderBy(desc(schema.messages.createdAt))
     .limit(THREAD_HISTORY_LIMIT)
   const history = recent.slice().reverse()

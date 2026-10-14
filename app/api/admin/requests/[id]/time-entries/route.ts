@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * Time logged against one request.
  *
@@ -18,8 +19,9 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and, sql } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { attributedUserId } from '@/lib/mcp-actor'
 import {
   createTimeEntry,
@@ -53,6 +55,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
   const database = await db()
@@ -60,6 +64,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const denied = await guardRequestAccess(drizzle, userId, requestId)
   if (denied) return denied
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgFilter = scope.kind === 'all' ? undefined
+    : sql`${schema.timeEntries.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope.kind === 'some' ? scope.orgIds : [])}))`
 
   const items = await drizzle
     .select({
@@ -74,7 +81,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     })
     .from(schema.timeEntries)
     .leftJoin(schema.teamMembers, timeEntryLoggerJoin())
-    .where(eq(schema.timeEntries.requestId, requestId))
+    .where(and(eq(schema.timeEntries.requestId, requestId), rowOrgFilter))
     .orderBy(desc(schema.timeEntries.date))
 
   return NextResponse.json({ items })
@@ -88,6 +95,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
   const body = await req.json() as {

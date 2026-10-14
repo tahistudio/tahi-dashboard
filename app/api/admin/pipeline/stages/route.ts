@@ -1,8 +1,11 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { asc, eq, sql, inArray } from 'drizzle-orm'
+import { and, asc, eq, sql, inArray } from 'drizzle-orm'
 import { computeStageProbabilities, type StageInfo, type ActivityStageEvent } from '@/lib/pipeline-probability'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -38,13 +41,17 @@ async function seedDefaultStages(database: D1) {
 
 // GET /api/admin/pipeline/stages
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
+
 
   const database = await db() as unknown as D1
 
+  const scope = await scopedOrgIds({ userId, orgId })
   let stages = await database
     .select()
     .from(schema.pipelineStages)
@@ -73,7 +80,8 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.deals)
     .innerJoin(schema.pipelineStages, eq(schema.deals.stageId, schema.pipelineStages.id))
-    .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
+    .where(and(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`,
+      scope.kind === 'all' ? undefined : scope.kind === 'none' ? sql`0 = 1` : orgColumnInScope(schema.deals.orgId, scope.orgIds, { includeNull: true })))
 
   // Pull stage-history events from the activity log (Decision #041) so we
   // can compute historical probability via true journeys where available.
@@ -134,10 +142,13 @@ export async function GET(req: NextRequest) {
 // probability defaults low; the historical model takes over once deals
 // actually move through the stage.
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json() as {
     name?: string
@@ -198,10 +209,13 @@ export async function POST(req: NextRequest) {
 // payload are deleted - unless any deal still references them, in which case
 // the whole request is rejected with 409 before any write (all-or-nothing).
 export async function PUT(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json() as {
     stages?: Array<{

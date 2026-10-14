@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await guardTask(database as Drizzle, userId, id)
   if (denied) return denied
 
-  const calls = await listCallsForParent(database, 'task', id)
+  const calls = await listCallsForParent(database, 'task', id, { userId, orgId })
   return NextResponse.json({ calls })
 }
 

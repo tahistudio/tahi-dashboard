@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/requests/bulk-assign
  *
@@ -44,6 +45,8 @@ export async function POST(req: NextRequest) {
   const { orgId, userId } = auth
   const actorUserId = attributedUserId(auth)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const body = await req.json().catch(() => null) as {
     requestIds?: string[]
@@ -95,6 +98,17 @@ export async function POST(req: NextRequest) {
   const foundIds = new Set(requests.map(r => r.id))
   const notFound = body!.requestIds!.filter(id => !foundIds.has(id))
 
+  const contactOrgs = new Map<string, string>()
+  for (const participant of body!.participants!) {
+    if (participant.participantType !== 'contact' || !participant.participantId) continue
+    const [contact] = await drizzle.select({ orgId: schema.contacts.orgId }).from(schema.contacts)
+      .where(eq(schema.contacts.id, participant.participantId)).limit(1)
+    if (!contact) return NextResponse.json({ error: 'Contact not found' }, { status: 404 })
+    const contactDenied = await requireAccessToOrg(drizzle, userId, contact?.orgId)
+    if (contactDenied) return contactDenied
+    contactOrgs.set(participant.participantId, contact.orgId)
+  }
+
   let added = 0
   let skipped = 0
   let invalid = 0
@@ -114,6 +128,7 @@ export async function POST(req: NextRequest) {
     for (const p of body!.participants!) {
       if (!p.participantId || !p.participantType || !p.role) { invalid++; continue }
       if (p.participantType === 'contact' && p.role !== 'follower') { invalid++; continue }
+      if (p.participantType === 'contact' && contactOrgs.get(p.participantId) !== request.orgId) { invalid++; continue }
 
       if (p.role === 'pm') {
         await drizzle

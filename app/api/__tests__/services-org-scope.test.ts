@@ -31,6 +31,7 @@ vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
 vi.mock('@/lib/require-feature', () => ({
   requirePortalFeature: vi.fn().mockResolvedValue(null),
+  requireFeature: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock('@/lib/access-scoping', () => ({

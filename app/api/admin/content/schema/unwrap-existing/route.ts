@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/schema/unwrap-existing
  *
@@ -120,8 +121,10 @@ async function processCollection(
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const body = (await req.json().catch(() => ({}))) as Body
   const type = body.type ?? 'all'

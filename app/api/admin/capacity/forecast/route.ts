@@ -1,19 +1,25 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sql } from 'drizzle-orm'
+import { sql, and } from 'drizzle-orm'
 
 // ── GET /api/admin/capacity/forecast ──────────────────────────────────────
 // Returns forecasted capacity impact from pipeline deals weighted by
 // probability, grouped by expected close month.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'capacity')
+  if (featureDenied) return featureDenied
 
   const database = await db()
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   // Get all open deals (not closed-won, not closed-lost) with their stage probability
   const deals = await database
@@ -29,7 +35,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.deals)
     .innerJoin(schema.pipelineStages, sql`${schema.deals.stageId} = ${schema.pipelineStages.id}`)
-    .where(sql`${schema.pipelineStages.isClosedWon} = 0 AND ${schema.pipelineStages.isClosedLost} = 0`)
+    .where(and(sql`${schema.pipelineStages.isClosedWon} = 0 AND ${schema.pipelineStages.isClosedLost} = 0`, internalOrgFilter(orgScope, schema.deals.orgId, true)))
 
   // Group by expected close month (YYYY-MM)
   const monthMap: Record<string, {

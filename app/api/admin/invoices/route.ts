@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
     notes?: string
     // Source captures the user's intent at creation time. Even if the
     // downstream Stripe/Xero call fails, source remembers what they
-    // were trying to do so the FE can show "Stripe link failed — retry".
+    // were trying to do so the FE can show "Stripe link failed , retry".
     source?: 'manual' | 'stripe' | 'xero'
   }
 
@@ -125,6 +125,12 @@ export async function POST(req: NextRequest) {
   const drizzleForAccess = (await db()) as ReturnType<typeof import('drizzle-orm/d1').drizzle>
   const deniedAccess = await requireAccessToOrg(drizzleForAccess, userId, body.orgId)
   if (deniedAccess) return deniedAccess
+  if (body.subscriptionId) {
+    const [subscription] = await drizzleForAccess.select({ orgId: schema.subscriptions.orgId })
+      .from(schema.subscriptions).where(eq(schema.subscriptions.id, body.subscriptionId)).limit(1)
+    const linkedDenied = await requireAccessToOrg(drizzleForAccess, userId, subscription?.orgId)
+    if (linkedDenied) return linkedDenied
+  }
 
   if (!Array.isArray(body.lineItems) || body.lineItems.length === 0) {
     return NextResponse.json({ error: 'lineItems must be a non-empty array' }, { status: 400 })

@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 /**
  * POST /api/admin/invoices/dedupe-manyrequests-twins
  *
@@ -51,6 +52,9 @@ export async function POST(req: NextRequest) {
   }
   const featureDenied = await requireFeature(auth, 'billing')
   if (featureDenied) return featureDenied
+
+  const adminDenied = await requireAdmin(auth)
+  if (adminDenied) return adminDenied
 
   const database = (await db()) as DB
 

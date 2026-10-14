@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -5,10 +6,12 @@ import { schema } from '@/db/d1'
 
 // GET /api/admin/exchange-rates - list all cached rates
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'financial_reports')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const rates = await database.select().from(schema.exchangeRates)
@@ -27,10 +30,12 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/exchange-rates/refresh - fetch latest rates from OpenExchangeRates
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'financial_reports')
+  if (featureDenied) return featureDenied
 
   const appId = process.env.OPEN_EXCHANGE_RATES_APP_ID
   if (!appId) {

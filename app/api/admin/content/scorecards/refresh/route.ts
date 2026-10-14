@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/scorecards/refresh
  *
@@ -49,8 +50,10 @@ interface RefreshBody {
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const body = (await req.json().catch(() => ({}))) as RefreshBody
   const limit = Math.max(1, Math.min(200, body.limit ?? 50))

@@ -1,8 +1,12 @@
+import { resolvePermissions } from '@/lib/permissions'
+import { internalFeatureOrgFilter, internalMessageFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, isNull, inArray, gte, desc } from 'drizzle-orm'
+import { eq, and, isNull, inArray, gte, desc, sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,9 +66,13 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'overview')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const drizzle = database as D1
+  const access = await resolvePermissions(drizzle, { userId, orgId })
+  const orgScope = await scopedOrgIds({ userId, orgId }, access)
 
   let memberId: string | null = null
   if (userId) {
@@ -92,17 +100,17 @@ export async function GET(req: NextRequest) {
     const directReqs = await drizzle
       .select({ id: schema.requests.id })
       .from(schema.requests)
-      .where(eq(schema.requests.assigneeId, memberId))
+      .where(and(eq(schema.requests.assigneeId, memberId), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
     for (const r of directReqs) reqIds.add(r.id)
 
     const partReqs = await drizzle
       .select({ requestId: schema.requestParticipants.requestId })
       .from(schema.requestParticipants)
-      .where(and(
+      .where(and(and(
         eq(schema.requestParticipants.participantId, memberId),
         eq(schema.requestParticipants.participantType, 'team_member'),
         isNull(schema.requestParticipants.removedAt),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, sql`(SELECT org_id FROM requests WHERE id = ${schema.requestParticipants.requestId})`)))
     for (const p of partReqs) reqIds.add(p.requestId)
 
     const reqIdList = [...reqIds]
@@ -120,7 +128,7 @@ export async function GET(req: NextRequest) {
         .from(schema.messages)
         .innerJoin(schema.requests, eq(schema.messages.requestId, schema.requests.id))
         .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
-        .where(and(
+        .where(and(and(and(
           inArray(schema.messages.requestId, reqIdList),
           // Studio-only notes are not an answer to the client, so they must not
           // win the per-request "last message" race. Without this, reading a
@@ -129,7 +137,7 @@ export async function GET(req: NextRequest) {
           eq(schema.messages.isInternal, false),
           isNull(schema.messages.deletedAt),
           gte(schema.messages.createdAt, cutoff),
-        ))
+        ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)), internalMessageFilter(access, orgScope)))
         .orderBy(desc(schema.messages.createdAt))
         .limit(reqIdList.length * MESSAGE_BUDGET_PER_REQUEST)
 

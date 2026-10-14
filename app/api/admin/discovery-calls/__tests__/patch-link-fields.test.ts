@@ -27,6 +27,15 @@ vi.mock('@/lib/server-auth', () => ({
 
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
+vi.mock('@/lib/permissions', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/permissions')>(),
+  resolvePermissions: async (_database: unknown, auth: { userId: string | null; orgId: string | null }) => ({
+    ...auth, level: 'team_member', audience: 'team', isAdmin: false,
+    isSuperAdmin: false, canManagePermissions: false,
+    viewableResources: new Set(['calls']), overrides: new Map(), portalRole: null,
+  }),
+}))
+
 vi.mock('@/lib/access-scoping', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/access-scoping')>()),
   resolveAccessScoping: vi.fn(),
@@ -69,7 +78,17 @@ function makeDb(results: unknown[] = []) {
     return makeChain(queue.length ? queue.shift() : [], calls)
   }
   const handle = {
-    select: (...args: unknown[]) => entry('select', args),
+    select: (...args: unknown[]) => {
+      const projection = args[0]
+      // The access guard reads the existing call's minimal link projection.
+      // Keep business-query results intact while the real scope resolver and
+      // existing relink guards continue to enforce the configured test scope.
+      if (projection && typeof projection === 'object'
+        && ['id', 'orgId', 'dealId', 'requestId', 'taskId'].every(key => key in projection)) {
+        return makeChain(queue[0] ?? [], [])
+      }
+      return entry('select', args)
+    },
     insert: (...args: unknown[]) => entry('insert', args),
     update: (...args: unknown[]) => entry('update', args),
     delete: (...args: unknown[]) => entry('delete', args),
@@ -300,7 +319,8 @@ describe('PATCH /api/admin/discovery-calls/[id], access scoping on a relink', ()
     // itself belonging to an out-of-scope org must still deny.
     const res = await PATCH(req({ leadId: 'lead_1' }), params('call-1'))
     expect(res.status).toBe(403)
-    expect(queries).toHaveLength(2)
+    // The new access guard refuses before any business lookup or mutation.
+    expect(queries).toHaveLength(0)
   })
 
   it('allows an unrestricted admin to relink a call across orgs', async () => {
@@ -335,6 +355,7 @@ describe('PATCH /api/admin/discovery-calls/[id], access scoping on a relink', ()
 
     const res = await PATCH(req({ leadId: 'lead_1' }), params('call-1'))
     expect(res.status).toBe(403)
-    expect(queries).toHaveLength(2)
+    // The new access guard refuses before any business lookup or mutation.
+    expect(queries).toHaveLength(0)
   })
 })

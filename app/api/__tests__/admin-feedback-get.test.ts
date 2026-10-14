@@ -65,7 +65,7 @@ beforeEach(() => {
   lastWhereArg = undefined
   lastLimitArg = undefined
   rowsToReturn = []
-  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 's1' })
+  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi', sessionId: 's1' })
 })
 
 describe('GET /api/admin/feedback - auth', () => {

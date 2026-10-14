@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/content/spend
  *
@@ -27,8 +28,10 @@ import { gte, eq, sql, desc } from 'drizzle-orm'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const now = Date.now()

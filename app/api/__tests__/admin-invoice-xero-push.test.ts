@@ -1,3 +1,5 @@
+// Target authorisation is covered by t1-6-support-routes; this suite pins rail payloads.
+vi.mock('@/lib/require-access', () => ({ requireAccessToOrg: vi.fn().mockResolvedValue(null) }))
 /**
  * POST /api/admin/invoices/xero-sync, the push.
  *
@@ -70,6 +72,10 @@ function makeDb(results: unknown[] = []) {
   const entry = (method: string, args: unknown[]) => {
     const record: QueryRecord = { calls: [{ method, args }] }
     queries.push(record)
+    const projection = args[0]
+    if (method === 'select' && projection && typeof projection === 'object' && Object.keys(projection).length === 1 && 'orgId' in projection) {
+      return makeChain([{ orgId: 'org-client' }], record)
+    }
     return makeChain(queue.length ? queue.shift() : [], record)
   }
   const handle = {

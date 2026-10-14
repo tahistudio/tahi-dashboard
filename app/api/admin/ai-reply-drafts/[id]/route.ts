@@ -1,3 +1,4 @@
+import { requireReplyDraftAccess } from '@/lib/reply-draft-access'
 /**
  * PATCH /api/admin/ai-reply-drafts/[id]
  *   Update the draft before sending. Accepts finalSubject + finalBody.
@@ -8,7 +9,7 @@
  *
  * DELETE /api/admin/ai-reply-drafts/[id]
  *   Dismiss the draft. Status flips to 'dismissed' (kept for the
- *   tone-learning corpus — "what Liam rejected" is also information).
+ *   tone-learning corpus , "what Liam rejected" is also information).
  */
 
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -20,7 +21,7 @@ import { eq } from 'drizzle-orm'
 type Params = { params: Promise<{ id: string }> }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -33,6 +34,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const database = await db()
+  const scopeDenied = await requireReplyDraftAccess(database, { userId, orgId }, id)
+  if (scopeDenied) return scopeDenied
   const updates: Record<string, string | null> = {}
   if (typeof body.finalSubject === 'string') updates.finalSubject = body.finalSubject.trim() || null
   if (typeof body.finalBody === 'string') updates.finalBody = body.finalBody.trim() || null
@@ -48,12 +51,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   const { id } = await params
   const database = await db()
+  const scopeDenied = await requireReplyDraftAccess(database, { userId, orgId }, id)
+  if (scopeDenied) return scopeDenied
   await database
     .update(schema.aiReplyDrafts)
     .set({ status: 'dismissed', updatedAt: new Date().toISOString() })

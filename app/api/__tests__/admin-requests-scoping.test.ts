@@ -39,6 +39,20 @@ vi.mock('@/lib/server-auth', () => ({
 
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 
+// Feature access is granted here so these cases isolate the real org guards.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+
+// Keep the caller non-admin. Source features are permitted while each test's
+// resolveAccessScoping fixture still decides exactly which clients are visible.
+vi.mock('@/lib/permissions', async original => ({
+  ...await original<typeof import('@/lib/permissions')>(),
+  resolvePermissions: vi.fn().mockResolvedValue({
+    userId: 'user_member', orgId: 'org_tahi', level: 'team_member', audience: 'team',
+    isAdmin: false, isSuperAdmin: false, canManagePermissions: false,
+    viewableResources: new Set(['tasks', 'requests']), overrides: new Map(),
+  }),
+}))
+
 vi.mock('@/lib/access-scoping', () => ({
   resolveAccessScoping: vi.fn(),
 }))
@@ -895,18 +909,12 @@ describe('GET /api/admin/requests/[id]/blockers', () => {
 
   it('gives a scoped caller no title, reference or client name for a far end it may not open', async () => {
     scopedTo(['org-a'])
-    const { handle } = makeDb([
+    const { handle, queries } = makeDb([
       [{ orgId: 'org-a' }],                    // guardSubject on the near end
       [link('link-1', 'request', 'req-b')],    // what req-a waits on
       [],                                      // what waits on req-a
-      [{
-        id: 'req-b',
-        title: 'Beta rebrand, phase two',
-        status: 'in_progress',
-        requestNumber: 42,
-        orgId: 'org-b',
-        orgName: 'Beta Ltd',
-      }],
+      [{ id: 'req-b', status: 'in_progress' }], // harmless status lookup
+      [],                                      // scoped metadata lookup
     ])
     vi.mocked(db).mockResolvedValue(handle as never)
 
@@ -919,6 +927,13 @@ describe('GET /api/admin/requests/[id]/blockers', () => {
     expect(row.otherOrgName).toBeNull()
     // The status is not identifying, and the open count reads it.
     expect(row.otherStatus).toBe('in_progress')
+    const metadataRead = queries.find(query => {
+      const projection = query.calls[0]?.args[0]
+      return query.calls[0]?.method === 'select' && typeof projection === 'object'
+        && projection !== null && 'title' in projection
+    })
+    expect(metadataRead).toBeDefined()
+    expect(collect(metadataRead!, 'where').params).toContain(JSON.stringify(['org-a']))
   })
 
   it('leaves a far end inside the scope whole', async () => {
@@ -927,6 +942,7 @@ describe('GET /api/admin/requests/[id]/blockers', () => {
       [{ orgId: 'org-a' }],
       [link('link-1', 'request', 'req-b')],
       [],
+      [{ id: 'req-b', status: 'in_progress' }],
       [{
         id: 'req-b',
         title: 'Beta rebrand, phase two',
@@ -950,6 +966,7 @@ describe('GET /api/admin/requests/[id]/blockers', () => {
       [{ orgId: 'org-a' }],
       [link('link-1', 'task', 'task-1')],
       [],
+      [{ id: 'task-1', status: 'todo' }],
       [{ id: 'task-1', title: 'Chase the hosting invoice', status: 'todo', orgId: null, orgName: null }],
     ])
     vi.mocked(db).mockResolvedValue(handle as never)
@@ -965,6 +982,7 @@ describe('GET /api/admin/requests/[id]/blockers', () => {
       [{ orgId: 'org-a' }],
       [link('link-1', 'request', 'req-b')],
       [],
+      [{ id: 'req-b', status: 'in_progress' }],
       [{
         id: 'req-b',
         title: 'Beta rebrand, phase two',

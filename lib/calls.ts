@@ -1,5 +1,7 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
 /**
- * Discovery call helpers — shared logic for the per-parent call routes
+ * Discovery call helpers , shared logic for the per-parent call routes
  * (/api/admin/leads/[id]/calls, /api/admin/deals/[id]/calls, etc).
  *
  * Calls are polymorphic: any of leadId / dealId / requestId / taskId /
@@ -9,7 +11,7 @@
 
 import { schema } from '@/db/d1'
 import type { db } from '@/lib/db'
-import { desc, eq, getTableColumns } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns } from 'drizzle-orm'
 import { normalizeCallInstant } from '@/lib/call-time'
 // Type-only import, the same one-way dependency badge.tsx documents for
 // lib/status-config.ts, so this file stays server-safe.
@@ -49,7 +51,7 @@ function parentColumns(parent: CallParentType): {
 
 /** Create a discovery call attached to the given parent. Writes an
  *  activity row when the parent type has a matching column on activities
- *  (lead / deal / org). request/task activities are skipped for now —
+ *  (lead / deal / org). request/task activities are skipped for now ,
  *  those tables get their own comment-stream model, not the unified
  *  activities table. */
 export async function createCallForParent(
@@ -119,7 +121,9 @@ export async function listCallsForParent(
   database: Database,
   parent: CallParentType,
   parentId: string,
+  auth: { userId: string | null; orgId: string | null },
 ) {
+  const scope = await scopedOrgIds(auth)
   const { callColumn } = parentColumns(parent)
   const column = schema.discoveryCalls[callColumn]
   return database
@@ -135,7 +139,7 @@ export async function listCallsForParent(
     .leftJoin(schema.deals, eq(schema.discoveryCalls.dealId, schema.deals.id))
     .leftJoin(schema.leads, eq(schema.discoveryCalls.leadId, schema.leads.id))
     .leftJoin(schema.requests, eq(schema.discoveryCalls.requestId, schema.requests.id))
-    .where(eq(column, parentId))
+    .where(and(eq(column, parentId), discoveryCallScopeCondition(scope)))
     .orderBy(desc(schema.discoveryCalls.scheduledAt))
 }
 

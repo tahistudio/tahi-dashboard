@@ -1,3 +1,5 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
@@ -8,10 +10,13 @@ import { eq } from 'drizzle-orm'
 // Accepts a submissionId and generates a placeholder case study draft.
 // TODO: Wire to Claude API for actual AI-generated drafts.
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'reviews')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json() as { submissionId?: string }
 
@@ -20,6 +25,11 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db()
+
+  const [owner] = await database.select({ orgId: schema.caseStudySubmissions.orgId })
+    .from(schema.caseStudySubmissions).where(eq(schema.caseStudySubmissions.id, body.submissionId)).limit(1)
+  const scopeDenied = await requireAccessToOrg(database, userId, owner?.orgId)
+  if (scopeDenied) return scopeDenied
 
   const submissions = await database
     .select()

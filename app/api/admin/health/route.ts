@@ -1,3 +1,8 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
+import { requireStudioAdmin } from '@/lib/internal-route-access'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -13,10 +18,12 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const timestamp = new Date().toISOString()
 
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ ok: true, timestamp })
   }
+  const denied = await requireStudioAdmin({ userId, orgId }, 'settings')
+  if (denied) return denied
 
   const checks: Record<string, string> = {}
   checks.js = 'ok'
@@ -76,14 +83,21 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  if (featureDenied) return featureDenied
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const orgScope = await scopedOrgIds({ userId, orgId })
   const body = await req.json().catch(() => ({})) as { orgId?: string }
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+  if (body.orgId) {
+    const denied = await requireAccessToOrg(drizzle, userId, body.orgId)
+    if (denied) return denied
+  }
 
   // Get all active orgs or a specific one
   let orgs
@@ -91,12 +105,12 @@ export async function POST(req: NextRequest) {
     orgs = await drizzle
       .select({ id: schema.organisations.id })
       .from(schema.organisations)
-      .where(eq(schema.organisations.id, body.orgId))
+      .where(and(eq(schema.organisations.id, body.orgId), internalOrgFilter(orgScope, schema.organisations.id)))
   } else {
     orgs = await drizzle
       .select({ id: schema.organisations.id })
       .from(schema.organisations)
-      .where(eq(schema.organisations.status, 'active'))
+      .where(and(eq(schema.organisations.status, 'active'), internalOrgFilter(orgScope, schema.organisations.id)))
   }
 
   const now = new Date()
@@ -112,47 +126,47 @@ export async function POST(req: NextRequest) {
     const activeRequests = await drizzle
       .select({ count: sql<number>`count(*)` })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         eq(schema.requests.orgId, org.id),
         sql`${schema.requests.status} NOT IN ('delivered', 'archived')`,
-      ))
+      ), internalOrgFilter(orgScope, schema.requests.orgId)))
     if ((activeRequests[0]?.count ?? 0) > 0) score += 20
 
     // 2. Last request within 30 days? (+20)
     const recentRequests = await drizzle
       .select({ count: sql<number>`count(*)` })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         eq(schema.requests.orgId, org.id),
         gte(schema.requests.createdAt, thirtyDaysAgo),
-      ))
+      ), internalOrgFilter(orgScope, schema.requests.orgId)))
     if ((recentRequests[0]?.count ?? 0) > 0) score += 20
 
     // 3. No overdue invoices? (+20)
     const overdueInvoices = await drizzle
       .select({ count: sql<number>`count(*)` })
       .from(schema.invoices)
-      .where(and(
+      .where(and(and(
         eq(schema.invoices.orgId, org.id),
         eq(schema.invoices.status, 'overdue'),
-      ))
+      ), internalOrgFilter(orgScope, schema.invoices.orgId)))
     if ((overdueInvoices[0]?.count ?? 0) === 0) score += 20
 
     // 4. Recent activity in last 14 days? (+20)
     const recentActivity = await drizzle
       .select({ count: sql<number>`count(*)` })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         eq(schema.requests.orgId, org.id),
         gte(schema.requests.updatedAt, fourteenDaysAgo),
-      ))
+      ), internalOrgFilter(orgScope, schema.requests.orgId)))
     const recentMessages = await drizzle
       .select({ count: sql<number>`count(*)` })
       .from(schema.messages)
-      .where(and(
+      .where(and(and(
         eq(schema.messages.orgId, org.id),
         gte(schema.messages.createdAt, fourteenDaysAgo),
-      ))
+      ), internalOrgFilter(orgScope, schema.messages.orgId)))
     if ((recentActivity[0]?.count ?? 0) > 0 || (recentMessages[0]?.count ?? 0) > 0) score += 20
 
     // 5. Has at least one contact with email? (+20)

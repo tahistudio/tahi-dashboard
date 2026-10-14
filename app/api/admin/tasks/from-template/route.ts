@@ -68,6 +68,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Template not found' }, { status: 404 })
   }
 
+  if (template.orgId) {
+    const templateDenied = await requireAccessToOrg(drizzle, userId, template.orgId)
+    if (templateDenied) return templateDenied
+  }
+
   // Validate orgId is provided for client-facing task types
   if (template.type !== 'tahi_internal' && !body.orgId) {
     return NextResponse.json(

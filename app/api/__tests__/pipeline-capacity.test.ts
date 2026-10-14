@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({
-    userId: 'user_admin',
+    userId: 'api-service',
     orgId: 'org_tahi',
     sessionId: 'sess_1',
   }),

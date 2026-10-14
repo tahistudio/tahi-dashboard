@@ -1,3 +1,4 @@
+import { contactScopeCondition } from '@/lib/contact-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -119,7 +120,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     })
     .from(schema.dealContacts)
     .leftJoin(schema.contacts, eq(schema.dealContacts.contactId, schema.contacts.id))
-    .where(eq(schema.dealContacts.dealId, id))
+    .where(and(eq(schema.dealContacts.dealId, id), await contactScopeCondition({ userId, orgId })))
 
   // Get activities for this deal. Fetch metadata via a second query using
   // raw SQL so we don't need the column declared in Drizzle yet.
@@ -340,7 +341,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   if (body.stageId !== undefined) updates.stageId = body.stageId
   if (body.currency !== undefined) updates.currency = body.currency
 
-  // Upfront range handling — range now applies only to the upfront portion.
+  // Upfront range handling , range now applies only to the upfront portion.
   let nextValueMin: number | null = existingRange.valueMin
   let nextValueMax: number | null = existingRange.valueMax
   let rangeTouched = false

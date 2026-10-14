@@ -1,3 +1,5 @@
+// This suite exercises numbering business rules with an explicitly permitted admin.
+vi.mock('@/lib/permissions', () => ({ resolvePermissions: vi.fn().mockResolvedValue({ isAdmin: true }) }))
 /**
  * Invoice numbering at the two doors that write it: the create rail and the
  * backfill.

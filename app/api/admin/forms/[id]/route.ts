@@ -1,3 +1,5 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -9,10 +11,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const body = await req.json() as {
@@ -32,6 +36,18 @@ export async function PATCH(
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const [scopeTarget] = await drizzle.select({ orgId: schema.requestForms.orgId }).from(schema.requestForms).where(eq(schema.requestForms.id, id)).limit(1)
+  if (!scopeTarget) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (scopeTarget.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, scopeTarget.orgId)
+    if (scopeDenied) return scopeDenied
+  }
+
+  if (body.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, body.orgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   const updates: Record<string, unknown> = {
     updatedAt: new Date().toISOString(),
@@ -59,14 +75,23 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  const [scopeTarget] = await drizzle.select({ orgId: schema.requestForms.orgId }).from(schema.requestForms).where(eq(schema.requestForms.id, id)).limit(1)
+  if (!scopeTarget) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (scopeTarget.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, scopeTarget.orgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   await drizzle.delete(schema.requestForms).where(eq(schema.requestForms.id, id))
 

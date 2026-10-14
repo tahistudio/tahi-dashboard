@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET  /api/admin/content/glossary/boost-underperformers
  *   List the top-N underperforming glossary terms based on GSC data.
@@ -25,8 +26,10 @@ export const dynamic = 'force-dynamic'
 const BUDGET_MS = 25_000
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
   const { searchParams } = new URL(req.url)
   const topN = Math.max(1, Math.min(50, parseInt(searchParams.get('topN') ?? '20', 10) || 20))
   const typeParam = searchParams.get('type')
@@ -51,8 +54,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
   const body = (await req.json().catch(() => ({}))) as { topN?: number; autoRewrite?: boolean }
   const topN = Math.max(1, Math.min(20, body.topN ?? 5))  // hard cap 20 — this is expensive
   const autoRewrite = !!body.autoRewrite

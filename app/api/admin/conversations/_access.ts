@@ -1,3 +1,4 @@
+import { requireAccessToOrg } from '@/lib/require-access'
 /**
  * app/api/admin/conversations/_access.ts
  *
@@ -65,6 +66,12 @@ export async function requireConversationAccess(
   const scope = await scopedOrgIds(auth)
   if (!isOrgInScope(scope, conversation.orgId, 'allow')) {
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  }
+
+  if (conversation.requestId) {
+    const [request] = await database.select({ orgId: schema.requests.orgId }).from(schema.requests).where(eq(schema.requests.id, conversation.requestId)).limit(1)
+    const denied = await requireAccessToOrg(database, auth.userId, request?.orgId)
+    if (denied) return { ok: false, response: denied }
   }
 
   return { ok: true, participantId, conversation }

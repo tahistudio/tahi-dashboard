@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -11,6 +12,9 @@ import { searchBlockerCandidates } from '@/lib/blockers-server'
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const taskDenied = await requireFeature({ userId, orgId }, 'tasks')
+  const requestDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (taskDenied && requestDenied) return taskDenied
 
   const url = new URL(req.url)
   const q = url.searchParams.get('q') ?? ''
@@ -25,6 +29,6 @@ export async function GET(req: NextRequest) {
     : null
 
   return NextResponse.json({
-    candidates: await searchBlockerCandidates(drizzle, userId, q, exclude),
+    candidates: await searchBlockerCandidates(drizzle, userId, q, exclude, { userId, orgId }),
   })
 }

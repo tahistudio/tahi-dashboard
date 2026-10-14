@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/capacity/start-date
  *
@@ -11,7 +12,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { internalOrgFilter } from '@/lib/internal-route-access'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -22,10 +25,12 @@ const PLAN_HOURS: Record<string, number> = {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'capacity')
+  if (featureDenied) return featureDenied
 
   let body: { estimatedHoursPerWeek?: unknown }
   try {
@@ -43,6 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   // 1. Total team capacity = sum of all team members' weeklyCapacityHours
   const members = await database
@@ -58,7 +64,7 @@ export async function POST(req: NextRequest) {
   const activeSubs = await database
     .select({ planType: schema.subscriptions.planType })
     .from(schema.subscriptions)
-    .where(eq(schema.subscriptions.status, 'active'))
+    .where(and(eq(schema.subscriptions.status, 'active'), internalOrgFilter(orgScope, schema.subscriptions.orgId)))
 
   const committedHours = activeSubs.reduce(
     (sum, s) => sum + (PLAN_HOURS[s.planType] ?? 0),

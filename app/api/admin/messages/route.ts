@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
   const { threads } = await loadInboxThreads(database, {
     viewer,
-    scope: { orgIds, brandIds: null, audience: 'studio' },
+    scope: { orgIds, brandIds: null, audience: 'studio', orgScope: scope },
     channelsByOrg: channels,
     orgNames,
   })

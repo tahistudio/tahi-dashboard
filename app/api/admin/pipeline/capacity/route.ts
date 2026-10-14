@@ -1,3 +1,6 @@
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -30,11 +33,15 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * positive weeklyCapacityHours. See lib/capacity-active-members.ts.
  */
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
 
+
+  const scope = await scopedOrgIds({ userId, orgId })
   const database = await db() as unknown as D1
 
   const [allMembers, inactiveRows] = await Promise.all([
@@ -92,6 +99,7 @@ export async function GET(req: NextRequest) {
       .from(schema.timeEntries)
       .where(and(
         inArray(schema.timeEntries.teamMemberId, memberIds),
+        scope.kind === 'none' ? sql`0 = 1` : scope.kind === 'some' ? orgColumnInScope(schema.timeEntries.orgId, scope.orgIds, { includeNull: true }) : undefined,
         gte(schema.timeEntries.date, weekStart),
         lte(schema.timeEntries.date, weekEnd),
       ))
@@ -105,6 +113,7 @@ export async function GET(req: NextRequest) {
       .from(schema.tasks)
       .where(and(
         inArray(schema.tasks.assigneeId, memberIds),
+        scope.kind === 'none' ? sql`0 = 1` : scope.kind === 'some' ? orgColumnInScope(schema.tasks.orgId, scope.orgIds, { includeNull: true }) : undefined,
         ne(schema.tasks.status, 'done'),
         sql`${schema.tasks.dueDate} IS NOT NULL AND ${schema.tasks.dueDate} <= ${weekEnd}`,
       ))
@@ -118,6 +127,7 @@ export async function GET(req: NextRequest) {
       .from(schema.requests)
       .where(and(
         inArray(schema.requests.assigneeId, memberIds),
+        scope.kind === 'none' ? sql`0 = 1` : scope.kind === 'some' ? orgColumnInScope(schema.requests.orgId, scope.orgIds) : undefined,
         sql`${schema.requests.status} NOT IN ('delivered', 'archived')`,
         sql`${schema.requests.estimatedHours} IS NOT NULL AND ${schema.requests.estimatedHours} > 0`,
       ))

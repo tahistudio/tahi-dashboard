@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -18,6 +19,8 @@ export async function POST(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
   const denied = await requireFeature({ userId, orgId }, 'settings.integrations')
   if (denied) return denied
 

@@ -1,3 +1,5 @@
+import { requireAdmin } from '@/lib/require-admin'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/feedback
  *
@@ -24,10 +26,15 @@ const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 200
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'settings')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+
 
   const url = new URL(req.url)
   const orgFilter = url.searchParams.get('org_id')

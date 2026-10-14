@@ -1,3 +1,5 @@
+import { requireFeature } from '@/lib/require-feature'
+import { requireAdmin } from '@/lib/require-admin'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -10,8 +12,12 @@ export const dynamic = 'force-dynamic'
 // ── GET: return cached briefing if fresh ────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'overview')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
 
   const database = await db()
   const cached = await database.select()
@@ -40,8 +46,12 @@ export async function GET(req: NextRequest) {
 // endpoint can call the same code path directly. See Decision #043.
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'overview')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
 
   try {
     const briefing = await generateBriefing()

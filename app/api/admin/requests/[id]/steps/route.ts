@@ -1,8 +1,9 @@
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, asc } from 'drizzle-orm'
+import { eq, asc, and } from 'drizzle-orm'
 import { requireAccessToOrg } from '@/lib/require-access'
 import { attributedUserId } from '@/lib/mcp-actor'
 
@@ -36,6 +37,8 @@ export async function GET(
 ) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
   const database = await db() as unknown as D1
@@ -60,6 +63,8 @@ export async function POST(
   const auth = await getRequestAuth(req)
   const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
   const body = await req.json() as {
@@ -77,6 +82,12 @@ export async function POST(
 
   const denied = await guardRequestAccess(database, userId, requestId)
   if (denied) return denied
+
+  if (body.parentStepId) {
+    const [parentStep] = await database.select({ id: schema.requestSteps.id }).from(schema.requestSteps)
+      .where(and(eq(schema.requestSteps.id, body.parentStepId), eq(schema.requestSteps.requestId, requestId))).limit(1)
+    if (!parentStep) return NextResponse.json({ error: 'Parent step not found' }, { status: 404 })
+  }
 
   const step = await database
     .insert(schema.requestSteps)

@@ -1,6 +1,7 @@
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAccessToOrg } from '@/lib/require-access'
+import { requireManagePermissions } from '@/lib/require-permission'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
@@ -72,6 +73,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const database = await db()
   const denied = await requireAccessToOrg(database, userId, clientOrgId)
   if (denied) return denied
+  const permission = await requireManagePermissions(database, { userId, orgId })
+  if (permission.denied) return permission.denied
   const now = new Date().toISOString()
 
   // Remove any existing PM assignment for this org. Find the matching

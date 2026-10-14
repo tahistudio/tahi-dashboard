@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/health/scan
  *
@@ -69,8 +70,10 @@ async function fetchSitemapUrls(rootUrl: string, depth = 0): Promise<string[]> {
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const body = (await req.json().catch(() => ({}))) as { urls?: string[]; continueFromIndex?: number }
   const startIndex = Math.max(0, body.continueFromIndex ?? 0)

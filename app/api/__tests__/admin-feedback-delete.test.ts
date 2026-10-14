@@ -69,7 +69,7 @@ beforeEach(() => {
   h.state.deleteCalls = []
   h.state.hasStorage = true
   h.state.storageDelete = vi.fn().mockResolvedValue(undefined)
-  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 's1' })
+  vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'api-service', orgId: 'org_tahi', sessionId: 's1' })
 })
 
 describe('DELETE /api/admin/feedback/[id] - auth', () => {

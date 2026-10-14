@@ -151,7 +151,7 @@ describe('GET /api/admin/guide', () => {
   })
 
   it('returns every section for an admin caller', async () => {
-    callAs('org_tahi', 'user_1')
+    callAs('org_tahi', 'api-service')
     const res = await getAdminGuide(new NextRequest('http://localhost/api/admin/guide'))
     expect(res.status).toBe(200)
     const json = (await res.json()) as { sections: { key: string }[] }
@@ -160,7 +160,7 @@ describe('GET /api/admin/guide', () => {
   })
 
   it('returns one section when ?key is given, 404 for an unknown key', async () => {
-    callAs('org_tahi', 'user_1')
+    callAs('org_tahi', 'api-service')
     const ok = await getAdminGuide(new NextRequest('http://localhost/api/admin/guide?key=blockers'))
     expect(ok.status).toBe(200)
     const okJson = (await ok.json()) as { section: { key: string } }

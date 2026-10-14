@@ -68,13 +68,15 @@ const RATES: Row[] = [
 const OWED_NZD = 1000 + 500 + 250
 const DRAFTS_NZD = 4200 + 1200
 
+vi.mock('@/lib/internal-route-access', () => ({ internalOrgFilter: () => undefined }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn(),
   isTahiAdmin: (orgId: string | null) => orgId === 'org-tahi',
 }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
 vi.mock('@/lib/permissions', () => ({
-  resolvePermissions: async () => ({}),
+  resolvePermissions: async () => ({ isAdmin: true }),
   can: () => true,
 }))
 vi.mock('@/lib/xero', () => ({ callXeroAPI: async () => null }))

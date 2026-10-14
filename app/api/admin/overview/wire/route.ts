@@ -1,10 +1,13 @@
+import { internalFeatureOrgFilter, internalMessageFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds, type OrgScope } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, gte, isNotNull, isNull, inArray, ne, desc } from 'drizzle-orm'
+import { eq, and, gte, isNotNull, isNull, inArray, ne, desc, sql } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
-import { resolvePermissions, can } from '@/lib/permissions'
+import { resolvePermissions, can, type ResolvedAccess } from '@/lib/permissions'
 import {
   mergeWireEvents,
   wireSince,
@@ -33,22 +36,25 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature(auth, 'overview')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const drizzle = database as D1
+  const access = await resolvePermissions(drizzle, auth)
+  const orgScope = await scopedOrgIds(auth, access)
 
   // ── scope=me ──────────────────────────────────────────────────────────────
   // Teammate home wants a member-scoped pulse (assignments to me, comments on
   // my requests, my tasks moved) rather than the studio-wide feed. Resolved via
   // teamMembers.clerkUserId; honest empty when the caller has no member row.
   if (new URL(req.url).searchParams.get('scope') === 'me') {
-    const events = await memberWire(drizzle, auth.userId)
+    const events = await memberWire(drizzle, auth.userId, orgScope, access)
     return NextResponse.json({ events })
   }
 
   // Feature-level access: omit money events without financial_reports and
   // client events without clients (mirrors the overview endpoint's gating).
-  const access = await resolvePermissions(drizzle, auth)
   const canSeeMoney = can(access, 'financial_reports')
   const canSeeClients = can(access, 'clients')
 
@@ -72,7 +78,7 @@ export async function GET(req: NextRequest) {
   const candidates: WireEvent[] = []
 
   // ── Content published (publish_history) ───────────────────────────────────
-  try {
+  if (can(access, 'content_studio')) try {
     const rows = await drizzle
       .select({
         id: schema.publishHistory.id,
@@ -99,7 +105,7 @@ export async function GET(req: NextRequest) {
   // Intentionally skipped: there is no posts/buffer table in db/schema.ts.
 
   // ── Automations run (automation_log + rule name) ──────────────────────────
-  try {
+  if (can(access, 'settings')) try {
     const rows = await drizzle
       .select({
         id: schema.automationLog.id,
@@ -127,7 +133,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Leads scored (leads with aiScore, recently run) ───────────────────────
-  try {
+  if (can(access, 'leads') && orgScope.kind !== 'none') try {
     const rows = await drizzle
       .select({
         id: schema.leads.id,
@@ -165,10 +171,10 @@ export async function GET(req: NextRequest) {
           paidAt: schema.invoices.paidAt,
         })
         .from(schema.invoices)
-        .where(and(
+        .where(and(and(
           eq(schema.invoices.status, 'paid'),
           gte(schema.invoices.paidAt, since),
-        ))
+        ), internalFeatureOrgFilter(access, 'invoices', orgScope, schema.invoices.orgId)))
         .orderBy(desc(schema.invoices.paidAt))
         .limit(PER_SOURCE)
       for (const r of rows) {
@@ -198,10 +204,10 @@ export async function GET(req: NextRequest) {
         })
         .from(schema.caseStudySubmissions)
         .leftJoin(schema.organisations, eq(schema.caseStudySubmissions.orgId, schema.organisations.id))
-        .where(and(
+        .where(and(and(
           isNotNull(schema.caseStudySubmissions.submittedAt),
           gte(schema.caseStudySubmissions.submittedAt, since),
-        ))
+        ), internalFeatureOrgFilter(access, 'clients', orgScope, schema.caseStudySubmissions.orgId)))
         .orderBy(desc(schema.caseStudySubmissions.submittedAt))
         .limit(PER_SOURCE)
       for (const r of rows) {
@@ -231,7 +237,7 @@ export async function GET(req: NextRequest) {
 // moving forward. Reuses the studio wire's WireDomain palette so the-wire.tsx
 // renders it unchanged ('client' ink for a client reply, 'ops' otherwise).
 // Every source is isolated so a missing table can never break the rail.
-async function memberWire(drizzle: D1, userId: string | null): Promise<WireEvent[]> {
+async function memberWire(drizzle: D1, userId: string | null, orgScope: OrgScope, access: ResolvedAccess): Promise<WireEvent[]> {
   if (!userId) return []
 
   let memberId: string | null = null
@@ -257,16 +263,16 @@ async function memberWire(drizzle: D1, userId: string | null): Promise<WireEvent
     const direct = await drizzle
       .select({ id: schema.requests.id })
       .from(schema.requests)
-      .where(eq(schema.requests.assigneeId, memberId))
+      .where(and(eq(schema.requests.assigneeId, memberId), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
     for (const r of direct) reqIds.add(r.id)
     const parts = await drizzle
       .select({ requestId: schema.requestParticipants.requestId })
       .from(schema.requestParticipants)
-      .where(and(
+      .where(and(and(
         eq(schema.requestParticipants.participantId, memberId),
         eq(schema.requestParticipants.participantType, 'team_member'),
         isNull(schema.requestParticipants.removedAt),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, sql`(SELECT org_id FROM requests WHERE id = ${schema.requestParticipants.requestId})`)))
     for (const p of parts) reqIds.add(p.requestId)
   } catch {
     // requests / participants missing - no request-derived events.
@@ -282,13 +288,13 @@ async function memberWire(drizzle: D1, userId: string | null): Promise<WireEvent
       })
       .from(schema.requestParticipants)
       .innerJoin(schema.requests, eq(schema.requestParticipants.requestId, schema.requests.id))
-      .where(and(
+      .where(and(and(
         eq(schema.requestParticipants.participantId, memberId),
         eq(schema.requestParticipants.participantType, 'team_member'),
         inArray(schema.requestParticipants.role, ['assignee', 'pm']),
         isNull(schema.requestParticipants.removedAt),
         gte(schema.requestParticipants.addedAt, since),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
       .orderBy(desc(schema.requestParticipants.addedAt))
       .limit(PER_SOURCE)
     for (const r of rows) {
@@ -316,12 +322,12 @@ async function memberWire(drizzle: D1, userId: string | null): Promise<WireEvent
         })
         .from(schema.messages)
         .innerJoin(schema.requests, eq(schema.messages.requestId, schema.requests.id))
-        .where(and(
+        .where(and(and(and(
           inArray(schema.messages.requestId, [...reqIds]),
           isNull(schema.messages.deletedAt),
           ne(schema.messages.authorId, memberId),
           gte(schema.messages.createdAt, since),
-        ))
+        ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)), internalMessageFilter(access, orgScope)))
         .orderBy(desc(schema.messages.createdAt))
         .limit(PER_SOURCE)
       for (const r of rows) {
@@ -351,11 +357,11 @@ async function memberWire(drizzle: D1, userId: string | null): Promise<WireEvent
         updatedAt: schema.tasks.updatedAt,
       })
       .from(schema.tasks)
-      .where(and(
+      .where(and(and(
         eq(schema.tasks.assigneeId, memberId),
         inArray(schema.tasks.status, ['in_progress', 'blocked', 'done']),
         gte(schema.tasks.updatedAt, since),
-      ))
+      ), internalFeatureOrgFilter(access, 'tasks', orgScope, schema.tasks.orgId, true)))
       .orderBy(desc(schema.tasks.updatedAt))
       .limit(PER_SOURCE)
     for (const r of rows) {

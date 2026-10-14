@@ -1,9 +1,11 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { count, sql, eq } from 'drizzle-orm'
+import { count, sql, eq, and } from 'drizzle-orm'
 import { calculatePipelineTotals, type StageForMath, type DealForMath } from '@/lib/pipeline-math'
 
 // ── GET /api/admin/reports/sales ───────────────────────────────────────────
@@ -18,6 +20,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied
 
   const database = await db()
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   // Pipeline value by stage (join deals with pipeline_stages)
   // Exclude archived deals, and use COALESCE(valueNzd, value, 0) to match pipeline page logic
@@ -36,6 +39,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.pipelineStages)
     .leftJoin(schema.deals, sql`${schema.deals.stageId} = ${schema.pipelineStages.id} AND (${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
+    .where(internalOrgFilter(orgScope, schema.deals.orgId, true))
     .groupBy(schema.pipelineStages.id)
     .orderBy(schema.pipelineStages.position)
 
@@ -55,7 +59,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.deals)
     .leftJoin(schema.pipelineStages, eq(schema.deals.stageId, schema.pipelineStages.id))
-    .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
+    .where(and(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`, internalOrgFilter(orgScope, schema.deals.orgId, true)))
 
   // Historical probability per stage: reuse the same formula as the
   // pipeline-stages endpoint (won / deals-reached) when >=3 deals.
@@ -109,7 +113,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.deals)
     .innerJoin(schema.pipelineStages, sql`${schema.deals.stageId} = ${schema.pipelineStages.id}`)
-    .where(sql`${schema.pipelineStages.isClosedWon} = 1 AND (${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
+    .where(and(sql`${schema.pipelineStages.isClosedWon} = 1 AND (${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`, internalOrgFilter(orgScope, schema.deals.orgId, true)))
 
   let avgDaysToClose = 0
   if (wonDeals.length > 0) {
@@ -154,7 +158,7 @@ export async function GET(req: NextRequest) {
       stageId: schema.deals.stageId,
     })
     .from(schema.deals)
-    .where(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`)
+    .where(and(sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`, internalOrgFilter(orgScope, schema.deals.orgId, true)))
 
   // Get closed-won and closed-lost stage IDs for close rate calc
   const closedWonStageIds = new Set(

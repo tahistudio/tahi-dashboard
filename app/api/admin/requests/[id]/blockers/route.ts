@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { attributedUserId } from '@/lib/mcp-actor'
 import { NextRequest, NextResponse } from 'next/server'
@@ -16,6 +17,8 @@ type Params = { params: Promise<{ id: string }> }
 export async function GET(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -25,7 +28,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await guardSubject(drizzle, userId, subject)
   if (denied) return denied
 
-  return NextResponse.json(await listBlockers(drizzle, userId, subject))
+  return NextResponse.json(await listBlockers(drizzle, userId, subject, { userId, orgId }))
 }
 
 // ── POST /api/admin/requests/[id]/blockers ─────────────────────────────────
@@ -33,6 +36,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   const auth = await getRequestAuth(req)
   const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const body = (await req.json().catch(() => ({}))) as { blockerType?: string; blockerId?: string }

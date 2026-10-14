@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 /**
  * POST /api/admin/integrations/airwallex/sync
  *
@@ -35,6 +36,8 @@ export async function POST(req: NextRequest) {
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)
     if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const adminDenied = await requireAdmin(auth)
+    if (adminDenied) return adminDenied
     const denied = await requireFeature(auth, 'settings.integrations')
     if (denied) return denied
   }

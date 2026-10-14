@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { GUIDE_SECTIONS, guideSectionsFor } from '@/lib/dashboard-guide'
@@ -5,10 +6,12 @@ import { GUIDE_SECTIONS, guideSectionsFor } from '@/lib/dashboard-guide'
 // GET /api/admin/guide - the full "how this works" guide, every section.
 // Optional ?key=<section key> returns just one section.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'help')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const key = url.searchParams.get('key')

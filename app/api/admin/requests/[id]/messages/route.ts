@@ -1,3 +1,6 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -22,6 +25,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -36,6 +41,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await requireAccessToOrg(drizzle, userId, owner.orgId)
   if (denied) return denied
 
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
   const msgs = await drizzle
     .select({
       id: schema.messages.id,
@@ -63,6 +70,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     .where(and(
       eq(schema.messages.requestId, id),
       isNull(schema.messages.deletedAt),
+      scope.kind === 'all' ? undefined : orgColumnInScope(schema.messages.orgId, rowOrgIds),
     ))
     .orderBy(asc(schema.messages.createdAt))
 
@@ -93,7 +101,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         storageKey: schema.files.storageKey,
       })
       .from(schema.files)
-      .where(inArray(schema.files.messageId, idSlice))
+      .where(and(inArray(schema.files.messageId, idSlice), scope.kind === 'all' ? undefined : orgColumnInScope(schema.files.orgId, rowOrgIds)))
     fileRows.push(...rows)
   }
   const filesByMessage = new Map<string, MessageFileRow[]>()
@@ -117,7 +125,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       createdAt: schema.conversations.createdAt,
     })
     .from(schema.conversations)
-    .where(eq(schema.conversations.requestId, id))
+    .where(and(eq(schema.conversations.requestId, id), scope.kind === 'all' ? undefined : orgColumnInScope(schema.conversations.orgId, rowOrgIds, { includeNull: true })))
   const conversationId = pickThreadConversationId(convRows)
 
   return NextResponse.json({ items, conversationId, page: 1, limit: items.length })
@@ -133,6 +141,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+    if (featureDenied) return featureDenied
 
     const { id } = await params
 
@@ -189,6 +199,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     // before anything is written.
     const denied = await requireAccessToOrg(drizzle, userId, request.orgId)
     if (denied) return denied
+
+    if (body.conversationId) {
+      const [conversation] = await drizzle.select({ orgId: schema.conversations.orgId, requestId: schema.conversations.requestId })
+        .from(schema.conversations).where(eq(schema.conversations.id, body.conversationId)).limit(1)
+      if (!conversation) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+      if (conversation.orgId) {
+        const conversationDenied = await requireAccessToOrg(drizzle, userId, conversation.orgId)
+        if (conversationDenied) return conversationDenied
+      }
+      if (conversation.orgId && conversation.orgId !== request.orgId || conversation.requestId && conversation.requestId !== id) {
+        return NextResponse.json({ error: 'Conversation must belong to this request client' }, { status: 400 })
+      }
+    }
 
     // Look up team member ID by Clerk user ID. The name signs the email: a
     // client should hear from a person, not from "the team".

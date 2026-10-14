@@ -1,3 +1,5 @@
+import { requireAdmin } from '@/lib/require-admin'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
@@ -7,10 +9,15 @@ import { desc, eq } from 'drizzle-orm'
 // GET /api/admin/automations/log?ruleId=xxx&limit=50
 // Returns automation execution log entries.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'settings')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+
 
   const url = new URL(req.url)
   const ruleId = url.searchParams.get('ruleId')

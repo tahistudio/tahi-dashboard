@@ -1,3 +1,4 @@
+import { requireTimerAccess } from '@/lib/timer-access'
 /**
  * POST /api/admin/timers/ping
  *
@@ -29,11 +30,13 @@ export async function POST(req: NextRequest) {
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   const [timer] = await drizzle
-    .select({ id: schema.activeTimers.id })
+    .select()
     .from(schema.activeTimers)
     .where(eq(schema.activeTimers.userId, userId))
     .limit(1)
   if (!timer) return new NextResponse(null, { status: 204 })
+  const scopeDenied = await requireTimerAccess(drizzle, { userId, orgId }, timer)
+  if (scopeDenied) return scopeDenied
 
   await drizzle
     .update(schema.activeTimers)

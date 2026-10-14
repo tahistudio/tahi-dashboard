@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 /**
  * GET /api/admin/reports/ai-cost
  *
@@ -41,6 +42,8 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
   const denied = await requireFeature({ userId, orgId }, 'financial_reports')
   if (denied) return denied
 

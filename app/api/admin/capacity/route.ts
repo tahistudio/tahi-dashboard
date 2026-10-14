@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, and, ne, asc, gte, desc } from 'drizzle-orm'
@@ -28,6 +29,8 @@ export async function GET(req: NextRequest) {
   if (!targetOrgId) return NextResponse.json({ error: 'orgId required' }, { status: 400 })
 
   const database = await db() as unknown as D1
+  const accessDenied = await requireAccessToOrg(database, userId, targetOrgId)
+  if (accessDenied) return accessDenied
 
   const [sub] = await database
     .select({
@@ -158,6 +161,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
+  const [target] = await database.select({ orgId: schema.requests.orgId })
+    .from(schema.requests).where(eq(schema.requests.id, body.requestId)).limit(1)
+  const accessDenied = await requireAccessToOrg(database, userId, target?.orgId)
+  if (accessDenied) return accessDenied
 
   await database
     .update(schema.requests)

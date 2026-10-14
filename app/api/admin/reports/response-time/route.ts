@@ -1,9 +1,11 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sql } from 'drizzle-orm'
+import { sql, and } from 'drizzle-orm'
 
 export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
@@ -14,6 +16,7 @@ export async function GET(req: NextRequest) {
   if (featureDenied) return featureDenied
 
   const database = await db()
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   // Get all team members with their message counts and avg response time
   const members = await database.select().from(schema.teamMembers)
@@ -24,7 +27,7 @@ export async function GET(req: NextRequest) {
       const msgResult = await database
         .select({ count: sql<number>`count(*)` })
         .from(schema.messages)
-        .where(sql`${schema.messages.authorId} = ${member.id}`)
+        .where(and(sql`${schema.messages.authorId} = ${member.id}`, internalOrgFilter(orgScope, schema.messages.orgId)))
 
       const messageCount = msgResult[0]?.count ?? 0
 

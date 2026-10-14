@@ -1,3 +1,5 @@
+// Business fixtures grant the owning feature; real scoped-seat gates are covered by nested-client-scope-sqlite.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn(async () => null) }))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { drizzle, type AnyD1Database } from 'drizzle-orm/d1'

@@ -31,7 +31,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await requireDealAccess(database as unknown as D1, { userId, orgId }, id)
   if (denied) return denied
 
-  const calls = await listCallsForParent(database, 'deal', id)
+  const calls = await listCallsForParent(database, 'deal', id, { userId, orgId })
   return NextResponse.json({ calls })
 }
 

@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/health/indexnow
  *
@@ -29,8 +30,10 @@ const INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow'
 const HOST = 'www.tahi.studio'
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const body = (await req.json().catch(() => ({}))) as { urls?: string[] }
   const urls = Array.isArray(body.urls) ? body.urls.filter(u => typeof u === 'string' && u.length > 0) : []

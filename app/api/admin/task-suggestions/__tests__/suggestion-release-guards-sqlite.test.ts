@@ -249,8 +249,17 @@ describe('overview suggestion counts over actual SQLite and current permissions'
     fixture.queries.length = 0
     asUser(user)
     const response = await getOverview()
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({ kpis: { taskSuggestions: { pending: 0, calls: 0 } } })
+    if (user === 'roleless' || user === 'revoked') {
+      // The overview now refuses a seat with no active role. The count helper
+      // must still fail closed when called directly with the same identity.
+      expect(response.status).toBe(403)
+      const auth = { userId: user, orgId: 'tahi-org' }
+      expect(await loadTaskSuggestionsOverview(fixture.database, auth, await resolvePermissions(fixture.database, auth)))
+        .toEqual({ pending: 0, calls: 0 })
+    } else {
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toMatchObject({ kpis: { taskSuggestions: { pending: 0, calls: 0 } } })
+    }
     expect(business()).toEqual([])
   })
   it.each(['tasks', 'requests'])('zeros counts when %s is explicitly denied', async feature => {

@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -51,6 +52,8 @@ export async function POST(req: NextRequest) {
   // Invoices (CLAUDE.md rule 11 + the role contract in lib/require-feature).
   const deniedFeature = await requireFeature({ userId, orgId }, 'invoices')
   if (deniedFeature) return deniedFeature
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
 
   const body = (await req.json().catch(() => ({}))) as { dryRun?: unknown }
   if (body.dryRun !== undefined && typeof body.dryRun !== 'boolean') {

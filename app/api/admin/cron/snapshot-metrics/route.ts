@@ -1,3 +1,4 @@
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 /**
  * POST /api/admin/cron/snapshot-metrics
  *
@@ -89,6 +90,8 @@ export async function POST(req: NextRequest) {
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)
     if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const roleDenied = await requireStudioAdmin(auth, 'settings')
+    if (roleDenied) return roleDenied
     const denied = await requireFeature(auth, 'financial_reports')
     if (denied) return denied
   }

@@ -1,3 +1,5 @@
+import { requireDiscoveryCallAccess } from '@/lib/discovery-call-access'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET   /api/admin/call-transcripts/[id]   the full text and the wrap up
  * PATCH /api/admin/call-transcripts/[id]   attach parked notes to a call
@@ -63,9 +65,10 @@ async function loadTranscript(database: D1, id: string) {
  */
 async function guardTranscript(
   database: D1,
-  userId: string | null,
+  auth: { userId: string | null; orgId: string | null },
   row: { callKind: string | null; callId: string | null; source: string; externalId: string },
 ): Promise<NextResponse | null> {
+  const { userId } = auth
   let recorder: Awaited<ReturnType<typeof recordingTranscriptOrg>>
   try {
     recorder = await recordingTranscriptOrg(database as unknown as DB, row)
@@ -82,6 +85,10 @@ async function guardTranscript(
   if (!row.callId) return requireAccessToOrgOrPreClient(database, userId, null)
   const kind = parseCallKind(row.callKind)
   if (!kind) return requireAccessToOrgOrPreClient(database, userId, null)
+  if (kind === 'discovery') {
+    const denied = await requireDiscoveryCallAccess(database, auth, row.callId)
+    if (denied) return denied
+  }
   const { found, orgId } = await resolveCallOrgId(database, kind, row.callId)
   if (!found) return requireAccessToOrgOrPreClient(database, userId, null)
   return requireAccessToOrgOrPreClient(database, userId, orgId)
@@ -93,6 +100,8 @@ export async function GET(
 ) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'calls')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db() as unknown as D1
@@ -104,7 +113,7 @@ export async function GET(
     return withRecordingContext(req, row.externalId.slice('recording:'.length), async () => NextResponse.json({ transcript: row }))
   }
 
-  const denied = await guardTranscript(database, userId, row)
+  const denied = await guardTranscript(database, { userId, orgId }, row)
   if (denied) return denied
 
   return NextResponse.json({ transcript: row })
@@ -116,6 +125,8 @@ export async function PATCH(
 ) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'calls')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const body = await req.json().catch(() => ({})) as { callKind?: unknown; callId?: unknown }
@@ -137,7 +148,7 @@ export async function PATCH(
   // The caller has to be allowed to see the notes they are moving as well as
   // the call they are moving them to, or an attach becomes a way to read a
   // transcript you could not otherwise open.
-  const deniedSource = await guardTranscript(database, userId, row)
+  const deniedSource = await guardTranscript(database, { userId, orgId }, row)
   if (deniedSource) return deniedSource
 
   // Recorder transcripts keep durable client scope and links in one lease,
@@ -150,6 +161,10 @@ export async function PATCH(
     })
   }
 
+  if (callKind === 'discovery') {
+    const targetDenied = await requireDiscoveryCallAccess(database, { userId, orgId }, callId)
+    if (targetDenied) return targetDenied
+  }
   const target = await resolveCallOrgId(database, callKind, callId)
   if (!target.found) {
     return NextResponse.json({ error: 'Call not found' }, { status: 404 })

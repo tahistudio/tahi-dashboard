@@ -1,3 +1,5 @@
+import { requireDiscoveryCallAccess } from '@/lib/discovery-call-access'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/discovery-calls/[id]/extract
  *
@@ -116,13 +118,18 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'calls')
+  if (featureDenied) return featureDenied
+
 
   const { id } = await params
   const database = await db()
+  const scopeDenied = await requireDiscoveryCallAccess(database, { userId, orgId }, id)
+  if (scopeDenied) return scopeDenied
 
   const [call] = await database
     .select()

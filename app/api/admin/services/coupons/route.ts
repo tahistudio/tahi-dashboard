@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -28,10 +29,13 @@ function parseCouponValue(value: string | null): CouponData | null {
 
 // GET /api/admin/services/coupons - list all coupons
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'billing')
+  if (featureDenied) return featureDenied
+
 
   const database = await db()
   const rows = await database
@@ -50,10 +54,13 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/services/coupons - create a coupon
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'billing')
+  if (featureDenied) return featureDenied
+
 
   const body = (await req.json()) as {
     code?: string
@@ -107,10 +114,13 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/admin/services/coupons - delete a coupon
 export async function DELETE(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'billing')
+  if (featureDenied) return featureDenied
+
 
   const { searchParams } = new URL(req.url)
   const code = searchParams.get('code')

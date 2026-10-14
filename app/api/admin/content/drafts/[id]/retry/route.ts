@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * POST /api/admin/content/drafts/[id]/retry
  *
@@ -28,8 +29,10 @@ export const dynamic = 'force-dynamic'
 const RETRY_ELIGIBLE = ['failed', 'cost_capped'] as const
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const { id } = await ctx.params
   if (!id) return NextResponse.json({ error: 'Missing draft id' }, { status: 400 })

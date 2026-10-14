@@ -1,10 +1,12 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireAccessToOrg } from '@/lib/require-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import type { DB } from '@/db/d1'
-import { eq, and, lte, inArray } from 'drizzle-orm'
+import { eq, and, lte, inArray, sql } from 'drizzle-orm'
 import { logAudit } from '@/lib/audit'
 import {
   planStampInvoiced,
@@ -105,11 +107,18 @@ export async function POST(req: NextRequest) {
 
   const database = await db() as DB
 
+  if (orgFilter) {
+    const scopeDenied = await requireAccessToOrg(database, userId, orgFilter)
+    if (scopeDenied) return scopeDenied
+  }
+  const scope = await scopedOrgIds({ userId, orgId })
   const conditions = [
     eq(schema.timeEntries.billable, true),
     lte(schema.timeEntries.date, before),
   ]
   if (orgFilter) conditions.push(eq(schema.timeEntries.orgId, orgFilter))
+  if (scope.kind === 'none') conditions.push(sql`0 = 1`)
+  if (scope.kind === 'some') conditions.push(sql`${schema.timeEntries.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))`)
 
   // Every billable entry on or before the cutoff, in whatever invoice state it
   // holds. Unlike the export, this reads invoice_id AND invoiced_at rather

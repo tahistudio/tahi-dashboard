@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'clients')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const status = url.searchParams.get('status') ?? 'all'

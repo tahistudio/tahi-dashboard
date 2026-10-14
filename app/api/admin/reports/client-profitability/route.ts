@@ -1,3 +1,5 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -30,6 +32,7 @@ export async function GET(req: NextRequest) {
   if (featureDenied) return featureDenied
 
   const drizzle = (await db()) as D1
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   // Apply team-member scoping
   const scope = await getOrgScope(drizzle, userId)
@@ -49,7 +52,7 @@ export async function GET(req: NextRequest) {
       status: schema.organisations.status,
     })
     .from(schema.organisations)
-    .where(ne(schema.organisations.status, 'archived'))
+    .where(and(ne(schema.organisations.status, 'archived'), internalOrgFilter(orgScope, schema.organisations.id)))
 
   const scopedOrgs = scope === null ? orgs : orgs.filter(o => scope.includes(o.id))
   if (scopedOrgs.length === 0) return NextResponse.json({ clients: [] })
@@ -64,10 +67,10 @@ export async function GET(req: NextRequest) {
       currency: schema.invoices.currency,
     })
     .from(schema.invoices)
-    .where(and(
+    .where(and(and(
       inArray(schema.invoices.orgId, orgIds),
       eq(schema.invoices.status, 'paid'),
-    ))
+    ), internalOrgFilter(orgScope, schema.invoices.orgId)))
 
   const revenueByOrg = new Map<string, number>()
   for (const inv of paidInvoices) {
@@ -83,7 +86,7 @@ export async function GET(req: NextRequest) {
       currency: schema.clientCosts.currency,
     })
     .from(schema.clientCosts)
-    .where(inArray(schema.clientCosts.orgId, orgIds))
+    .where(and(inArray(schema.clientCosts.orgId, orgIds), internalOrgFilter(orgScope, schema.clientCosts.orgId)))
     .catch(() => [] as Array<{ orgId: string; amount: number; currency: string }>)
 
   const costByOrg = new Map<string, number>()

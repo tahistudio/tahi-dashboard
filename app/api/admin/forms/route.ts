@@ -1,3 +1,5 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -13,10 +15,12 @@ const AUDIENCES = ['all_clients', 'retainer_clients', 'internal_only']
 //   - orgId: that client's overrides PLUS the inherited global forms (each row
 //     carries its own orgId so the UI can chip Override vs Global)
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const url = new URL(req.url)
   const category = url.searchParams.get('category')
@@ -24,6 +28,11 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  if (filterOrgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, filterOrgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   const conditions = []
   if (category) {
@@ -62,10 +71,12 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/forms - create form template
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const body = await req.json() as {
     name?: string
@@ -90,6 +101,11 @@ export async function POST(req: NextRequest) {
 
   const database = await db()
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+  if (body.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, body.orgId)
+    if (scopeDenied) return scopeDenied
+  }
 
   await drizzle.insert(schema.requestForms).values({
     id,

@@ -1,3 +1,4 @@
+import { requireAccessToOrg } from '@/lib/require-access'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
@@ -54,6 +55,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!sub) {
     return NextResponse.json({ error: 'Subscription not found' }, { status: 404 })
   }
+  const scopeDenied = await requireAccessToOrg(drizzle, userId, sub.orgId)
+  if (scopeDenied) return scopeDenied
 
   const oldCycle = (sub.billingInterval ?? 'monthly') as BillingInterval
   const now = new Date().toISOString()

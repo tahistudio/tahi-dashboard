@@ -29,6 +29,9 @@ vi.mock('@/lib/require-access', () => ({
   requireAccessToOrg: vi.fn().mockResolvedValue(null),
 }))
 
+// These manual billing cases exercise a permitted admin's target resolution.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+
 vi.mock('@/lib/internal-org', () => ({
   INTERNAL_ORG_ID: 'org_tahi_internal',
   ensureInternalOrg: vi.fn().mockResolvedValue('org_tahi_internal'),

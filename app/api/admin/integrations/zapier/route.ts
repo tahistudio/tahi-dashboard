@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
+import { requireAccessToOrg } from '@/lib/require-access'
 
 /**
  * GET /api/admin/integrations/zapier
@@ -82,6 +83,8 @@ export async function POST(req: NextRequest) {
     if (!body.orgId || !body.title) {
       return NextResponse.json({ error: 'orgId and title are required' }, { status: 400 })
     }
+    const accessDenied = await requireAccessToOrg(database, userId, body.orgId)
+    if (accessDenied) return accessDenied
 
     const id = crypto.randomUUID()
     await database.insert(schema.requests).values({
@@ -103,6 +106,10 @@ export async function POST(req: NextRequest) {
     if (!body.requestId || !body.status) {
       return NextResponse.json({ error: 'requestId and status are required' }, { status: 400 })
     }
+    const [target] = await database.select({ orgId: schema.requests.orgId })
+      .from(schema.requests).where(eq(schema.requests.id, body.requestId)).limit(1)
+    const accessDenied = await requireAccessToOrg(database, userId, target?.orgId)
+    if (accessDenied) return accessDenied
 
     await database
       .update(schema.requests)

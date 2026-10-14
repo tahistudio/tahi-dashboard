@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/require-admin'
 /**
  * POST /api/admin/financial-reports/backfill-mrr
  *
@@ -23,6 +24,8 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function POST(req: NextRequest) {
   const { userId, orgId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
   const denied = await requireFeature({ userId, orgId }, 'financial_reports')
   if (denied) return denied
 

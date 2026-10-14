@@ -1,3 +1,5 @@
+import { requireAdmin } from '@/lib/require-admin'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -10,10 +12,14 @@ type DrizzleDB = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 // ── POST /api/admin/seed ────────────────────────────────────────────────────
 // Creates sample data for testing. Admin only.
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+  const featureDenied = await requireFeature({ userId, orgId }, 'settings')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const drizzle = database as DrizzleDB

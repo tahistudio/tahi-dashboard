@@ -1,3 +1,4 @@
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 /**
  * POST /api/admin/cron/leads-ai
  *
@@ -113,10 +114,12 @@ export async function POST(req: NextRequest) {
   const cronSecret = process.env.TAHI_CRON_SECRET ?? process.env.CRON_SECRET
   const hasCronAuth = hasCronSecretAuth(req)
   if (!hasCronAuth) {
-    const { orgId } = await getRequestAuth(req)
+    const { orgId, userId } = await getRequestAuth(req)
     if (!isTahiAdmin(orgId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+    const roleDenied = await requireStudioAdmin({ userId, orgId }, 'settings')
+    if (roleDenied) return roleDenied
   }
 
   const database = await db()

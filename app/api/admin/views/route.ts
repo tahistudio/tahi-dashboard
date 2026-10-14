@@ -1,3 +1,4 @@
+import { requireAdminResource } from '@/lib/require-admin-resource'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -12,7 +13,7 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 //   - aggregates: avg / total duration, last viewed
 //   - timeline: most recent N events with country / duration / when
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const url = new URL(req.url)
@@ -25,6 +26,8 @@ export async function GET(req: NextRequest) {
   }
 
   const database = await db() as unknown as D1
+  const denied = await requireAdminResource(database, { userId, orgId }, resourceType, resourceId)
+  if (denied) return denied
   const where = and(
     eq(schema.shareViewEvents.resourceType, resourceType),
     eq(schema.shareViewEvents.resourceId, resourceId),

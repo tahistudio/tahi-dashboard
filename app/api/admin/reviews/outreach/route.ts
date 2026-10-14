@@ -1,3 +1,6 @@
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
@@ -8,15 +11,21 @@ import { sql, eq, and } from 'drizzle-orm'
 // Trigger review outreach for all orgs older than N days (default 90) that
 // do not already have a case study submission.
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'reviews')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json().catch(() => ({})) as { minAgeDays?: number }
   const minAgeDays = body.minAgeDays ?? 90
 
   const database = await db()
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ success: true, created: 0, eligible: 0, skipped: 0 })
 
   // Find active orgs created more than minAgeDays ago
   const cutoff = new Date(Date.now() - minAgeDays * 86400000).toISOString()
@@ -27,6 +36,7 @@ export async function POST(req: NextRequest) {
     .where(
       and(
         eq(schema.organisations.status, 'active'),
+        scope.kind === 'some' ? orgColumnInScope(schema.organisations.id, scope.orgIds) : undefined,
         sql`${schema.organisations.createdAt} <= ${cutoff}`
       )
     )
@@ -35,6 +45,7 @@ export async function POST(req: NextRequest) {
   const existingSubmissions = await database
     .select({ orgId: schema.caseStudySubmissions.orgId })
     .from(schema.caseStudySubmissions)
+    .where(scope.kind === 'some' ? orgColumnInScope(schema.caseStudySubmissions.orgId, scope.orgIds) : undefined)
 
   const existingOrgIds = new Set(existingSubmissions.map(s => s.orgId))
 
@@ -42,7 +53,7 @@ export async function POST(req: NextRequest) {
   const neverAskSubmissions = await database
     .select({ orgId: schema.caseStudySubmissions.orgId })
     .from(schema.caseStudySubmissions)
-    .where(eq(schema.caseStudySubmissions.neverAsk, 1))
+    .where(and(eq(schema.caseStudySubmissions.neverAsk, 1), scope.kind === 'some' ? orgColumnInScope(schema.caseStudySubmissions.orgId, scope.orgIds) : undefined))
 
   const neverAskOrgIds = new Set(neverAskSubmissions.map(s => s.orgId))
 

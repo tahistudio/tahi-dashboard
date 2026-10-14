@@ -8,7 +8,7 @@ import { GET as matchContacts, PATCH as confirmContact } from '@/app/api/admin/i
 import { permissionSqlite } from './helpers/permission-sqlite'
 
 vi.mock('@/lib/server-auth', () => ({
-  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user-admin', orgId: 'org-tahi' }),
+  getRequestAuth: vi.fn().mockResolvedValue({ userId: 'api-service', orgId: 'org-tahi' }),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org-tahi'),
 }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))

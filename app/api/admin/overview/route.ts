@@ -1,3 +1,6 @@
+import { internalFeatureOrgFilter, internalMessageFilter, internalTimerFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -34,6 +37,8 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature(auth, 'overview')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const drizzle = database as D1
@@ -41,6 +46,7 @@ export async function GET(req: NextRequest) {
   // Resolve caller's feature-level access so sensitive KPIs are omitted from
   // the response when the caller lacks the corresponding feature.
   const access = await resolvePermissions(drizzle, auth)
+  const orgScope = await scopedOrgIds(auth, access)
   const canSeeMrr = can(access, 'financial_reports')
   const canSeeInvoices = can(access, 'invoices')
 
@@ -65,23 +71,23 @@ export async function GET(req: NextRequest) {
     drizzle
       .select({ count: count() })
       .from(schema.organisations)
-      .where(eq(schema.organisations.status, 'active')),
+      .where(and(eq(schema.organisations.status, 'active'), internalFeatureOrgFilter(access, 'clients', orgScope, schema.organisations.id))),
 
     // Open requests (not delivered/archived)
     drizzle
       .select({ count: count() })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         ne(schema.requests.status, 'delivered'),
         ne(schema.requests.status, 'archived'),
         ne(schema.requests.status, 'draft'),
-      )),
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId))),
 
     // In progress right now
     drizzle
       .select({ count: count() })
       .from(schema.requests)
-      .where(inArray(schema.requests.status, ['in_progress', 'in_review', 'client_review'])),
+      .where(and(inArray(schema.requests.status, ['in_progress', 'in_review', 'client_review']), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId))),
 
     // Recent 8 requests for activity feed
     drizzle
@@ -99,9 +105,9 @@ export async function GET(req: NextRequest) {
       })
       .from(schema.requests)
       .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
-      .where(and(
+      .where(and(and(
         ne(schema.requests.status, 'archived'),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
       .orderBy(schema.requests.updatedAt)
       .limit(8),
 
@@ -113,10 +119,10 @@ export async function GET(req: NextRequest) {
         currency: schema.invoices.currency,
       })
       .from(schema.invoices)
-      .where(and(
+      .where(and(and(
         eq(schema.invoices.status, 'paid'),
         gte(schema.invoices.paidAt, sixMonthsAgoIso),
-      )),
+      ), internalFeatureOrgFilter(access, 'invoices', orgScope, schema.invoices.orgId))),
 
     // Outstanding invoices (issued and unpaid) - individual rows for currency
     // conversion. Drafts are excluded by OWED_STATUSES: a draft is a
@@ -129,7 +135,7 @@ export async function GET(req: NextRequest) {
         dueDate: schema.invoices.dueDate,
       })
       .from(schema.invoices)
-      .where(inArray(schema.invoices.status, owedStatusList())),
+      .where(and(inArray(schema.invoices.status, owedStatusList()), internalFeatureOrgFilter(access, 'invoices', orgScope, schema.invoices.orgId))),
 
     // Drafts, counted on their own so the Owed vital can say "3 drafts,
     // NZ$4,200 not yet issued" underneath rather than folding them into the
@@ -140,7 +146,7 @@ export async function GET(req: NextRequest) {
         currency: schema.invoices.currency,
       })
       .from(schema.invoices)
-      .where(inArray(schema.invoices.status, draftStatusList())),
+      .where(and(inArray(schema.invoices.status, draftStatusList()), internalFeatureOrgFilter(access, 'invoices', orgScope, schema.invoices.orgId))),
   ])
 
   // Outstanding invoices total in NZD, plus counts for the Owed vital sub
@@ -195,7 +201,7 @@ export async function GET(req: NextRequest) {
   let mrr = 0
   try {
     const mrrRows = await drizzle.all<{ custom_mrr: number; preferred_currency: string }>(
-      sql`SELECT custom_mrr, preferred_currency FROM organisations WHERE status = 'active' AND custom_mrr > 0`
+      sql`SELECT custom_mrr, preferred_currency FROM organisations WHERE status = 'active' AND custom_mrr > 0 AND ${internalFeatureOrgFilter(access, 'financial_reports', orgScope, sql`id`)}`
     )
     for (const row of mrrRows ?? []) {
       mrr += toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap)
@@ -216,7 +222,7 @@ export async function GET(req: NextRequest) {
   // instead of an unlabelled percentage, and flag it when the basis is more
   // than one month back (a skipped snapshot, not last month).
   let mrrDeltaBasisMonth: string | null = null
-  try {
+  if (canSeeMrr && access.isAdmin) try {
     const currentMonthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
     const priorRows = await drizzle
       .select({ mrrNzd: schema.financialSnapshots.mrrNzd, monthKey: schema.financialSnapshots.monthKey })
@@ -253,7 +259,7 @@ export async function GET(req: NextRequest) {
     monthlySurplusNzd: number
     disposableNzd: number
   } | null = null
-  if (canSeeMrr) {
+  if (canSeeMrr && access.isAdmin) {
     try {
       // One source for every money card: lib/cash-position.ts. The card used to
       // average three months of Xero P&L here while /financial-reports summed
@@ -291,7 +297,7 @@ export async function GET(req: NextRequest) {
         })
         .from(schema.invoices)
         .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
-        .where(inArray(schema.invoices.status, owedStatusList()))
+        .where(and(inArray(schema.invoices.status, owedStatusList()), internalFeatureOrgFilter(access, 'invoices', orgScope, schema.invoices.orgId)))
 
       arAging = bucketArAging(
         owedInvoices.map(inv => ({
@@ -312,10 +318,10 @@ export async function GET(req: NextRequest) {
     const deliveredRows = await drizzle
       .select({ count: count() })
       .from(schema.requests)
-      .where(and(
+      .where(and(and(
         eq(schema.requests.status, 'delivered'),
         gte(sql`COALESCE(${schema.requests.deliveredAt}, ${schema.requests.updatedAt})`, since),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
     deliveriesCompleted = deliveredRows[0]?.count ?? 0
   } catch {
     deliveriesCompleted = 0
@@ -326,10 +332,10 @@ export async function GET(req: NextRequest) {
     const replyRows = await drizzle
       .select({ count: count() })
       .from(schema.messages)
-      .where(and(
+      .where(and(and(and(
         inArray(schema.messages.authorType, ['contact', 'client']),
         gte(schema.messages.createdAt, since),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.messages.orgId)), internalMessageFilter(access, orgScope)))
     clientReplies = replyRows[0]?.count ?? 0
   } catch {
     clientReplies = 0
@@ -345,10 +351,10 @@ export async function GET(req: NextRequest) {
           currency: schema.invoices.currency,
         })
         .from(schema.invoices)
-        .where(and(
+        .where(and(and(
           eq(schema.invoices.status, 'paid'),
           gte(schema.invoices.paidAt, since),
-        ))
+        ), internalFeatureOrgFilter(access, 'invoices', orgScope, schema.invoices.orgId)))
       paymentsClearedCount = clearedRows.length
       for (const inv of clearedRows) {
         paymentsClearedNzd += toNzd(inv.totalUsd, inv.currency ?? 'USD', rateMap)
@@ -382,7 +388,7 @@ export async function GET(req: NextRequest) {
       const [timer] = await drizzle
         .select()
         .from(schema.activeTimers)
-        .where(eq(schema.activeTimers.userId, auth.userId))
+        .where(and(eq(schema.activeTimers.userId, auth.userId), internalTimerFilter(access, orgScope)))
         .limit(1)
       if (timer) {
         let targetName: string | null = null
@@ -390,7 +396,7 @@ export async function GET(req: NextRequest) {
           const [o] = await drizzle
             .select({ name: schema.organisations.name })
             .from(schema.organisations)
-            .where(eq(schema.organisations.id, timer.orgId))
+            .where(and(eq(schema.organisations.id, timer.orgId), internalFeatureOrgFilter(access, 'clients', orgScope, schema.organisations.id)))
             .limit(1)
           targetName = o?.name ?? null
         } else if (timer.requestId) {
@@ -398,7 +404,7 @@ export async function GET(req: NextRequest) {
             .select({ orgName: schema.organisations.name })
             .from(schema.requests)
             .leftJoin(schema.organisations, eq(schema.requests.orgId, schema.organisations.id))
-            .where(eq(schema.requests.id, timer.requestId))
+            .where(and(eq(schema.requests.id, timer.requestId), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
             .limit(1)
           targetName = r?.orgName ?? null
         }
@@ -418,7 +424,7 @@ export async function GET(req: NextRequest) {
     const grouped = await drizzle
       .select({ status: schema.requests.status, count: count() })
       .from(schema.requests)
-      .where(ne(schema.requests.status, 'archived'))
+      .where(and(ne(schema.requests.status, 'archived'), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
       .groupBy(schema.requests.status)
     for (const row of grouped) {
       if (row.status) openByStatus[row.status] = row.count
@@ -434,7 +440,7 @@ export async function GET(req: NextRequest) {
     const planned = await drizzle
       .select({ planType: schema.subscriptions.planType, count: count() })
       .from(schema.subscriptions)
-      .where(eq(schema.subscriptions.status, 'active'))
+      .where(and(eq(schema.subscriptions.status, 'active'), internalFeatureOrgFilter(access, 'clients', orgScope, schema.subscriptions.orgId)))
       .groupBy(schema.subscriptions.planType)
     for (const row of planned) {
       if (row.planType) clientsByPlan[row.planType] = row.count
@@ -467,7 +473,7 @@ export async function GET(req: NextRequest) {
     },
     ...(canSeeMrr ? { mrrDeltaPct, mrrDeltaBasisMonth } : {}),
     recentRequests,
-    monthlyRevenue,
+    monthlyRevenue: canSeeMrr ? monthlyRevenue : [],
     cash,
     arAging,
     overnight,

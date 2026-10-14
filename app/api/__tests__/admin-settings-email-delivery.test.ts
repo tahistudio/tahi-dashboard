@@ -49,7 +49,8 @@ vi.mock('drizzle-orm', () => ({
 }))
 
 vi.mock('@/lib/permissions', () => ({
-  resolvePermissions: vi.fn(async () => ({ isSuperAdmin: state.isSuperAdmin })),
+  resolvePermissions: vi.fn(async () => ({ isAdmin: true, isSuperAdmin: state.isSuperAdmin })),
+  can: () => true,
 }))
 
 const auditRows: Row[] = []

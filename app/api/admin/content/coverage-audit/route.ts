@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/content/coverage-audit
  *
@@ -142,8 +143,10 @@ async function auditCollection(collectionId: string, limit: number): Promise<Typ
 }
 
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'content_studio')
+  if (featureDenied) return featureDenied
 
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type') ?? 'all'

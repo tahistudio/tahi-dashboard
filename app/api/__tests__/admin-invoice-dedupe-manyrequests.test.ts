@@ -17,7 +17,7 @@ vi.mock('@/lib/server-auth', () => ({
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
 
 vi.mock('@/lib/permissions', () => ({
-  resolvePermissions: vi.fn().mockResolvedValue({ isSuperAdmin: true }),
+  resolvePermissions: vi.fn().mockResolvedValue({ isSuperAdmin: true, isAdmin: true }),
 }))
 
 vi.mock('@/lib/db', () => ({ db: vi.fn().mockResolvedValue({}) }))
@@ -67,7 +67,7 @@ describe('POST /api/admin/invoices/dedupe-manyrequests-twins', () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 'sess_1' })
     vi.mocked(isTahiAdmin).mockImplementation((orgId: string | null) => orgId === 'org_tahi')
     vi.mocked(requireFeature).mockResolvedValue(null)
-    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: true } as unknown as Access)
+    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: true, isAdmin: true } as unknown as Access)
     vi.mocked(planManyrequestsTwinDedupe).mockResolvedValue(emptyPlan)
   })
 
@@ -92,13 +92,13 @@ describe('POST /api/admin/invoices/dedupe-manyrequests-twins', () => {
   })
 
   it('lets a non-super-admin run the read-only dry run', async () => {
-    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: false } as unknown as Access)
+    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: false, isAdmin: true } as unknown as Access)
     const res = await POST(makeRequest({ dryRun: true }))
     expect(res.status).toBe(200)
   })
 
   it('refuses the apply to an admin who is not a super admin', async () => {
-    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: false } as unknown as Access)
+    vi.mocked(resolvePermissions).mockResolvedValue({ isSuperAdmin: false, isAdmin: true } as unknown as Access)
     const res = await POST(makeRequest({ dryRun: false }))
     expect(res.status).toBe(403)
     expect(planManyrequestsTwinDedupe).not.toHaveBeenCalled()

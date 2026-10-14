@@ -1,3 +1,5 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -9,10 +11,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'tasks')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
 
@@ -32,13 +36,18 @@ export async function PATCH(
 
   // Verify template exists
   const [existing] = await drizzle
-    .select({ id: schema.taskTemplates.id })
+    .select({ id: schema.taskTemplates.id, orgId: schema.taskTemplates.orgId })
     .from(schema.taskTemplates)
     .where(eq(schema.taskTemplates.id, id))
     .limit(1)
 
   if (!existing) {
     return NextResponse.json({ error: 'Template not found' }, { status: 404 })
+  }
+
+  if (existing.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, existing.orgId)
+    if (scopeDenied) return scopeDenied
   }
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -86,10 +95,12 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'tasks')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
 
@@ -98,13 +109,18 @@ export async function DELETE(
 
   // Verify template exists
   const [existing] = await drizzle
-    .select({ id: schema.taskTemplates.id })
+    .select({ id: schema.taskTemplates.id, orgId: schema.taskTemplates.orgId })
     .from(schema.taskTemplates)
     .where(eq(schema.taskTemplates.id, id))
     .limit(1)
 
   if (!existing) {
     return NextResponse.json({ error: 'Template not found' }, { status: 404 })
+  }
+
+  if (existing.orgId) {
+    const scopeDenied = await requireAccessToOrg(drizzle, userId, existing.orgId)
+    if (scopeDenied) return scopeDenied
   }
 
   await drizzle

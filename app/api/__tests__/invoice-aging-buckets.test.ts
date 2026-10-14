@@ -46,13 +46,15 @@ const INVOICES: Row[] = [
 
 const RATES: Row[] = [{ currency: 'NZD', rateToUsd: 1 }]
 
+vi.mock('@/lib/internal-route-access', () => ({ internalOrgFilter: () => undefined }))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn(),
   isTahiAdmin: (orgId: string | null) => orgId === 'org-tahi',
 }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: async () => null }))
 vi.mock('@/lib/permissions', () => ({
-  resolvePermissions: async () => ({}),
+  resolvePermissions: async () => ({ isAdmin: true }),
   can: () => true,
 }))
 

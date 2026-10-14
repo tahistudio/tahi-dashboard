@@ -1,3 +1,5 @@
+// Business fixtures grant the owning feature; real scoped-seat gates are covered by nested-client-scope-sqlite.test.ts.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn(async () => null) }))
 /**
  * Unit test for POST /api/admin/requests/bulk-assign (C1).
  *
@@ -49,6 +51,7 @@ vi.mock('@/db/d1', () => ({
       id: 1, requestId: 1, participantId: 1, participantType: 1, role: 1, removedAt: 1,
     },
     teamMembers: { _table: 'teamMembers', id: 1, clerkUserId: 1 },
+    contacts: { _table: 'contacts', id: 1, orgId: 1 },
   },
 }))
 
@@ -71,7 +74,7 @@ vi.mock('drizzle-orm', () => ({
 
 vi.mock('@/lib/db', () => {
   function chainFor(name: string | undefined) {
-    const rows = name === 'requests' ? state.requestRows : []
+    const rows = name === 'requests' ? state.requestRows : name === 'contacts' ? [{ orgId: 'org_c' }] : []
     const chain = Promise.resolve(rows) as Promise<Row[]> & {
       where: () => typeof chain
       limit: () => typeof chain

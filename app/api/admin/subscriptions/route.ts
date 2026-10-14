@@ -1,9 +1,10 @@
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,8 @@ export async function GET(req: NextRequest) {
   const featureDenied = await requireFeature({ userId, orgId }, 'billing')
   if (featureDenied) return featureDenied
 
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ items: [] })
   const database = await db()
 
   const rows = await database
@@ -34,6 +37,7 @@ export async function GET(req: NextRequest) {
     })
     .from(schema.subscriptions)
     .leftJoin(schema.organisations, eq(schema.subscriptions.orgId, schema.organisations.id))
+    .where(scope.kind === 'some' ? sql`${schema.subscriptions.orgId} IN (SELECT value FROM json_each(${JSON.stringify(scope.orgIds)}))` : undefined)
 
   const items = rows.map(r => ({
     id: r.id,

@@ -31,6 +31,9 @@ vi.mock('@/lib/require-access', () => ({
   requireAccessToOrg: vi.fn().mockResolvedValue(null),
 }))
 
+// A permitted admin fixture keeps the assertions on persisted billing rates.
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+
 // The GET half of /api/admin/time pulls the scoping tree in. POST never calls
 // it, and stubbing it keeps this file about the rate.
 vi.mock('@/lib/access-scope', () => ({

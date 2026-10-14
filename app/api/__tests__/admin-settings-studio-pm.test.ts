@@ -19,6 +19,11 @@ const state: {
   inserts: Row[]
 } = { rows: [], updates: [], inserts: [] }
 
+vi.mock('@/lib/permissions', () => ({
+  resolvePermissions: async () => ({ isAdmin: true, isSuperAdmin: true }),
+  can: () => true,
+}))
+
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({
     userId: 'user_admin',

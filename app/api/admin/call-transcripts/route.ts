@@ -1,3 +1,5 @@
+import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
+import { orgColumnInScope } from '../_scoping/org-scope'
 /**
  * GET /api/admin/call-transcripts
  *
@@ -21,10 +23,10 @@ import { transcriptPreview } from '@/lib/gemini-transcript-parser'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { desc, inArray } from 'drizzle-orm'
+import { and, desc, inArray, isNull, sql } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { columnInIds, isOrgInScope } from '../_scoping/org-scope'
-import { listUnlinked, type CallTranscriptRow } from '@/lib/call-transcripts'
+import type { CallTranscriptRow } from '@/lib/call-transcripts'
 import { requireFeature } from '@/lib/require-feature'
 import { IMPERSONATE_ORG_COOKIE, resolvePreviewOrgId } from '@/lib/preview-cookie'
 
@@ -37,6 +39,8 @@ export async function GET(req: NextRequest) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  const featureDenied = await requireFeature({ userId, orgId }, 'calls')
+  if (featureDenied) return featureDenied
   const scope = await scopedOrgIds({ userId, orgId })
   if (scope.kind === 'none') return NextResponse.json({ items: [] })
 
@@ -47,9 +51,11 @@ export async function GET(req: NextRequest) {
 
   const database = await db() as unknown as D1
 
-  const rows: CallTranscriptRow[] = unlinkedOnly
-    ? await listUnlinked(database, limit)
-    : await database
+  const transcriptScope = scope.kind === 'some' ? and(
+    sql`(${schema.callTranscripts.callId} IS NULL OR (${schema.callTranscripts.callKind} = 'discovery' AND EXISTS (SELECT 1 FROM discovery_calls WHERE discovery_calls.id = ${schema.callTranscripts.callId} AND ${discoveryCallScopeCondition(scope)})) OR (${schema.callTranscripts.callKind} = 'scheduled' AND EXISTS (SELECT 1 FROM scheduled_calls WHERE scheduled_calls.id = ${schema.callTranscripts.callId} AND ${orgColumnInScope(schema.scheduledCalls.orgId, scope.orgIds)})))`,
+    sql`(${schema.callTranscripts.source} != 'manual' OR ${schema.callTranscripts.externalId} NOT LIKE 'recording:%' OR EXISTS (SELECT 1 FROM meeting_recordings WHERE meeting_recordings.id = substr(${schema.callTranscripts.externalId}, 11) AND ${orgColumnInScope(schema.meetingRecordings.orgId, scope.orgIds, { includeNull: true })}))`,
+  ) : undefined
+  const rows: CallTranscriptRow[] = await database
         .select({
           id: schema.callTranscripts.id,
           callKind: schema.callTranscripts.callKind,
@@ -64,6 +70,7 @@ export async function GET(req: NextRequest) {
           text: schema.callTranscripts.text,
         })
         .from(schema.callTranscripts)
+        .where(and(unlinkedOnly ? isNull(schema.callTranscripts.callId) : undefined, transcriptScope))
         .orderBy(desc(schema.callTranscripts.receivedAt))
         .limit(limit)
 

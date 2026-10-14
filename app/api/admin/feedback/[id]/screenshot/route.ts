@@ -1,3 +1,5 @@
+import { requireAdmin } from '@/lib/require-admin'
+import { requireFeature } from '@/lib/require-feature'
 /**
  * GET /api/admin/feedback/[id]/screenshot
  *
@@ -18,8 +20,13 @@ import { schema } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'settings')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+
 
   const { id } = await params
   const database = await db()

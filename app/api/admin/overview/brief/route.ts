@@ -2,6 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { resolvePermissions, can } from '@/lib/permissions'
+import { requireFeature } from '@/lib/require-feature'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { BRIEF_FEATURES, briefCacheKeyForFingerprint, briefScopeFingerprint } from '@/lib/brief-cache-key'
 import { BRIEF_CACHE_KEY, computeBrief, readBriefCache, writeBriefCache, isBriefFresh, sweepStaleBriefCache, type D1 } from '@/lib/overview-brief'
@@ -13,6 +14,8 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const denied = await requireFeature(auth, 'overview')
+  if (denied) return denied
 
   const database = await db()
   const drizzle = database as D1

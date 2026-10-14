@@ -5,6 +5,7 @@ import { schema } from '@/db/d1'
 import type { DB } from '@/db/d1'
 import { eq } from 'drizzle-orm'
 import { requireFeature } from '@/lib/require-feature'
+import { requireManagePermissions } from '@/lib/require-permission'
 import { logAudit } from '@/lib/audit'
 
 // -- GET /api/admin/team/[id]/access --
@@ -13,13 +14,15 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { orgId } = await getRequestAuth(req)
-  if (!isTahiAdmin(orgId)) {
+  const auth = await getRequestAuth(req)
+  if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { id } = await params
   const database = await db()
+  const { denied } = await requireManagePermissions(database, auth)
+  if (denied) return denied
 
   // Get access rules
   const rules = await database
@@ -63,6 +66,9 @@ export async function PUT(
   // admin denied the permissions surface cannot widen scope through this route.
   const featureDenied = await requireFeature(auth, 'settings.permissions')
   if (featureDenied) return featureDenied
+  const database = await db()
+  const { denied } = await requireManagePermissions(database, auth)
+  if (denied) return denied
 
   const { id } = await params
 
@@ -87,7 +93,6 @@ export async function PUT(
     )
   }
 
-  const database = await db()
   const now = new Date().toISOString()
 
   // Snapshot the current rule (before) for the audit trail, then delete.

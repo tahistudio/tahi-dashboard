@@ -1,3 +1,4 @@
+import { requireStudioAdmin } from '@/lib/internal-route-access'
 /**
  * POST /api/admin/cron/post-scorecard-sync
  *
@@ -52,8 +53,10 @@ function isoDaysAgo(n: number): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const roleDenied = await requireStudioAdmin({ userId, orgId }, 'settings')
+  if (roleDenied) return roleDenied
 
   const body = (await req.json().catch(() => ({}))) as SyncBody
   const maxPosts = body.maxPosts ?? 200    // covers the full 145-URL site comfortably

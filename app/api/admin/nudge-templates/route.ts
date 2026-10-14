@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -8,8 +9,11 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // GET /api/admin/nudge-templates
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
+
 
   const database = await db() as unknown as D1
   const items = await database
@@ -22,8 +26,11 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/nudge-templates
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json() as {
     name: string
@@ -57,8 +64,11 @@ export async function POST(req: NextRequest) {
 
 // PATCH /api/admin/nudge-templates (update by id in body)
 export async function PATCH(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json() as {
     id: string

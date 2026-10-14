@@ -1,8 +1,12 @@
+import { resolvePermissions, type ResolvedAccess } from '@/lib/permissions'
+import { internalFeatureOrgFilter, internalMessageFilter, internalTimerFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds, type OrgScope } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, and, or, isNull, inArray, gte, desc } from 'drizzle-orm'
+import { eq, and, or, isNull, inArray, gte, desc, sql } from 'drizzle-orm'
 import { elapsedSeconds } from '@/lib/timer-helpers'
 
 export const dynamic = 'force-dynamic'
@@ -45,13 +49,17 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'overview')
+  if (featureDenied) return featureDenied
 
   const database = await db()
   const drizzle = database as D1
+  const access = await resolvePermissions(drizzle, { userId, orgId })
+  const orgScope = await scopedOrgIds({ userId, orgId }, access)
 
   // Timer is keyed by the Clerk userId (active_timers.user_id), so it resolves
   // even before we know the team_members row.
-  const timer = await resolveTimer(drizzle, userId)
+  const timer = await resolveTimer(drizzle, userId, orgScope, access)
 
   // Resolve the current team member. Without one, there is no scoped work.
   let memberId: string | null = null
@@ -83,10 +91,10 @@ export async function GET(req: NextRequest) {
     const tasks = await drizzle
       .select({ status: schema.tasks.status, dueDate: schema.tasks.dueDate })
       .from(schema.tasks)
-      .where(and(
+      .where(and(and(
         eq(schema.tasks.assigneeId, memberId),
         or(isNull(schema.tasks.assigneeType), eq(schema.tasks.assigneeType, 'team_member')),
-      ))
+      ), internalFeatureOrgFilter(access, 'tasks', orgScope, schema.tasks.orgId, true)))
     for (const t of tasks) {
       if (!TASK_CLOSED.has(t.status)) openItems.push({ dueDate: t.dueDate })
     }
@@ -102,7 +110,7 @@ export async function GET(req: NextRequest) {
     const direct = await drizzle
       .select({ id: schema.requests.id, status: schema.requests.status, dueDate: schema.requests.dueDate })
       .from(schema.requests)
-      .where(eq(schema.requests.assigneeId, memberId))
+      .where(and(eq(schema.requests.assigneeId, memberId), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
     for (const r of direct) {
       reqIds.add(r.id)
       rows.push(r)
@@ -111,17 +119,17 @@ export async function GET(req: NextRequest) {
     const parts = await drizzle
       .select({ requestId: schema.requestParticipants.requestId })
       .from(schema.requestParticipants)
-      .where(and(
+      .where(and(and(
         eq(schema.requestParticipants.participantId, memberId),
         eq(schema.requestParticipants.participantType, 'team_member'),
         isNull(schema.requestParticipants.removedAt),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, sql`(SELECT org_id FROM requests WHERE id = ${schema.requestParticipants.requestId})`)))
     const extraIds = parts.map(p => p.requestId).filter(id => !reqIds.has(id))
     if (extraIds.length > 0) {
       const extra = await drizzle
         .select({ id: schema.requests.id, status: schema.requests.status, dueDate: schema.requests.dueDate })
         .from(schema.requests)
-        .where(inArray(schema.requests.id, extraIds))
+        .where(and(inArray(schema.requests.id, extraIds), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
       for (const r of extra) rows.push(r)
     }
 
@@ -143,7 +151,7 @@ export async function GET(req: NextRequest) {
 
   let repliesWaiting = 0
   try {
-    repliesWaiting = await countRepliesWaiting(drizzle, memberId)
+    repliesWaiting = await countRepliesWaiting(drizzle, memberId, orgScope, access)
   } catch {
     repliesWaiting = 0
   }
@@ -161,13 +169,15 @@ export async function GET(req: NextRequest) {
 async function resolveTimer(
   drizzle: D1,
   userId: string | null,
+  orgScope: OrgScope,
+  access: ResolvedAccess,
 ): Promise<{ elapsedSeconds: number; title: string | null } | null> {
   if (!userId) return null
   try {
     const [timer] = await drizzle
       .select()
       .from(schema.activeTimers)
-      .where(eq(schema.activeTimers.userId, userId))
+      .where(and(eq(schema.activeTimers.userId, userId), internalTimerFilter(access, orgScope)))
       .limit(1)
     if (!timer) return null
 
@@ -176,21 +186,21 @@ async function resolveTimer(
       const [r] = await drizzle
         .select({ title: schema.requests.title })
         .from(schema.requests)
-        .where(eq(schema.requests.id, timer.requestId))
+        .where(and(eq(schema.requests.id, timer.requestId), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
         .limit(1)
       title = r?.title ?? null
     } else if (timer.taskId) {
       const [t] = await drizzle
         .select({ title: schema.tasks.title })
         .from(schema.tasks)
-        .where(eq(schema.tasks.id, timer.taskId))
+        .where(and(eq(schema.tasks.id, timer.taskId), internalFeatureOrgFilter(access, 'tasks', orgScope, schema.tasks.orgId, true)))
         .limit(1)
       title = t?.title ?? null
     } else if (timer.orgId) {
       const [o] = await drizzle
         .select({ name: schema.organisations.name })
         .from(schema.organisations)
-        .where(eq(schema.organisations.id, timer.orgId))
+        .where(and(eq(schema.organisations.id, timer.orgId), internalFeatureOrgFilter(access, 'clients', orgScope, schema.organisations.id)))
         .limit(1)
       title = o?.name ?? null
     }
@@ -218,7 +228,7 @@ async function resolveTimer(
 // thread, and the conversation pass only ever added rows this tile then had to
 // de-duplicate against. The tile and the card must agree on the same page, so
 // the two changed together.
-async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<number> {
+async function countRepliesWaiting(drizzle: D1, memberId: string, orgScope: OrgScope, access: ResolvedAccess): Promise<number> {
   const cutoff = since(60)
   let count = 0
 
@@ -227,16 +237,16 @@ async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<numbe
   const directReqs = await drizzle
     .select({ id: schema.requests.id })
     .from(schema.requests)
-    .where(eq(schema.requests.assigneeId, memberId))
+    .where(and(eq(schema.requests.assigneeId, memberId), internalFeatureOrgFilter(access, 'requests', orgScope, schema.requests.orgId)))
   for (const r of directReqs) reqIds.add(r.id)
   const partReqs = await drizzle
     .select({ requestId: schema.requestParticipants.requestId })
     .from(schema.requestParticipants)
-    .where(and(
+    .where(and(and(
       eq(schema.requestParticipants.participantId, memberId),
       eq(schema.requestParticipants.participantType, 'team_member'),
       isNull(schema.requestParticipants.removedAt),
-    ))
+    ), internalFeatureOrgFilter(access, 'requests', orgScope, sql`(SELECT org_id FROM requests WHERE id = ${schema.requestParticipants.requestId})`)))
   for (const p of partReqs) reqIds.add(p.requestId)
 
   const reqIdList = [...reqIds]
@@ -248,12 +258,12 @@ async function countRepliesWaiting(drizzle: D1, memberId: string): Promise<numbe
         createdAt: schema.messages.createdAt,
       })
       .from(schema.messages)
-      .where(and(
+      .where(and(and(and(
         inArray(schema.messages.requestId, reqIdList),
         eq(schema.messages.isInternal, false),
         isNull(schema.messages.deletedAt),
         gte(schema.messages.createdAt, cutoff),
-      ))
+      ), internalFeatureOrgFilter(access, 'requests', orgScope, schema.messages.orgId)), internalMessageFilter(access, orgScope)))
       .orderBy(desc(schema.messages.createdAt))
       .limit(reqIdList.length * MESSAGE_BUDGET_PER_REQUEST)
     const seen = new Set<string>()

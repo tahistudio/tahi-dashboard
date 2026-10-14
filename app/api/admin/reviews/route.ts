@@ -1,3 +1,7 @@
+import { requireAccessToOrg } from '@/lib/require-access'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { scopedOrgIds } from '@/lib/access-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -8,12 +12,18 @@ import { eq, desc } from 'drizzle-orm'
 // List all orgs with their outreach status.
 // If no caseStudySubmission exists for an org, show as 'not_sent'.
 export async function GET(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'reviews')
+  if (featureDenied) return featureDenied
+
 
   const database = await db()
+
+  const scope = await scopedOrgIds({ userId, orgId })
+  if (scope.kind === 'none') return NextResponse.json({ reviews: [] })
 
   // Get all organisations
   const orgs = await database
@@ -24,12 +34,14 @@ export async function GET(req: NextRequest) {
       status: schema.organisations.status,
     })
     .from(schema.organisations)
+    .where(scope.kind === 'some' ? orgColumnInScope(schema.organisations.id, scope.orgIds) : undefined)
     .orderBy(desc(schema.organisations.updatedAt))
 
   // Get all case study submissions
   const submissions = await database
     .select()
     .from(schema.caseStudySubmissions)
+    .where(scope.kind === 'some' ? orgColumnInScope(schema.caseStudySubmissions.orgId, scope.orgIds) : undefined)
 
   // Map submissions by orgId
   const submissionsByOrg = new Map<string, typeof submissions[number]>()
@@ -73,10 +85,13 @@ export async function GET(req: NextRequest) {
 // Create or update outreach for an org.
 // Body: { orgId, outreachStatus, nextAskAt? }
 export async function POST(req: NextRequest) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'reviews')
+  if (featureDenied) return featureDenied
+
 
   const body = await req.json() as {
     orgId?: string
@@ -94,6 +109,8 @@ export async function POST(req: NextRequest) {
   }
 
   const database = await db()
+  const scopeDenied = await requireAccessToOrg(database, userId, body.orgId)
+  if (scopeDenied) return scopeDenied
   const now = new Date().toISOString()
 
   // Check if a submission exists for this org

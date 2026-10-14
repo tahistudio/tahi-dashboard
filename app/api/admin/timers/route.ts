@@ -1,3 +1,4 @@
+import { requireTimerAccess } from '@/lib/timer-access'
 /**
  * /api/admin/timers
  *
@@ -47,6 +48,8 @@ export async function GET(req: NextRequest) {
     .where(eq(schema.activeTimers.userId, attributedUserId(auth) ?? userId))
     .limit(1)
   if (!timer) return NextResponse.json({ timer: null })
+  const scopeDenied = await requireTimerAccess(drizzle, { userId, orgId }, timer)
+  if (scopeDenied) return scopeDenied
 
   // Join the target title (request, task, or client).
   let targetTitle: string | null = null
@@ -129,12 +132,10 @@ export async function POST(req: NextRequest) {
   const database = await db()
   const drizzle = database as Drizzle
 
-  // Verify the target exists and derive the client the eventual timeEntry
-  // belongs to, from the target row itself. (We don't currently scope-check
-  // here because the user already only has access to requests their
-  // team_member_access rows permit. Picking up a timer on a scoped-out
-  // request is not a leak vector since the timer itself carries no request
-  // data beyond id.)
+  const scopeDenied = await requireTimerAccess(drizzle, { userId, orgId }, body)
+  if (scopeDenied) return scopeDenied
+
+  // Verify every target before deriving billing ownership.
   let targetOrgId: string | null = null
   if (body.requestId) {
     const [r] = await drizzle
@@ -178,6 +179,8 @@ export async function POST(req: NextRequest) {
   } else if (body.general) {
     targetOrgId = await ensureInternalOrg(drizzle)
   }
+  const billingOrgDenied = await requireTimerAccess(drizzle, { userId, orgId }, { orgId: targetOrgId })
+  if (billingOrgDenied) return billingOrgDenied
 
   // Check for existing timer.
   const [existing] = await drizzle
@@ -186,6 +189,10 @@ export async function POST(req: NextRequest) {
     .where(eq(schema.activeTimers.userId, timerOwnerId))
     .limit(1)
 
+  if (existing) {
+    const existingDenied = await requireTimerAccess(drizzle, { userId, orgId }, existing)
+    if (existingDenied) return existingDenied
+  }
   if (existing && !confirmed) {
     return NextResponse.json({
       error: 'You already have an active timer',

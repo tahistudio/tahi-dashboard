@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { db } from '@/lib/db'
@@ -31,6 +32,8 @@ async function guardRequestAccess(
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId, stepId } = await params
   const body = await req.json() as {
@@ -46,6 +49,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const denied = await guardRequestAccess(database, userId, requestId)
   if (denied) return denied
+
+  if (body.parentStepId) {
+    const [parentStep] = await database.select({ id: schema.requestSteps.id }).from(schema.requestSteps)
+      .where(and(eq(schema.requestSteps.id, body.parentStepId), eq(schema.requestSteps.requestId, requestId))).limit(1)
+    if (!parentStep) return NextResponse.json({ error: 'Parent step not found' }, { status: 404 })
+  }
 
   type Updates = Partial<typeof schema.requestSteps.$inferInsert>
   const updates: Updates = { updatedAt: new Date().toISOString() }
@@ -74,6 +83,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 export async function DELETE(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId, stepId } = await params
   const database = await db() as unknown as D1
@@ -97,7 +108,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!owned) return NextResponse.json({ error: 'Step not found' }, { status: 404 })
 
   // Recursively delete children (SQLite self-ref FK doesn't auto-cascade)
-  await deleteTree(database, stepId)
+  await deleteTree(database, stepId, requestId)
 
   const rows = await database
     .delete(schema.requestSteps)
@@ -108,14 +119,14 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   return NextResponse.json({ ok: true })
 }
 
-async function deleteTree(database: D1, parentId: string) {
+async function deleteTree(database: D1, parentId: string, requestId: string) {
   const children = await database
     .select({ id: schema.requestSteps.id })
     .from(schema.requestSteps)
-    .where(eq(schema.requestSteps.parentStepId, parentId))
+    .where(and(eq(schema.requestSteps.parentStepId, parentId), eq(schema.requestSteps.requestId, requestId)))
 
   for (const { id } of children) {
-    await deleteTree(database, id)
-    await database.delete(schema.requestSteps).where(eq(schema.requestSteps.id, id))
+    await deleteTree(database, id, requestId)
+    await database.delete(schema.requestSteps).where(and(eq(schema.requestSteps.id, id), eq(schema.requestSteps.requestId, requestId)))
   }
 }

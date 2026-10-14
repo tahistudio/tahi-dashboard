@@ -1,9 +1,11 @@
+import { internalOrgFilter } from '@/lib/internal-route-access'
+import { scopedOrgIds } from '@/lib/access-scope'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { sql } from 'drizzle-orm'
+import { sql, and } from 'drizzle-orm'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -41,6 +43,7 @@ export async function GET(req: NextRequest) {
   const weeks = Math.max(1, Math.min(52, parseInt(url.searchParams.get('weeks') ?? '4', 10)))
 
   const drizzle = (await db()) as D1
+  const orgScope = await scopedOrgIds({ userId, orgId })
 
   const windowStart = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000)
   const windowStartIso = windowStart.toISOString()
@@ -75,7 +78,7 @@ export async function GET(req: NextRequest) {
       total: sql<number>`SUM(${schema.timeEntries.hours})`.as('total'),
     })
     .from(schema.timeEntries)
-    .where(sql`${schema.timeEntries.billable} = 1 AND ${schema.timeEntries.date} >= ${windowStartDate}`)
+    .where(and(sql`${schema.timeEntries.billable} = 1 AND ${schema.timeEntries.date} >= ${windowStartDate}`, internalOrgFilter(orgScope, schema.timeEntries.orgId)))
     .groupBy(schema.timeEntries.teamMemberId)
 
   const billableMap = new Map(

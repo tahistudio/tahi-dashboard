@@ -1,3 +1,4 @@
+import { requireReplyDraftAccess } from '@/lib/reply-draft-access'
 /**
  * POST /api/admin/ai-reply-drafts/[id]/send
  *
@@ -39,13 +40,15 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const { id } = await params
+  const database = await db()
+  const scopeDenied = await requireReplyDraftAccess(database, { userId, orgId }, id)
+  if (scopeDenied) return scopeDenied
+
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
     return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })
   }
-
-  const { id } = await params
-  const database = await db()
 
   const [draft] = await database
     .select()

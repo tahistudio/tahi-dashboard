@@ -1,3 +1,5 @@
+import { requireContractAccess, requireProposalAccess, requireScheduleAccess } from '@/app/api/admin/_sales-access/artifact-scope'
+import { requireManagePermissions } from '@/lib/require-permission'
 import { createElement } from 'react'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
@@ -99,6 +101,10 @@ export async function POST(req: NextRequest) {
   // surface, so gating it on `clients` refused a team member who can manage the
   // roster but not the client list for a reason unrelated to what they asked
   // for. Access scoping below is client-flow only for the same reason.
+  if (flow === 'team') {
+    const { denied: permissionDenied } = await requireManagePermissions(await db(), auth)
+    if (permissionDenied) return permissionDenied
+  }
   const denied = await requireFeature(auth, flow === 'team' ? 'team' : 'clients')
   if (denied) return denied
 
@@ -147,6 +153,15 @@ export async function POST(req: NextRequest) {
     // reads. Callers that know better (the MCP tool, a scripted backfill) can
     // still pass an explicit persona; the UI does not have to guess.
     resolvedPersona = persona ?? personaForPlanType(org.planType)
+  }
+
+  for (const [id, guard] of [
+    [body.contractId, requireContractAccess], [body.scheduleId, requireScheduleAccess], [body.proposalId, requireProposalAccess],
+  ] as const) {
+    if (id) {
+      const denied = await guard(database, auth, id)
+      if (denied) return denied
+    }
   }
 
   const opts = {

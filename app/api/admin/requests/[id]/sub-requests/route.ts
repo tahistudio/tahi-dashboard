@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 /**
  * /api/admin/requests/[id]/sub-requests
  *
@@ -25,6 +26,8 @@ type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 export async function GET(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -57,7 +60,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     })
     .from(schema.requests)
     .leftJoin(schema.teamMembers, eq(schema.requests.assigneeId, schema.teamMembers.id))
-    .where(eq(schema.requests.parentRequestId, id))
+    .where(and(eq(schema.requests.parentRequestId, id), eq(schema.requests.orgId, parent.orgId)))
     .orderBy(asc(schema.requests.subPosition), asc(schema.requests.createdAt))
 
   return NextResponse.json({ subRequests: children })
@@ -66,6 +69,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 export async function POST(req: NextRequest, { params }: Params) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: parentId } = await params
   const body = await req.json().catch(() => null) as {

@@ -46,7 +46,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await guardSubject(drizzle, userId, subject)
   if (denied) return denied
 
-  const lists = await listBlockers(drizzle, userId, subject)
+  const lists = await listBlockers(drizzle, userId, subject, { userId, orgId })
   return NextResponse.json({
     blockedBy: legacyShape(lists.blockedBy),
     blocks: legacyShape(lists.blocks),

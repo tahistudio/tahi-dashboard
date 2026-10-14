@@ -1,3 +1,6 @@
+import { scopedOrgIds } from '@/lib/access-scope'
+import { orgColumnInScope } from '@/app/api/admin/_scoping/org-scope'
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -33,6 +36,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id } = await params
   const database = await db()
@@ -41,6 +46,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   const denied = await guardRequestAccess(drizzle, userId, id)
   if (denied) return denied
 
+  const scope = await scopedOrgIds({ userId, orgId })
+  const rowOrgIds = scope.kind === 'some' ? scope.orgIds : []
   const files = await drizzle
     .select({
       id: schema.files.id,
@@ -62,7 +69,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         eq(schema.files.uploadedByType, 'team_member'),
       )
     )
-    .where(eq(schema.files.requestId, id))
+    .where(and(eq(schema.files.requestId, id), scope.kind === 'all' ? undefined : orgColumnInScope(schema.files.orgId, rowOrgIds)))
     .orderBy(desc(schema.files.createdAt))
 
   return NextResponse.json({ items: files, page: 1, limit: files.length })
@@ -77,6 +84,8 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId }, 'requests')
+  if (featureDenied) return featureDenied
 
   const { id: requestId } = await params
 

@@ -1,3 +1,4 @@
+import { requireFeature } from '@/lib/require-feature'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -15,10 +16,13 @@ type RouteContext = { params: Promise<{ id: string }> }
 //     their stage FK) are refused with a 409 and a count so the UI can tell
 //     the admin what to move first
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
-  const { orgId } = await getRequestAuth(req)
+  const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  const featureDenied = await requireFeature({ userId, orgId: orgId }, 'deals')
+  if (featureDenied) return featureDenied
+
 
   const { id } = await ctx.params
   const database = await db() as unknown as D1

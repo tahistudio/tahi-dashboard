@@ -28,7 +28,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const database = await db()
   const denied = await requireAccessToOrg(database, userId, id)
   if (denied) return denied
-  const calls = await listCallsForParent(database, 'org', id)
+  const calls = await listCallsForParent(database, 'org', id, { userId, orgId })
   return NextResponse.json({ calls })
 }
 
