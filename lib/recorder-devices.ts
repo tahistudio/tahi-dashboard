@@ -8,10 +8,12 @@ import { attributedTeamMemberId, attributedUserId } from '@/lib/mcp-actor'
 import { hashRecorderSecret, isRecorderDeviceRequest, RECORDER_TOKEN_PREFIX, RecorderDeviceAuthError } from '@/lib/recorder-device-auth'
 import { isClerkUserInTahiOrg } from '@/lib/mcp-profile-server'
 import { logAudit } from '@/lib/audit'
+import { hashRecorderPairingIp } from '@/lib/recorder-pairing-security'
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const CODE_LIFETIME_MS = 10 * 60_000
 const ATTEMPT_WINDOW_MS = 15 * 60_000
+const ATTEMPT_RETENTION_MS = 24 * 60 * 60_000
 
 export class RecorderDevicesError extends Error {
   constructor(message: string, readonly status: number) { super(message) }
@@ -65,9 +67,19 @@ export async function listRecorderDevices({ database, teamMemberId }: DevicesCon
 
 export async function createRecorderPairingCode({ database, auth, teamMemberId }: DevicesContext) {
   const code = Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => CODE_ALPHABET[byte & 31]).join('')
-  const expiresAt = new Date(Date.now() + CODE_LIFETIME_MS).toISOString()
-  await database.run(sql`INSERT INTO recorder_pairing_codes (code_hash, team_member_id, created_by_user_id, expires_at)
-    VALUES (${await hashRecorderSecret(code)}, ${teamMemberId}, ${auth.userId}, ${expiresAt})`)
+  const nowMs = Date.now()
+  const now = new Date(nowMs).toISOString()
+  const expiresAt = new Date(nowMs + CODE_LIFETIME_MS).toISOString()
+  // A replacement expires every earlier unused code atomically with its insert.
+  await database.$client.batch([
+    database.$client.prepare(`UPDATE recorder_pairing_codes SET expires_at = ?
+      WHERE team_member_id = ? AND used_at IS NULL`).bind(now, teamMemberId),
+    database.$client.prepare(`INSERT INTO recorder_pairing_codes (code_hash, team_member_id, created_by_user_id, expires_at)
+      VALUES (?, ?, ?, ?)`).bind(await hashRecorderSecret(code), teamMemberId, auth.userId, expiresAt),
+  ])
+  await logAudit(database, {
+    userId: attributedUserId(auth), action: 'recorder_device.pairing_code_created', entityType: 'team_member', entityId: teamMemberId,
+  })
   return { code, expiresAt }
 }
 
@@ -90,15 +102,18 @@ function tokenSecret(): string {
 
 export async function exchangeRecorderPairingCode(req: NextRequest): Promise<NextResponse> {
   const database = await db()
-  const now = new Date().toISOString()
+  const nowMs = Date.now()
+  const now = new Date(nowMs).toISOString()
   // Cloudflare supplies this header. Forwarded-for is caller-controlled and is never used.
-  const ipHash = await hashRecorderSecret(req.headers.get('cf-connecting-ip') ?? 'unknown')
+  const ipHash = await hashRecorderPairingIp(req.headers.get('cf-connecting-ip'))
   const attemptId = crypto.randomUUID()
-  const cutoff = new Date(Date.now() - ATTEMPT_WINDOW_MS).toISOString()
+  const cutoff = new Date(nowMs - ATTEMPT_WINDOW_MS).toISOString()
+  await database.run(sql`DELETE FROM recorder_pairing_attempts WHERE attempted_at < ${new Date(nowMs - ATTEMPT_RETENTION_MS).toISOString()}`)
   // Reserve a failed attempt atomically before validating. Concurrent guesses cannot bypass the count.
   const attempts = await database.all<{ id: string }>(sql`INSERT INTO recorder_pairing_attempts (id, ip_hash, attempted_at, succeeded)
     SELECT ${attemptId}, ${ipHash}, ${now}, 0 WHERE
-    (SELECT COUNT(*) FROM recorder_pairing_attempts WHERE ip_hash = ${ipHash} AND attempted_at > ${cutoff} AND succeeded = 0) < 5 RETURNING id`)
+    (SELECT COUNT(*) FROM recorder_pairing_attempts WHERE ip_hash = ${ipHash} AND attempted_at > ${cutoff} AND succeeded = 0) < 5
+    AND (SELECT COUNT(*) FROM recorder_pairing_attempts WHERE attempted_at > ${cutoff} AND succeeded = 0) < 50 RETURNING id`)
   if (!attempts.length) return NextResponse.json({ error: 'Too many pairing attempts. Try again in 15 minutes.' }, { status: 429, headers: { 'Retry-After': '900' } })
   const body: unknown = await req.json().catch(() => null)
   if (!body || typeof body !== 'object') throw new RecorderDevicesError('Enter a pairing code and device name.', 400)
@@ -137,5 +152,8 @@ export async function exchangeRecorderPairingCode(req: NextRequest): Promise<Nex
       AND EXISTS (SELECT 1 FROM recorder_devices WHERE id = ?)`).bind(attemptId, id),
   ])
   if (!consumed.results.length) throw new RecorderDevicesError('The pairing code is invalid or expired.', 400)
+  await logAudit(database, {
+    userId: owner.clerk_user_id, action: 'recorder_device.paired', entityType: 'recorder_device', entityId: id,
+  })
   return NextResponse.json({ token, device: { id, name } }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
 }

@@ -1,16 +1,19 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 phases 1 and 1b live per Liam; phase 2 dashboard prepared, uncommitted). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 phases 1 and 1b live per Liam; phase 2 committed, review repair uncommitted). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## REC.0 phase 2 dashboard, prepared 2026-10-14
 
 Phases 1 and 1b are live per Liam's current brief, main 729cc282. The live
 five-second WAV probe passed for both tracks; retain Whisper vad_filter.
-The tray dashboard changes are uncommitted on feat/rec0-tray-server:
-separable migration 0114, restricted device auth/pairing, owned slim recording
+The tray dashboard implementation is committed on feat/rec0-tray-server:
+migration 0114 alone at 97b0b0ae, server/UI at e961108f, restricted device auth/pairing, owned slim recording
 APIs, quotas, upcoming calls, Settings devices and full-profile list/revoke
-MCP tools. Decision #072 records the fixed choices and pairing's MCP exception.
+MCP tools. The review repair is uncommitted on top: overlapping call windows,
+member matching, empty/stale recording recovery, rolling mic quota, pairing
+limits/HMAC/audits, batched reads and Settings fixes. Decision #072 records
+the fixed choices and pairing's MCP exception.
 The main session must ship/apply 0114 first, review and deploy the server,
 then verify signed-in 375/768 light/dark states. No migration apply, deploy,
 secret change or C# app is performed here. REC.0 stays open. The following
@@ -34,8 +37,8 @@ No automatic recording or external notification. Existing scoped APIs/MCP
 provide creator identity and bounded call time filters. No new migration.
 
 Initial phase 1b is committed as 3570d4e5, with review repairs in 807adc35.
-This small follow-up remains uncommitted on top. Main session owns deployment;
-phase 1b has not been deployed. Real Nova accuracy/long-call latency, Windows
+The last follow-up is committed at 729cc282 and phase 1b is live per Liam.
+Real Nova accuracy/long-call latency, Windows
 installation, and signed-in 375/768/dark checks remain open. Source QA/UIUX reviews pass;
 headless browser launch is blocked by sandbox spawn EPERM. Gate results and
 handoff notes are recorded in the run log.
@@ -48,12 +51,12 @@ action and completed mic results preserved. Gap, speaker, reminder, PWA and
 pre-client relink findings are fixed. The two PATCH mirror failures were stale
 mocks. Repair source gates passed, 10 targeted Vitest files / 245 tests.
 
-Opus re-review passed with notes. The uncommitted follow-up folds WAV
+Opus re-review passed with notes. Follow-up 729cc282 folds WAV
 remainders shorter than two seconds into the previous part, preserves paid
 Nova results when cache writes throw, and limits the long lease to possible
 group attempts. Audio deletion removes the Nova JSON, manual Whisper fallback
 is admin-only, and malformed transcription JSON returns 400. Follow-up gate
-results are recorded in the run log. REC.0 stays open with no phase 1b live claim.
+results are recorded in the run log. REC.0 stays open for phase 2.
 
 ## Next-20 items 2 to 7 hardening, 2026-10-13
 

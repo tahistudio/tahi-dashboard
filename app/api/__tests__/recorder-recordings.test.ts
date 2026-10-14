@@ -8,13 +8,14 @@ import { schema } from '@/db/d1'
 import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
 import { RECORDER_DEVICES_MIGRATION } from '@/lib/recorder-devices-migration'
 import { RECORDER_DAILY_AUDIO_MS } from '@/lib/recorder-recordings'
+import { MAX_RECORDING_DURATION_MS } from '@/lib/meeting-recordings'
 import { encodeRecordingPcmWav } from '@/lib/recording-group-audio'
 
 const h = vi.hoisted(() => ({
   database: null as unknown,
   session: { userId: null as string | null, orgId: null as string | null, sessionId: null as string | null },
   device: { userId: 'liam', orgId: 'tahi', sessionId: null, recorderDevice: { id: 'device', teamMemberId: 'member-liam' } },
-  valid: true, unavailable: false, failSideInsert: false, deniedOrg: null as string | null, bucket: { put: vi.fn() },
+  valid: true, unavailable: false, failSideInsert: false, deniedOrg: null as string | null, bucket: { put: vi.fn() }, queries: [] as string[],
 }))
 vi.mock('@/lib/db', () => ({ db: async () => h.database }))
 vi.mock('@/lib/server-auth', () => ({ getRequestAuth: async () => h.session, isTahiAdmin: (org: string) => org === 'tahi' }))
@@ -55,7 +56,8 @@ function adapter() {
   const prepare = (query: string): Statement => {
     const bind = (...params: SQLInputValue[]): Statement => {
       const execute = (): SqlResult => {
-        if (h.failSideInsert && /^insert into "recorder_recordings"/i.test(query)) throw new Error('Injected side insert failure')
+        h.queries.push(query)
+        if (h.failSideInsert && /^insert into "?recorder_recordings"?/i.test(query)) throw new Error('Injected side insert failure')
         const statement = sqlite.prepare(query)
         if (/^\s*select\b|\breturning\b/i.test(query)) {
           const results = statement.all(...params) as Record<string, unknown>[]
@@ -89,11 +91,11 @@ async function create(extra = {}) {
   return (await response.json() as { recording: { id: string } }).recording.id
 }
 function close(id: string) { sqlite.prepare("UPDATE meeting_recordings SET stopped_at = ?, state = 'uploading' WHERE id = ?").run(new Date(NOW).toISOString(), id) }
-function seedCall(id: string, changes: { kind?: 'discovery' | 'scheduled'; status?: string; email?: string; offset?: number } = {}) {
+function seedCall(id: string, changes: { kind?: 'discovery' | 'scheduled'; status?: string; email?: string; offset?: number; durationMinutes?: number } = {}) {
   const table = changes.kind === 'scheduled' ? 'scheduled_calls' : 'discovery_calls'
   const url = changes.kind === 'scheduled' ? 'meeting_url' : 'google_meet_url'
-  sqlite.prepare(`INSERT INTO ${table} (id,org_id,title,scheduled_at,duration_minutes,status,attendees,${url}) VALUES (?,?,?, ?,30,?,?,?)`)
-    .run(id, 'client-a', 'Planning', new Date(NOW + (changes.offset ?? 0)).toISOString(), changes.status ?? 'scheduled',
+  sqlite.prepare(`INSERT INTO ${table} (id,org_id,title,scheduled_at,duration_minutes,status,attendees,${url}) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(id, 'client-a', 'Planning', new Date(NOW + (changes.offset ?? 0)).toISOString(), changes.durationMinutes ?? 30, changes.status ?? 'scheduled',
       JSON.stringify([{ email: changes.email ?? 'business@tahi.studio' }]), 'https://meet.google.com/private-room')
 }
 const metadata = (extra = {}) => ({ track: 'mic', sequence: 0, startMs: 0, durationMs: 30_000, mimeType: 'audio/wav', size: 960_044, ...extra })
@@ -108,8 +110,9 @@ beforeEach(() => {
     CREATE TABLE organisations (id text PRIMARY KEY, name text);
     CREATE TABLE task_suggestions (id text, transcript_id text);
     CREATE TABLE team_members (id text PRIMARY KEY, clerk_user_id text, name text, email text);
-    CREATE TABLE scheduled_calls (id text PRIMARY KEY,org_id text,title text,scheduled_at text,duration_minutes integer,status text,attendees text,meeting_url text);
-    CREATE TABLE discovery_calls (id text PRIMARY KEY,org_id text,title text,scheduled_at text,duration_minutes integer,status text,attendees text,google_meet_url text,transcript text,transcript_source text,updated_at text);
+    CREATE TABLE scheduled_calls (id text PRIMARY KEY,org_id text,title text,scheduled_at text,duration_minutes integer,status text,attendees text,meeting_url text,created_by_id text);
+    CREATE TABLE discovery_calls (id text PRIMARY KEY,org_id text,title text,scheduled_at text,duration_minutes integer,status text,attendees text,google_meet_url text,transcript text,transcript_source text,updated_at text,created_by_id text);
+    CREATE TABLE integrations (id text PRIMARY KEY, service text, config text, status text);
     INSERT INTO organisations VALUES ('client-a', 'Client A');
     INSERT INTO team_members VALUES ('member-liam','liam','Liam Miller','business@tahi.studio');`)
   h.database = drizzle(adapter() as unknown as AnyD1Database, { schema })
@@ -117,6 +120,7 @@ beforeEach(() => {
   h.device = { userId: 'liam', orgId: 'tahi', sessionId: null, recorderDevice: { id: 'device', teamMemberId: 'member-liam' } }
   h.valid = true; h.unavailable = false; h.failSideInsert = false
   h.deniedOrg = null
+  h.queries = []
   h.bucket.put.mockReset()
 })
 afterEach(() => { sqlite.close(); vi.useRealTimers(); vi.restoreAllMocks() })
@@ -139,9 +143,26 @@ describe('tray recording create', () => {
 
   it('atomically refuses a second open recording and permits a new one after stopping', async () => {
     const first = await create()
-    expect((await createRecording(request('', input({ clientRef: crypto.randomUUID() })))).status).toBe(429)
+    const response = await createRecording(request('', input({ clientRef: crypto.randomUUID() })))
+    expect(response.status).toBe(429)
+    expect(await response.json()).toMatchObject({ code: 'open_recording' })
     close(first)
     expect(await create({ clientRef: crypto.randomUUID() })).not.toBe(first)
+  })
+
+  it('ignores abandoned open recordings older than the maximum duration plus one hour', async () => {
+    const first = await create()
+    vi.setSystemTime(NOW + MAX_RECORDING_DURATION_MS + 60 * 60 * 1000)
+    expect((await createRecording(request('', input({ clientRef: crypto.randomUUID() })))).status).toBe(429)
+    vi.setSystemTime(NOW + MAX_RECORDING_DURATION_MS + 60 * 60 * 1000 + 1)
+    expect(await create({ clientRef: crypto.randomUUID() })).not.toBe(first)
+  })
+
+  it('rejects callId without callKind before creating any rows', async () => {
+    const response = await createRecording(request('', input({ callId: 'call' })))
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'callKind is required when callId is supplied.' })
+    expect(sqlite.prepare('SELECT count(*) AS count FROM meeting_recordings').get()?.count).toBe(0)
   })
 
   it('rolls back the primary row when the side-table write fails', async () => {
@@ -157,8 +178,14 @@ describe('tray recording create', () => {
     seedCall('cancelled', { status: 'cancelled' })
     seedCall('later', { offset: 300_000 })
     seedCall('stale', { offset: -180_000 })
+    seedCall('in-progress', { offset: -20 * 60_000, durationMinutes: 60 })
+    seedCall('ended', { offset: -41 * 60_000 })
+    seedCall('grace-boundary', { offset: -40 * 60_000 })
+    seedCall('opens-now', { offset: 120_000 })
     for (const [id, kind, expected] of [['allowed', 'discovery', 'allowed'], ['other', 'discovery', null],
-      ['cancelled', 'discovery', null], ['later', 'discovery', null], ['stale', 'discovery', null],
+      ['cancelled', 'discovery', null], ['later', 'discovery', null], ['stale', 'discovery', 'stale'],
+      ['in-progress', 'discovery', 'in-progress'], ['ended', 'discovery', null],
+      ['grace-boundary', 'discovery', 'grace-boundary'], ['opens-now', 'discovery', 'opens-now'],
       ['allowed', 'scheduled', null], ['missing', 'discovery', null]]) {
       const recording = await create({ clientRef: crypto.randomUUID(), callId: id, callKind: kind, orgId: 'forged-client' })
       expect(sqlite.prepare('SELECT call_id,org_id FROM meeting_recordings WHERE id=?').get(recording))
@@ -169,6 +196,47 @@ describe('tray recording create', () => {
 })
 
 describe('owned slim recording responses', () => {
+  it('stops an empty device recording in a terminal failed state and frees its open slot', async () => {
+    const id = await create()
+    const response = await stop(request(`/${id}/stop`, { durationMs: 0, expectedChunks: { mic: 0, system: 0 } }), params(id))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ recording: { id, state: 'failed', expectedChunks: { mic: 0, system: 0 },
+      error: 'No audio was captured. Start a new recording.' }, chunks: [] })
+    expect(sqlite.prepare('SELECT stopped_at FROM meeting_recordings WHERE id=?').get(id)?.stopped_at).toBe(new Date(NOW).toISOString())
+    const replay = await stop(request(`/${id}/stop`, { durationMs: 30_000, expectedChunks: { mic: 1, system: 1 } }), params(id))
+    expect(await replay.json()).toMatchObject({ recording: { state: 'failed', expectedChunks: { mic: 0, system: 0 }, error: 'No audio was captured. Start a new recording.' } })
+    const attemptedTranscription = await transcribe(request(`/${id}/transcribe`, {}), params(id))
+    expect(attemptedTranscription.status).toBe(200)
+    expect(await attemptedTranscription.json()).toMatchObject({ recording: { state: 'failed', error: 'No audio was captured. Start a new recording.' }, pending: false })
+    expect((await reserve(request(`/${id}/chunks`, metadata()), params(id))).status).toBe(409)
+    expect(await create({ clientRef: crypto.randomUUID() })).not.toBe(id)
+  })
+
+  it('does not let an empty stop discard reserved chunks', async () => {
+    const id = await create()
+    expect((await reserve(request(`/${id}/chunks`, metadata()), params(id))).status).toBe(200)
+    expect((await stop(request(`/${id}/stop`, { durationMs: 0, expectedChunks: { mic: 0, system: 0 } }), params(id))).status).toBe(400)
+    expect(sqlite.prepare('SELECT state FROM meeting_recordings WHERE id=?').get(id)?.state).toBe('recording')
+  })
+
+  it('loads all listed chunk summaries in one query without reading other device chunks', async () => {
+    const ids: string[] = []
+    for (let index = 0; index < 3; index++) {
+      const id = await create({ clientRef: crypto.randomUUID() })
+      await reserve(request(`/${id}/chunks`, metadata()), params(id))
+      ids.push(id)
+      close(id)
+    }
+    h.device.recorderDevice.id = 'another-device'
+    const other = await create({ clientRef: crypto.randomUUID() })
+    await reserve(request(`/${other}/chunks`, metadata()), params(other))
+    h.device.recorderDevice.id = 'device'
+    h.queries = []
+    const response = await listRecordings(request())
+    expect(await response.json()).toMatchObject({ items: ids.map(id => ({ recording: { id }, chunks: [{ track: 'mic', sequence: 0 }] })) })
+    expect(h.queries.filter(query => /from "meeting_recording_chunks"/i.test(query))).toHaveLength(1)
+    expect(h.queries).toHaveLength(2)
+  })
   it('never returns transcript, chunk text, segments or upload secrets on reads or list', async () => {
     const id = await create()
     sqlite.prepare("INSERT INTO meeting_recording_chunks (id,recording_id,track,sequence,start_ms,duration_ms,mime_type,size,storage_key,upload_token,state,text,segments,uploaded_at,created_at,updated_at) VALUES ('chunk',?,'mic',0,0,30000,'audio/wav',960044,'secret-key','secret-token','ready','Secret transcript','[]',?,?,?)")
@@ -246,20 +314,47 @@ describe('device audio quotas and payloads', () => {
     expect(await (await reserve(request(`/${id}/chunks`, metadata()), params(id))).json()).toMatchObject({ duplicate: true, uploaded: true })
   })
 
-  it('counts both tracks, allows exact daily limit, preserves duplicates and ignores previous UTC days', async () => {
+  it('counts mic reservations over a rolling 24 hours, allows the exact limit and preserves duplicates', async () => {
     const id = await create()
-    sqlite.prepare("INSERT INTO meeting_recording_chunks (id,recording_id,track,sequence,start_ms,duration_ms,mime_type,size,storage_key,upload_token,state,created_at,updated_at) VALUES ('used',?,'system',999,0,?,'audio/wav',960044,'key','token','reserved',?,?)")
-      .run(id, RECORDER_DAILY_AUDIO_MS - 30_000, new Date(NOW).toISOString(), new Date(NOW).toISOString())
+    sqlite.prepare("INSERT INTO meeting_recording_chunks (id,recording_id,track,sequence,start_ms,duration_ms,mime_type,size,storage_key,upload_token,state,created_at,updated_at) VALUES ('used',?,'mic',999,0,?,'audio/wav',960044,'key','token','reserved',?,?)")
+      .run(id, RECORDER_DAILY_AUDIO_MS - 30_000, new Date(NOW - 60_000).toISOString(), new Date(NOW - 60_000).toISOString())
     expect((await reserve(request(`/${id}/chunks`, metadata()), params(id))).status).toBe(200)
-    expect((await reserve(request(`/${id}/chunks`, metadata({ sequence: 1, startMs: 30_000 })), params(id))).status).toBe(429)
+    const exceeded = await reserve(request(`/${id}/chunks`, metadata({ sequence: 1, startMs: 30_000 })), params(id))
+    expect(exceeded.status).toBe(429)
+    expect(await exceeded.json()).toMatchObject({ code: 'daily_quota' })
+    expect((await reserve(request(`/${id}/chunks`, metadata({ track: 'system' })), params(id))).status).toBe(200)
     const duplicate = await reserve(request(`/${id}/chunks`, metadata()), params(id))
     expect(duplicate.status).toBe(200)
     expect(await duplicate.json()).toMatchObject({ duplicate: false, uploaded: false })
     close(id)
-    expect((await createRecording(request('', input({ clientRef: crypto.randomUUID() })))).status).toBe(429)
+    const blocked = await createRecording(request('', input({ clientRef: crypto.randomUUID() })))
+    expect(blocked.status).toBe(429)
+    expect(await blocked.json()).toMatchObject({ code: 'daily_quota' })
     vi.setSystemTime(NOW + 86400_000)
     const next = await create({ clientRef: crypto.randomUUID() })
     expect((await reserve(request(`/${next}/chunks`, metadata()), params(next))).status).toBe(200)
+  })
+
+  it('accepts seven hours on each of two tracks as seven microphone hours', async () => {
+    const id = await create()
+    for (const track of ['mic', 'system']) {
+      sqlite.prepare("INSERT INTO meeting_recording_chunks (id,recording_id,track,sequence,start_ms,duration_ms,mime_type,size,storage_key,upload_token,state,created_at,updated_at) VALUES (?, ?, ?,999,0,?,'audio/wav',960044,'key','token','reserved',?,?)")
+        .run(`used-${track}`, id, track, 7 * 60 * 60 * 1000, new Date(NOW).toISOString(), new Date(NOW).toISOString())
+    }
+    expect((await reserve(request(`/${id}/chunks`, metadata()), params(id))).status).toBe(200)
+    expect((await reserve(request(`/${id}/chunks`, metadata({ track: 'system' })), params(id))).status).toBe(200)
+    close(id)
+    expect(await create({ clientRef: crypto.randomUUID() })).not.toBe(id)
+  })
+
+  it('keeps previous UTC-day mic audio charged until it is 24 hours old', async () => {
+    const id = await create()
+    sqlite.prepare("INSERT INTO meeting_recording_chunks (id,recording_id,track,sequence,start_ms,duration_ms,mime_type,size,storage_key,upload_token,state,created_at,updated_at) VALUES ('used',?,'mic',999,0,?,'audio/wav',960044,'key','token','reserved',?,?)")
+      .run(id, RECORDER_DAILY_AUDIO_MS, new Date(NOW - 60_000).toISOString(), new Date(NOW - 60_000).toISOString())
+    close(id)
+    expect((await createRecording(request('', input({ clientRef: crypto.randomUUID() })))).status).toBe(429)
+    vi.setSystemTime(NOW + 86400_000 - 60_000)
+    expect(await create({ clientRef: crypto.randomUUID() })).not.toBe(id)
   })
 })
 

@@ -1251,3 +1251,44 @@ security/Opus review, migration-first ship/apply, signed-in 375/768 desktop
 light/dark verification, deployment and live health/signed-in smoke. The
 separate C# client run owns pairing/capture/outbox integration and real calls.
 REC.0 remains open, with all changes uncommitted and no production operation.
+
+## 2026-10-14, REC.0 tray server review repairs, uncommitted on e961108f
+
+Started with clean git status on feat/rec0-tray-server at e961108f. Migration
+0114 is the separate 97b0b0ae commit. The review repair changes no migration
+file or schema and performs no commit, push, deploy, migration apply, secret
+change or production operation. REC.0 remains open for shipping/live proof.
+
+Fixed overlapping [start - 2 minutes, end + 10 minutes] call windows with
+open-now create validation and own attendee/Google account/creator matching.
+Added coarse scheduled_at bounds, batched owned chunk reads and explicit
+recording INSERT columns. Empty device stops fail terminally and stay failed
+on stop/transcribe retries; open rows older than thirteen hours do not block
+a new recording. Quota counts reserved mic audio only over a rolling 24 hours,
+with twelve-hour cap and distinct open_recording/daily_quota 429 codes.
+callId without callKind returns 400. Seven hours on two tracks is accepted.
+
+Pairing now groups IPv6 /64 prefixes, atomically limits fifty global and five
+per-prefix failed exchanges in fifteen minutes, expires earlier unused member
+codes, HMACs prefixes with an HKDF key from an existing secret, purges attempts
+older than one day and audits code creation/pairing without secrets. Settings
+uses shared EmptyState/Badge, friendly status/non-JSON error handling and polls
+away used code cards. Shared ConfirmDialog is restored to its pre-feature
+version; the Recorder devices portal/wrapping remains local.
+
+Decision #072 and handoff record rolling mic quota and Not this call only
+before create is sent; afterward Liam relinks in the dashboard. STATUS/TASKS
+and decision/handoff now distinguish committed implementation from this
+uncommitted repair. External C:/Users/Work/.codex-briefs/rec0-tray-spec.md is
+outside the writable workspace, so its corrected copy is
+docs/rec0-tray-spec-review-correction.md, with R14 fixed; original unchanged.
+
+Requested fail-closed gate passed: type-check exit 0, CI=1 lint exit 0
+(existing warnings), worker tsc --noEmit exit 0, sixteen Vitest files / 373
+tests passed, git diff --check exit 0. Vitest uses the existing ignored native
+sandbox config because standard esbuild startup hits spawn EPERM. Raw logs:
+.wrangler/rec0-tray-review-type-check.log, rec0-tray-review-lint.log,
+rec0-tray-review-worker-tsc.log and rec0-tray-review-vitest.log. Independent QA
+and UIUX source reviews pass after fixing terminal replay and local long-name
+overflow findings. No browser/live proof or build is claimed in this repair.
+Full item/file/line report: docs/superpowers/audits/2026-10-14-rec0-tray-review-fixes.md.

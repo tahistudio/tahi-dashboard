@@ -55,13 +55,13 @@ export async function recorderRecordingDetail(database: DB, auth: RecorderDevice
   }
 }
 
-export function recorderDayStart(now = new Date()): string {
-  return `${now.toISOString().slice(0, 10)}T00:00:00.000Z`
+export function recorderQuotaStart(now = new Date()): string {
+  return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
 }
 
-/** Reserved audio counts too. Atomic reservation checks prevent concurrent quota bypass. */
-export function recorderAudioQuota(deviceId: string, additionalMs: number, dayStart = recorderDayStart()) {
+/** Reserved mic audio counts over a rolling 24 hours, independently of the system track. */
+export function recorderAudioQuota(deviceId: string, additionalMs: number, cutoff = recorderQuotaStart()) {
   return sql`(SELECT COALESCE(SUM(c.duration_ms), 0) FROM meeting_recording_chunks c
     INNER JOIN recorder_recordings rr ON rr.recording_id = c.recording_id
-    WHERE rr.device_id = ${deviceId} AND c.created_at >= ${dayStart}) + ${additionalMs} <= ${RECORDER_DAILY_AUDIO_MS}`
+    WHERE rr.device_id = ${deviceId} AND c.track = 'mic' AND c.created_at > ${cutoff}) + ${additionalMs} <= ${RECORDER_DAILY_AUDIO_MS}`
 }

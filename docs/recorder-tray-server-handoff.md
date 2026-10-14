@@ -1,7 +1,9 @@
 ﻿# Tray recorder server handoff
 
 REC.0 phase 2 dashboard changes are prepared on feat/rec0-tray-server from
-729cc282. Nothing in this worktree has been committed, applied or deployed.
+729cc282. Migration 0114 is committed separately as 97b0b0ae and the server
+implementation as e961108f. This review repair is uncommitted on top of
+e961108f. No migration apply or deployment is performed in this session.
 Phases 1 and 1b are live per Liam's 2026-10-14 brief. Decision #072 records the
 approved automatic capture choices and the successful live WAV probe.
 
@@ -25,14 +27,21 @@ Settings > Recorder devices shows only the signed-in person's devices, with
 loading, empty, error, active and revoked states. A real Clerk-session admin
 can create a code for themselves with POST /api/admin/recorder-devices/pairing-code.
 The response is { code, expiresAt }, valid for ten minutes, single use. Only
-the code hash is stored. Neither MCP nor a recorder bearer can create codes.
+the code hash is stored. A new code invalidates that member's earlier unused
+codes. Neither MCP nor a recorder bearer can create codes. Settings polls the
+owned device list while the code card is open and hides it after pairing.
 
 The client exchanges { code, deviceName } through POST /api/public/recorder/pair.
 The 201 response is { token, device: { id, name } }. The bearer is tahi_rec_
 followed by 32 random bytes in base64url. Only its SHA-256 is stored. Responses
-containing secrets are no-store. Five failed attempts from a Cloudflare IP
-hash within fifteen minutes block further exchanges with 429. Atomic D1
-consumption prevents two devices using one code.
+containing secrets are no-store. Five failed attempts from one Cloudflare IP
+prefix, or fifty across all prefixes, within fifteen minutes block further
+exchanges with 429. IPv6 uses its /64 prefix. Prefixes are stored as HMACs
+using a purpose-specific HKDF key derived from the existing MCP_IDENTITY_SECRET
+(CLERK_SECRET_KEY fallback). Attempts older than one day are purged during
+exchange. Atomic D1 consumption prevents two devices using one code. Audit
+actions recorder_device.pairing_code_created and recorder_device.paired never
+contain a code or token; successful pairing identifies the device id.
 
 GET /api/admin/recorder-devices returns { items }. POST
 /api/admin/recorder-devices/{id}/revoke returns { success: true }. These use
@@ -52,6 +61,8 @@ recording methods are:
 - POST /api/admin/recordings, with { clientRef, title, tracks, callKind?, callId? }.
   clientRef is a persisted client UUID. A retry returns the existing recording.
   tracks contains mic and optionally system. Tray transcription uses Whisper.
+  Supplying callId without callKind returns 400. A stale or non-owned call
+  choice with both fields supplied creates an unlinked recording.
 - GET /api/admin/recordings and GET /api/admin/recordings/{id} for owned state,
   expected chunk counts, and each chunk's track, sequence, uploaded, state and
   error. These responses contain no transcript, segments or chunk text.
@@ -66,7 +77,9 @@ recording methods are:
   44-byte header and MIME exactly audio/wav. Reservation size must equal
   44 + durationMs * 32; upload validates the header and sample count before R2.
 - POST /api/admin/recordings/{id}/stop, with the existing expectedChunks and
-  durationMs contract. Upload missing chunks and repeatedly POST
+  durationMs contract. A device with no chunks can stop with zero expected
+  counts and durationMs: 0; it becomes terminal failed with a no-audio error.
+  Upload missing chunks and repeatedly POST
   /api/admin/recordings/{id}/transcribe until ready or failed.
 - GET /api/admin/recordings/upcoming-calls returns { items } containing only id,
   kind, title, startMs, endMs and platform. A device-provided call identity is
@@ -84,17 +97,35 @@ permissions. Clerk organisation membership is cached for fifteen minutes.
 A definite removal revokes the token; a Clerk outage returns retryable 503
 with Retry-After, preserving local audio. Thirty idle days expire a device;
 last-seen writes occur at most once per five minutes. Quotas allow one open
-recording and twelve hours of reserved audio per device per UTC day, across
-both tracks. Reservations count before upload so concurrency cannot bypass
-the limit. A 429 means retain audio and wait or resolve the open recording.
+recording and twelve hours of reserved microphone audio per device over a
+rolling 24 hours. System audio does not count, so seven hours on both tracks
+uses seven hours of quota. Reservations count before upload so concurrency
+cannot bypass the limit. Open recordings older than the maximum recording
+duration (12 hours) plus one hour do not occupy the open slot. A 429 code
+open_recording means stop or resolve the open recording; daily_quota means
+retain audio and wait for the rolling quota to free up.
 
 ## Calendar and client limits
 
-Upcoming calls must be scheduled, include the member's email in attendees,
-and start from two minutes ago through fifteen minutes ahead. Times are
-parsed instants; the raw meeting URL is never returned. Calendar sync runs
+Upcoming calls must be scheduled and match this member: their email is in
+attendees (case-insensitive), or the connected Google account email is in
+attendees and belongs to this member, or they created the call. The Google
+integration currently records its account email, with no connecting member
+identity, so account ownership is checked against the member's email.
+Return calls whose window overlaps [now, now + 15 minutes], where each window
+is [start - 2 minutes, end + 10 minutes]. The precise condition is
+startMs - 120_000 <= nowMs + 900_000 && endMs + 600_000 >= nowMs.
+Create links only while that window is open now. A call starting 20 minutes
+ago and lasting 60 minutes still links; one ending over 10 minutes ago does
+not. Times are parsed instants after a coarse scheduled_at SQL range of
+about one day each side; the raw meeting URL is never returned. Calendar sync runs
 every fifteen minutes, only lead/deal/client-matched events become calls,
 and the shared Google integration is Liam's calendar.
+
+The tray honours "Not this call" only before its create request is sent,
+by omitting the call identity. After create is sent, Liam relinks through
+the dashboard when its existing linking rules allow it. Devices cannot
+relink a recording and must not imply that the toast can undo a sent create.
 
 The separate tray run implements automatic unlinked capture for unknown
 calls after twenty seconds of an active meeting capture session, manual

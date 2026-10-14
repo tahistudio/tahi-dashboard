@@ -1,5 +1,9 @@
 # REC.0 phase 2 dashboard report
 
+Historical preparation report. Migration and server implementation were later
+committed as 97b0b0ae and e961108f. Current review repairs, corrected quota and
+window contracts, and verification are in 2026-10-14-rec0-tray-review-fixes.md.
+
 Prepared uncommitted on feat/rec0-tray-server, base 729cc282. Initial git status
 was clean. No commit, push, deploy, migration apply, secret change or production
 data write. No C# project was built; apps/recorder-tray contains a handoff README.

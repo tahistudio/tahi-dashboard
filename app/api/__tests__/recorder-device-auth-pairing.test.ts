@@ -16,7 +16,6 @@ vi.mock('@/lib/db', () => ({ db: async () => h.database }))
 vi.mock('@/lib/server-auth', () => ({ getRequestAuth: async () => h.auth, isTahiAdmin: (id: string | null) => id === 'tahi' }))
 vi.mock('@/lib/permissions', () => ({ resolvePermissions: (...args: unknown[]) => h.permissions(...args) }))
 vi.mock('@/lib/mcp-profile-server', () => ({ isClerkUserInTahiOrg: (...args: unknown[]) => h.membership(...args) }))
-vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }))
 
 import { RECORDER_DEVICES_MIGRATION } from '@/lib/recorder-devices-migration'
 import { getRecorderDeviceAuth, hashRecorderSecret, isRecorderDeviceRequest, RecorderDeviceAuthError } from '@/lib/recorder-device-auth'
@@ -24,6 +23,7 @@ import { GET as listDevices } from '@/app/api/admin/recorder-devices/route'
 import { POST as createCode } from '@/app/api/admin/recorder-devices/pairing-code/route'
 import { POST as revokeDevice } from '@/app/api/admin/recorder-devices/[id]/revoke/route'
 import { POST as pair } from '@/app/api/public/recorder/pair/route'
+import { hashRecorderPairingIp, recorderPairingIpPrefix } from '@/lib/recorder-pairing-security'
 
 interface SqlResult { results: Array<Record<string, unknown>>; success: boolean; meta: { changes: number } }
 interface SqlStatement {
@@ -97,10 +97,14 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date(now))
   vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', 'tahi')
+  vi.stubEnv('MCP_IDENTITY_SECRET', 'recorder-pairing-test-secret-00000000')
+  vi.stubEnv('CLERK_SECRET_KEY', '')
   sqlite = new DatabaseSync(':memory:')
   sqlite.exec(RECORDER_DEVICES_MIGRATION.join(';'))
   sqlite.exec(`CREATE TABLE team_members (id TEXT PRIMARY KEY, clerk_user_id TEXT, name TEXT, email TEXT);
-    INSERT INTO team_members VALUES ('member-liam','liam','Liam','business@tahi.studio'), ('member-staci','staci','Staci','staci@tahi.studio');`)
+    INSERT INTO team_members VALUES ('member-liam','liam','Liam','business@tahi.studio'), ('member-staci','staci','Staci','staci@tahi.studio');
+    CREATE TABLE audit_log (id TEXT PRIMARY KEY, actor_id TEXT, actor_type TEXT, action TEXT NOT NULL,
+      entity_type TEXT, entity_id TEXT, metadata TEXT, ip_address TEXT, created_at TEXT NOT NULL);`)
   database = drizzle(adapter(sqlite) as unknown as AnyD1Database, { schema })
   h.database = database
   h.auth = { userId: 'liam', orgId: 'tahi', sessionId: 'sess_liam' }
@@ -111,6 +115,36 @@ beforeEach(() => {
 })
 
 afterEach(() => { sqlite.close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers() })
+
+describe('recorder pairing IP protection', () => {
+  it('canonicalizes IPv6 /64 prefixes across compressed and expanded addresses', () => {
+    expect(recorderPairingIpPrefix('2001:DB8:1234:5678::1')).toBe('ipv6:2001:0db8:1234:5678/64')
+    expect(recorderPairingIpPrefix('2001:0db8:1234:5678:aaaa:bbbb:cccc:dddd')).toBe('ipv6:2001:0db8:1234:5678/64')
+    expect(recorderPairingIpPrefix('2001:db8:1234:5679::1')).not.toBe(recorderPairingIpPrefix('2001:db8:1234:5678::1'))
+    expect(recorderPairingIpPrefix('::1')).toBe('ipv6:0000:0000:0000:0000/64')
+    expect(recorderPairingIpPrefix('::ffff:192.0.2.1')).toBe(recorderPairingIpPrefix('0:0:0:0:0:ffff:c000:201'))
+    expect(recorderPairingIpPrefix('192.0.2.1')).toBe('ipv4:192.0.2.1')
+    expect(recorderPairingIpPrefix('not-an-address')).toBe('unknown')
+    expect(recorderPairingIpPrefix(null)).toBe('unknown')
+  })
+
+  it('stores a secret-dependent HMAC of the prefix rather than an enumerable plain hash', async () => {
+    const first = await hashRecorderPairingIp('2001:db8:1234:5678::1')
+    expect(first).toMatch(/^[a-f0-9]{64}$/)
+    expect(first).toBe(await hashRecorderPairingIp('2001:0db8:1234:5678::abcd'))
+    expect(first).not.toBe(await hashRecorderSecret('2001:db8:1234:5678::1'))
+    expect(first).not.toBe(await hashRecorderSecret(recorderPairingIpPrefix('2001:db8:1234:5678::1')))
+    vi.stubEnv('MCP_IDENTITY_SECRET', 'different-pairing-test-secret-0000')
+    expect(await hashRecorderPairingIp('2001:db8:1234:5678::1')).not.toBe(first)
+  })
+
+  it('uses the existing Clerk secret when the MCP identity secret is unavailable', async () => {
+    const expected = await hashRecorderPairingIp('192.0.2.1')
+    vi.stubEnv('CLERK_SECRET_KEY', process.env.MCP_IDENTITY_SECRET!)
+    vi.stubEnv('MCP_IDENTITY_SECRET', '')
+    expect(await hashRecorderPairingIp('192.0.2.1')).toBe(expected)
+  })
+})
 
 describe('recorder device authentication', () => {
   it('returns the real Clerk identity with a narrow device marker', async () => {
@@ -228,6 +262,36 @@ describe('recorder pairing', () => {
     expect(await getRecorderDeviceAuth(request('/', undefined, body.token))).toMatchObject({ userId: 'liam' })
   })
 
+  it('records creation and pairing audit rows without codes, tokens or their hashes', async () => {
+    const code = await pairingCode()
+    const response = await exchange(code)
+    expect(response.status).toBe(201)
+    const body = await response.json() as { token: string; device: { id: string } }
+    const rows = sqlite.prepare('SELECT actor_id, action, entity_type, entity_id, metadata, ip_address FROM audit_log ORDER BY rowid').all()
+    expect(rows).toEqual([
+      expect.objectContaining({ actor_id: 'liam', action: 'recorder_device.pairing_code_created', entity_type: 'team_member', entity_id: 'member-liam' }),
+      expect.objectContaining({ actor_id: 'liam', action: 'recorder_device.paired', entity_type: 'recorder_device', entity_id: body.device.id }),
+    ])
+    const stored = JSON.stringify(rows)
+    for (const secret of [code, body.token, await hashRecorderSecret(code), await hashRecorderSecret(body.token)]) {
+      expect(stored).not.toContain(secret)
+    }
+    expect(rows.every(row => row.metadata === null && row.ip_address === null)).toBe(true)
+    expect((await exchange(code)).status).toBe(400)
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'recorder_device.paired'").get()?.n).toBe(1)
+  })
+
+  it('invalidates earlier unused codes only for the member creating a replacement', async () => {
+    h.auth = { userId: 'staci', orgId: 'tahi', sessionId: 'sess_staci' }
+    const staciCode = await pairingCode()
+    h.auth = { userId: 'liam', orgId: 'tahi', sessionId: 'sess_liam' }
+    const oldCode = await pairingCode()
+    const replacement = await pairingCode()
+    expect((await exchange(oldCode)).status).toBe(400)
+    expect((await exchange(replacement)).status).toBe(201)
+    expect((await exchange(staciCode)).status).toBe(201)
+  })
+
   it('consumes the code atomically under racing exchanges', async () => {
     const code = await pairingCode()
     const results = await Promise.all([exchange(code), exchange(code)])
@@ -268,13 +332,59 @@ describe('recorder pairing', () => {
     expect(results.filter(result => result.status === 400)).toHaveLength(5)
     expect(results.filter(result => result.status === 429)).toHaveLength(5)
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM recorder_pairing_attempts').get()?.n).toBe(5)
-    expect(sqlite.prepare('SELECT ip_hash FROM recorder_pairing_attempts LIMIT 1').get()?.ip_hash).toBe(await hashRecorderSecret('192.0.2.1'))
+    expect(sqlite.prepare('SELECT ip_hash FROM recorder_pairing_attempts LIMIT 1').get()?.ip_hash).toBe(await hashRecorderPairingIp('192.0.2.1'))
     expect((await exchange('ZZZZZZZZ', '192.0.2.2')).status).toBe(400)
     vi.setSystemTime(new Date('2026-10-14T00:15:00.001Z'))
     expect((await exchange('ZZZZZZZZ')).status).toBe(400)
   })
 
+  it('shares the five-failure limit across rotating IPv6 addresses within one /64', async () => {
+    const results = await Promise.all(Array.from({ length: 8 }, (_, index) => exchange('ZZZZZZZZ', `2001:db8:1234:5678::${index + 1}`)))
+    expect(results.filter(result => result.status === 400)).toHaveLength(5)
+    expect(results.filter(result => result.status === 429)).toHaveLength(3)
+    expect(sqlite.prepare('SELECT COUNT(DISTINCT ip_hash) AS n FROM recorder_pairing_attempts').get()?.n).toBe(1)
+    expect((await exchange('ZZZZZZZZ', '2001:db8:1234:5679::1')).status).toBe(400)
+  })
+
+  it('atomically caps concurrent failures at fifty across all IPs for fifteen minutes', async () => {
+    const results = await Promise.all(Array.from({ length: 60 }, (_, index) => exchange('ZZZZZZZZ', `192.0.2.${index + 1}`)))
+    expect(results.filter(result => result.status === 400)).toHaveLength(50)
+    expect(results.filter(result => result.status === 429)).toHaveLength(10)
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM recorder_pairing_attempts WHERE succeeded = 0').get()?.n).toBe(50)
+    const blocked = await exchange('ZZZZZZZZ', '198.51.100.1')
+    expect(blocked.status).toBe(429)
+    expect(blocked.headers.get('Retry-After')).toBe('900')
+    vi.setSystemTime(new Date('2026-10-14T00:15:00.001Z'))
+    expect((await exchange('ZZZZZZZZ', '198.51.100.1')).status).toBe(400)
+  })
+
+  it('purges successful and failed attempts older than one day during exchange', async () => {
+    const insert = sqlite.prepare('INSERT INTO recorder_pairing_attempts VALUES (?, ?, ?, ?)')
+    insert.run('old-failure', 'old-key', '2026-10-12T23:59:59.999Z', 0)
+    insert.run('old-success', 'old-key', '2026-10-12T23:00:00.000Z', 1)
+    insert.run('boundary', 'older-key', '2026-10-13T00:00:00.000Z', 0)
+    insert.run('recent', 'recent-key', '2026-10-13T23:59:00.000Z', 0)
+    expect((await exchange('ZZZZZZZZ')).status).toBe(400)
+    const remaining = sqlite.prepare('SELECT id FROM recorder_pairing_attempts').all().map(row => row.id)
+    expect(remaining).toEqual(expect.arrayContaining(['boundary', 'recent']))
+    expect(remaining).toHaveLength(3)
+    expect(remaining).not.toContain('old-failure')
+    expect(remaining).not.toContain('old-success')
+  })
+
+  it('fails closed without either existing server secret', async () => {
+    const code = await pairingCode()
+    vi.stubEnv('MCP_IDENTITY_SECRET', '')
+    vi.stubEnv('CLERK_SECRET_KEY', '')
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    expect((await exchange(code)).status).toBe(503)
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM recorder_pairing_attempts').get()?.n).toBe(0)
+    expect(sqlite.prepare('SELECT used_at FROM recorder_pairing_codes').get()?.used_at).toBeNull()
+  })
+
   it('does not count successful exchanges as failures', async () => {
+    const insert = sqlite.prepare('INSERT INTO recorder_pairing_attempts VALUES (?, ?, ?, 1)')
+    for (let index = 0; index < 50; index++) insert.run(`success-${index}`, `ip-key-${index}`, now)
     for (let index = 0; index < 6; index++) expect((await exchange(await pairingCode())).status).toBe(201)
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM recorder_pairing_attempts WHERE succeeded = 0').get()?.n).toBe(0)
   })

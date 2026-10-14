@@ -8,6 +8,8 @@ import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
 import { usePermissions } from '@/components/tahi/permissions-context'
 import { TahiButton } from '@/components/tahi/tahi-button'
+import { EmptyState } from '@/components/tahi/empty-state'
+import { Badge } from '@/components/tahi/badge'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { SectionShell } from '@/components/tahi/settings/primitives'
 
@@ -23,6 +25,7 @@ interface RecorderDevice {
 interface PairingCode {
   code: string
   expiresAt: string
+  existingDeviceIds: string[]
 }
 
 const CARD: CSSProperties = {
@@ -38,10 +41,16 @@ function dateLabel(value: string): string {
 }
 
 async function readResponse(response: Response): Promise<Record<string, unknown>> {
-  const body: unknown = await response.json()
+  if (!response.ok) {
+    const message = response.status >= 500
+      ? 'Recorder devices are temporarily unavailable. Try again in a moment.'
+      : 'Could not save this change. Try again.'
+    const body: unknown = await response.json().catch(() => null)
+    throw new Error(body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : message)
+  }
+  const body: unknown = await response.json().catch(() => null)
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('The server returned an invalid response. Try again.')
   const payload = body as Record<string, unknown>
-  if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : 'Could not save this change. Try again.')
   return payload
 }
 
@@ -68,6 +77,14 @@ export function RecorderDevicesSection({ isAdmin = false }: { isAdmin?: boolean 
     return () => window.clearInterval(timer)
   }, [pairing, expired])
 
+  useEffect(() => {
+    if (!pairing || expired || !data) return
+    const pairedDevice = data.items.find(device => !pairing.existingDeviceIds.includes(device.id))
+    if (!pairedDevice) return
+    setPairing(null)
+    setNotice(`${pairedDevice.name} is paired and ready to record.`)
+  }, [pairing, expired, data])
+
   if (!canManage) return null
 
   const createCode = async () => {
@@ -77,6 +94,8 @@ export function RecorderDevicesSection({ isAdmin = false }: { isAdmin?: boolean 
     setNotice(null)
     setPairing(null)
     try {
+      const devices = await mutate().catch(() => undefined)
+      if (!devices) throw new Error('Could not check your recorder devices. Try again.')
       const payload = await readResponse(await fetch(apiPath('/api/admin/recorder-devices/pairing-code'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       }))
@@ -84,7 +103,7 @@ export function RecorderDevicesSection({ isAdmin = false }: { isAdmin?: boolean 
         throw new Error('Could not read the pairing code. Try again.')
       }
       setNow(Date.now())
-      setPairing({ code: payload.code, expiresAt: payload.expiresAt })
+      setPairing({ code: payload.code, expiresAt: payload.expiresAt, existingDeviceIds: devices.items.map(device => device.id) })
     } catch (failure) {
       setActionError(failure instanceof Error ? failure.message : 'Could not create a pairing code. Try again.')
     } finally {
@@ -115,9 +134,9 @@ export function RecorderDevicesSection({ isAdmin = false }: { isAdmin?: boolean 
         <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', maxWidth: '36rem' }}>
           Pairing codes work once and expire after 10 minutes. Enter the code in the recorder on your Windows computer.
         </p>
-        <TahiButton onClick={createCode} loading={pairingBusy} disabled={!canPair} iconLeft={<Plus aria-hidden="true" style={{ width: '1rem', height: '1rem' }} />} style={BUTTON}>
+        {(isLoading || error || !!data?.items.length) && <TahiButton onClick={createCode} loading={pairingBusy} disabled={!canPair} iconLeft={<Plus aria-hidden="true" style={{ width: '1rem', height: '1rem' }} />} style={BUTTON}>
           Pair a device
-        </TahiButton>
+        </TahiButton>}
       </div>
       {!canPair && <p role="status" className="mb-4" style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>Sign in with your admin account to create a pairing code.</p>}
       {actionError && <p role="alert" className="mb-4" style={{ color: 'var(--color-danger-ink)', overflowWrap: 'anywhere' }}>{actionError}</p>}
@@ -147,11 +166,13 @@ export function RecorderDevicesSection({ isAdmin = false }: { isAdmin?: boolean 
           <TahiButton variant="secondary" onClick={() => { void mutate() }} iconLeft={<RefreshCw aria-hidden="true" style={{ width: '1rem', height: '1rem' }} />} style={BUTTON}>Try again</TahiButton>
         </div>
       ) : !data?.items.length ? (
-        <div style={{ ...CARD, textAlign: 'center', padding: '2rem 1rem' }}>
-          <span aria-hidden="true" style={{ display: 'inline-flex', padding: '0.875rem', marginBottom: '0.875rem', borderRadius: 'var(--radius-leaf)', background: 'var(--gradient-leaf-icon)', color: 'var(--color-text-on-dark)' }}><Laptop style={{ width: '1.5rem', height: '1.5rem' }} /></span>
-          <h3 style={{ color: 'var(--color-text)', fontSize: '1rem', fontWeight: 600 }}>No recorder devices yet</h3>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', marginTop: '0.5rem' }}>Pair your Windows computer to start recording calls from the tray.</p>
-        </div>
+        <EmptyState
+          icon={<Laptop style={{ width: '1.5rem', height: '1.5rem' }} />}
+          title="No recorder devices yet"
+          description="Pair your Windows computer to start recording calls from the tray."
+          style={{ ...CARD, padding: '2rem 1rem' }}
+          action={<TahiButton onClick={createCode} loading={pairingBusy} disabled={!canPair} iconLeft={<Plus aria-hidden="true" style={{ width: '1rem', height: '1rem' }} />} style={BUTTON}>Pair a device</TahiButton>}
+        />
       ) : (
         <ul aria-label="Your recorder devices" className="space-y-3" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {data.items.map(device => (
@@ -160,7 +181,7 @@ export function RecorderDevicesSection({ isAdmin = false }: { isAdmin?: boolean 
                 <div className="flex flex-wrap items-center gap-2">
                   <Laptop aria-hidden="true" style={{ width: '1rem', height: '1rem', color: 'var(--color-text-muted)', flexShrink: 0 }} />
                   <h3 style={{ color: 'var(--color-text)', fontSize: '0.9375rem', fontWeight: 600, overflowWrap: 'anywhere', minWidth: 0 }}>{device.name}</h3>
-                  {device.revokedAt && <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '0.25rem 0.5rem' }}>Revoked</span>}
+                  {device.revokedAt && <Badge tone="neutral">Revoked</Badge>}
                 </div>
                 <dl className="flex flex-wrap gap-x-5 gap-y-1" style={{ marginTop: '0.5rem', color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
                   <div><dt className="inline">Last seen: </dt><dd className="inline">{device.lastSeenAt ? dateLabel(device.lastSeenAt) : 'Not yet seen'}</dd></div>
@@ -178,7 +199,9 @@ export function RecorderDevicesSection({ isAdmin = false }: { isAdmin?: boolean 
       )}
       <p className="flex items-start gap-2 mt-4" style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}><ShieldCheck aria-hidden="true" style={{ width: '1rem', height: '1rem', flexShrink: 0 }} />Revoke a lost or unused device to stop its uploads immediately. Devices expire after 30 days without use.</p>
       {revoking && typeof document !== 'undefined' && createPortal(
-        <ConfirmDialog open title="Revoke recorder device?" description={`This stops ${revoking.name} from uploading recordings. Pair it again to restore access.`} confirmLabel="Revoke device" onConfirm={revoke} onCancel={() => setRevoking(null)} />,
+        <div style={{ overflowWrap: 'anywhere' }}>
+          <ConfirmDialog open title="Revoke recorder device?" description={`This stops ${revoking.name} from uploading recordings. Pair it again to restore access.`} confirmLabel="Revoke device" onConfirm={revoke} onCancel={() => setRevoking(null)} />
+        </div>,
         document.body,
       )}
     </SectionShell>
