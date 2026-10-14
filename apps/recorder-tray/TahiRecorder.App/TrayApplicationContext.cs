@@ -22,8 +22,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
     private readonly SemaphoreSlim _operations = new(1, 1);
     private readonly object _automationGate = new();
-    private readonly object _chunksGate = new();
-    private readonly List<Task> _chunkJobs = [];
+    private readonly CaptureChunkJobs _chunkJobs = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TouchMenuItem _status = new("Idle") { Enabled = false };
     private readonly TouchMenuItem _start = new("Start recording now");
@@ -188,7 +187,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             var currentStore = _store;
             if (currentStore is null) return;
-            lock (_chunksGate) _chunkJobs.Add(TransferChunkAsync(currentStore, args.Chunk));
+            _chunkJobs.Add(TransferChunkAsync(currentStore, args.Chunk));
         };
         _capture.Error += (_, args) => Post(async () =>
         {
@@ -199,15 +198,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 RefreshTray();
                 return;
             }
-            var persistenceFailure = CaptureFailurePolicy.RequiresRecorderDisable(_capture?.HasPersistenceFailure == true);
-            var audioGap = _capture?.HasAudioGap == true;
-            if (!persistenceFailure && !audioGap) return;
-            _captureFault |= persistenceFailure;
-            await StopForLifecycleAsync(audioGap && !persistenceFailure
-                ? RecordingStopReason.CaptureGap : RecordingStopReason.Shutdown);
-            _detail = audioGap && !persistenceFailure ? "Recording stopped after an audio gap longer than 10 seconds. Local audio is retained."
-                : "Capture stopped because audio could not be saved. Check disk space and folder access.";
-            RefreshTray();
+            // Polling and device callbacks share the Core capture failure decision.
+            await TickAsync();
         });
         _pump.CreateSending += clientRef =>
         {
@@ -270,16 +262,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
             if (_paired && !_captureFault)
             {
-                if (_capture?.HasPersistenceFailure == true)
+                var failure = CaptureFailurePolicy.Evaluate(_capture?.IsRecording == true,
+                    _capture?.HasAudioGap == true, _capture?.HasPersistenceFailure == true);
+                if (failure == CaptureFailureAction.DisableRecorder)
                     throw new IOException("Capture cannot persist audio.");
-                if (_capture?.HasAudioGap == true)
-                {
-                    lock (_automationGate) _automation.StopForLifecycle(RecordingStopReason.CaptureGap);
-                    await StopCaptureAsync(_settings.ActiveCaptureRef);
-                    _detail = "Recording stopped after an audio gap longer than 10 seconds.";
-                    RefreshTray();
-                    return;
-                }
                 var meeting = _detector.Poll();
                 _meetingActive = meeting.IsActive;
                 _platform = meeting.Platform;
@@ -287,10 +273,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 lock (_automationGate)
                 {
                     actions = _automation.Tick(DateTimeOffset.UtcNow, meeting.IsActive, meeting.Platform,
-                        Volatile.Read(ref _upcoming), meeting.Platform + ":" + meeting.ProcessId);
+                        Volatile.Read(ref _upcoming), meeting.Platform + ":" + meeting.ProcessId, failure);
                     PersistState();
                 }
                 await ApplyActionsAsync(actions);
+                if (actions.Any(action => action.StopReason == RecordingStopReason.CaptureGap))
+                    _detail = "Recording stopped after an audio gap longer than 10 seconds. Local audio is retained.";
                 PersistState();
             }
             RefreshTray();
@@ -420,10 +408,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _pending = true;
         // Outbox draining may wait on a network operation. Show the physical stop immediately.
         Post(RefreshTray);
-        Task[] chunks;
-        lock (_chunksGate) chunks = _chunkJobs.ToArray();
-        await Task.WhenAll(chunks).ConfigureAwait(false);
-        lock (_chunksGate) foreach (var job in chunks) _chunkJobs.Remove(job);
+        await _chunkJobs.DrainAsync().ConfigureAwait(false);
         if (!_capture.LastStopCompleted && clientRef is not null)
         {
             _captureFault = true;
@@ -508,11 +493,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 await StopWorkersAsync();
                 if (_capture is not null) { await _capture.StopAsync(_lifetime.Token); await _capture.DisposeAsync(); _capture = null; }
                 // Old jobs capture their old store. Drain them before selecting a new device.
-                Task[] previousChunks;
-                lock (_chunksGate) previousChunks = _chunkJobs.ToArray();
-                try { await Task.WhenAll(previousChunks); }
+                try { await _chunkJobs.DrainAsync(); }
                 catch (Exception error) { HostLog.Error("Previous device capture files retained for recovery", error); }
-                lock (_chunksGate) _chunkJobs.Clear();
                 await _tokens.SaveForDeviceAsync(response.Device.Id, response.Token, _lifetime.Token);
                 lock (_automationGate)
                 {

@@ -1460,3 +1460,38 @@ beside TahiRecorder.App.exe. No installation or recorder launch was performed.
 Raw logs and TRX: apps/recorder-tray/.build-logs/round2-build.log,
 round2-tests.log, round2-tests.trx and round2-publish.log. Published artifacts
 remain under ignored apps/recorder-tray/publish/ for installation review.
+
+## 2026-10-14, REC.0 Windows tray round 3, follow-up to 5e77adc5
+
+Started with clean git status on feat/rec0-tray-app at 5e77adc5. Round 2 is
+committed at that HEAD. Its Opus re-review failed with the P0 fix confirmed.
+Liam requested only the nine listed repairs and no commit. README, STATUS,
+TASKS and Decision #072 now identify round 2's commit and this round's follow-up;
+the preceding entries retain their historical state at the time of each run.
+No dashboard code, commit, push, deploy, pairing, secret or production-data
+operation is part of this run. REC.0 stays open for installed Windows/real calls.
+
+Scope: clear completed capture gap state and apply a forty-five-second automatic
+start hold-off, leaving manual Start available; distinguish later calendar
+windows with five seconds of observed inactivity from unscheduled calls with
+sixty seconds; prevent process-key changes from clearing suppression and retain
+an active current PID; block missing chunks and cap other chunk read IO failures;
+remove stop jobs on
+failure; recover terminal ready/failed recordings without a journal; log render
+outages once each; always show startup access paths and recovery steps. Core owns
+capture, suppression and retry decisions, tested through actual state changes.
+No schema, product or UI redesign decision is needed.
+
+Release gate passed, exit 0 for build and tests:
+    dotnet build TahiRecorder.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false
+    Build succeeded. 0 Warning(s), 0 Error(s). Time Elapsed 00:00:04.13.
+    dotnet test TahiRecorder.sln -c Release --no-build --no-restore -m:1 --logger "trx;LogFileName=round3-tests.trx" --results-directory .build-logs
+    Passed! Failed: 0, Passed: 181, Skipped: 0, Total: 181, Duration: 2 s.
+All three solution projects built; one xUnit test assembly ran. Existing restored
+.packages were used without downloads. Raw logs and TRX:
+apps/recorder-tray/.build-logs/round3-build.log, round3-tests.log and
+round3-tests.trx. Independent source QA passed with no blocking findings and
+confirmed the three-project build and all 181 tests. No code changed after the
+successful gate. No folder publish, installation, recorder launch or real-call
+proof is claimed for this follow-up. Native hardware checks remain pending;
+REC.0 remains open.

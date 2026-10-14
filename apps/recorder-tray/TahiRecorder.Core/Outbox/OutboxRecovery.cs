@@ -19,7 +19,7 @@ public static class OutboxRecovery
                 if (store.NeedsAttention(id) || recording.TerminalState == "blocked") { attention = true; continue; }
                 recovered.TryGetValue(id, out var capture);
                 var captureFolder = Path.Combine(spoolDirectory, id.ToString("D"));
-                if (capture is null && recording.TerminalState == "ready"
+                if (capture is null && recording.TerminalState is "ready" or "failed"
                     && !File.Exists(Path.Combine(captureFolder, "session.json"))) continue;
                 if (capture is null && Directory.Exists(captureFolder))
                     throw new InvalidDataException("Capture journal needs attention.");

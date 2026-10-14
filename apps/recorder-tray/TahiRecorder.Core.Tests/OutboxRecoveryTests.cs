@@ -39,9 +39,9 @@ public sealed class OutboxRecoveryTests : IDisposable
 
     [Theory]
     [InlineData("ready", false)]
-    [InlineData("failed", true)]
+    [InlineData("failed", false)]
     [InlineData(null, true)]
-    public async Task MissingJournalAfterPruneIsToleratedOnlyForReadyRecording(string? terminalState, bool needsAttention)
+    public async Task MissingJournalAfterPruneIsToleratedOnlyForReadyOrFailedRecording(string? terminalState, bool needsAttention)
     {
         var store = new FileOutboxStore(Path.Combine(_root, "outbox"));
         var spoolDirectory = Path.Combine(_root, "capture");

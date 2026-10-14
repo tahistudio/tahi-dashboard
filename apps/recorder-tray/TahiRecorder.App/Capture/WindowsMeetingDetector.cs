@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
+using TahiRecorder.Core.Audio;
 
 namespace TahiRecorder.App.Capture;
 
@@ -11,6 +12,7 @@ public sealed class WindowsMeetingDetector : IDisposable
     private readonly Thread _thread;
     private readonly string _logsDirectory;
     private readonly HashSet<string> _loggedNames = new(StringComparer.OrdinalIgnoreCase);
+    private CaptureProcessSession? _selectedSession;
     private MeetingObservation _latest = MeetingObservation.Inactive;
     private bool _disposed;
 
@@ -38,7 +40,7 @@ public sealed class WindowsMeetingDetector : IDisposable
             {
                 using var enumerator = new MMDeviceEnumerator();
                 var processes = ProcessTree.Snapshot();
-                var observations = new List<MeetingObservation>();
+                var observations = new List<CaptureProcessSession>();
                 foreach (var endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
                 {
                     using (endpoint)
@@ -56,8 +58,8 @@ public sealed class WindowsMeetingDetector : IDisposable
                                 if (processes.TryGetValue(processId, out var process))
                                     LogObservedName(process.Name);
                                 var platform = ProcessTree.MeetingPlatform(processId, processes);
-                                if (platform is not null)
-                                    observations.Add(new MeetingObservation(true, platform, processId));
+                                if (platform is not null && process is not null)
+                                    observations.Add(new CaptureProcessSession(platform, process.Name, processId));
                             }
                         }
                         catch (COMException)
@@ -71,9 +73,7 @@ public sealed class WindowsMeetingDetector : IDisposable
                     }
                 }
 
-                var observation = observations.OrderBy(value => value.Platform == "meet" ? 1 : 0)
-                    .ThenBy(value => value.ProcessId).FirstOrDefault() ?? MeetingObservation.Inactive;
-                Volatile.Write(ref _latest, observation);
+                PublishSelection(CaptureSessionSelector.Select(_selectedSession, observations));
             }
             catch (Exception)
             {
@@ -88,11 +88,31 @@ public sealed class WindowsMeetingDetector : IDisposable
     {
         if (!_loggedNames.Add(processName))
             return;
+        WriteCaptureProcessLog($"capture-session process={processName}");
+    }
+
+    private void PublishSelection(CaptureProcessSession? selected)
+    {
+        if (_selectedSession?.ProcessId != selected?.ProcessId || _selectedSession?.Platform != selected?.Platform)
+        {
+            var previous = _selectedSession is { } old
+                ? $" previousProcess={old.ProcessName} previousPid={old.ProcessId}" : string.Empty;
+            var current = selected is { } next
+                ? $" process={next.ProcessName} pid={next.ProcessId}" : string.Empty;
+            WriteCaptureProcessLog($"capture-session key-change{previous}{current}");
+        }
+        _selectedSession = selected;
+        Volatile.Write(ref _latest, selected is null ? MeetingObservation.Inactive
+            : new MeetingObservation(true, selected.Platform, selected.ProcessId));
+    }
+
+    private void WriteCaptureProcessLog(string message)
+    {
         try
         {
             Directory.CreateDirectory(_logsDirectory);
             var path = Path.Combine(_logsDirectory, $"capture-processes-{DateTime.UtcNow:yyyy-MM-dd}.log");
-            File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} capture-session process={processName}{Environment.NewLine}");
+            File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

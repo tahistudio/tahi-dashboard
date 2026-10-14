@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using TahiRecorder.App.Integration;
 using TahiRecorder.App.Security;
+using TahiRecorder.Core.Security;
 
 namespace TahiRecorder.App;
 
@@ -24,8 +25,7 @@ internal static class Program
             try { AppPaths.EnsureDirectories(); }
             catch (Exception error)
             {
-                var recovery = error is UnauthorizedAccessException ? error.Message :
-                    $"The local data folder '{AppPaths.Root}' could not be protected. Close Tahi Recorder, back up retained recordings, and fix the folder permissions or delete it so the recorder can recreate it.";
+                var recovery = StartupRecovery.DataFolderError(AppPaths.Root, error);
                 ShowStartupError("Recorder needs attention. Recording is disabled. " + recovery);
                 return;
             }

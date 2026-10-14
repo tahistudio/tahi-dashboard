@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client review repairs committed at 938bd68e, round 2 fixes in the worktree without a commit).
+Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client round 2 committed at 5e77adc5, round 3 follow-up in the worktree).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1345,10 +1345,15 @@ scheduled; each needs a scope before building.
   The committed baseline builds with zero warnings and tests pass with restored
   packages. The first Windows review repairs are committed at 938bd68e; round 2
   silence, suppression, blocked capture, retries, ACL and folder publishing fixes
-  remain in the worktree without a commit. Verification is in
+  are committed at 5e77adc5. Round 3 follows the failed Opus re-review and remains
+  uncommitted per Liam's brief: gap auto-start hold-off, later-calendar suppression,
+  process-key stability, bounded chunk IO failures, faulted-job cleanup, terminal
+  recovery, render-outage logging and startup access guidance. Verification is in
   the running log and review report. Round 2 Release build: zero warnings/errors;
   all 152 tests pass, zero failed/skipped. Folder publish passes with native
-  libraries alongside the executable. Installed Windows checks and real calls remain required
+  libraries alongside the executable. Round 3 Release build: zero warnings/errors;
+  all 181 tests pass, zero failed/skipped. No publish in this follow-up.
+  Installed Windows checks and real calls remain required
   before closing REC.0. No commit, push, deploy, live pairing or production
   write in this review run.
   Automatic known and unknown call capture,

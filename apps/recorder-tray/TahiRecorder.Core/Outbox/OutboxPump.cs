@@ -7,6 +7,7 @@ namespace TahiRecorder.Core.Outbox;
 public sealed class OutboxPump
 {
     public const string BlockedError = "Recording needs attention. Local audio is retained.";
+    private const int MaxIoFailures = 10;
     private readonly FileOutboxStore store;
     private readonly IRecorderApi api;
     private readonly TimeProvider clock;
@@ -145,9 +146,11 @@ public sealed class OutboxPump
         recording.Failures++;
         // Persist only fixed messages. Exception bodies can contain upload grants.
         recording.LastError = "Upload delayed. Audio is saved for retry.";
+        var retryableIo = error is IOException and not (FileNotFoundException or DirectoryNotFoundException)
+            && recording.Failures < MaxIoFailures;
         var retryable = apiError?.IsRetryable == true || apiError?.IsAuthenticationFailure == true
             || error is HttpRequestException or OperationCanceledException or JsonException
-            || error is IOException;
+            || retryableIo;
         var delay = apiError?.RetryAfter ?? TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, Math.Min(8, recording.Failures))));
         if (apiError?.Code == "daily_quota") delay = delay < TimeSpan.FromMinutes(15) ? TimeSpan.FromMinutes(15) : delay;
         if (apiError?.Code == "open_recording") delay = delay < TimeSpan.FromSeconds(30) ? TimeSpan.FromSeconds(30) : delay;

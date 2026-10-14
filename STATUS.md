@@ -1,7 +1,7 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 server live per Liam; Windows client review fixes committed at 938bd68e, round 2 fixes in the worktree without a commit). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 server live per Liam; Windows client round 2 committed at 5e77adc5, round 3 follow-up in the worktree). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## REC.0 phase 2 Windows client, prepared 2026-10-14
 
@@ -16,16 +16,22 @@ pass with restored packages. Review repairs add protected data/install ACLs,
 working toast arguments, manual/early-join/suppression fixes, resilient polling,
 per-recording recovery, Communications audio devices, portable crash spool,
 ten-second gap stop, short-tail folding, retention and lifecycle flush.
-The first review repairs are committed at 938bd68e. Round 2 fixes retain silent
-single-track capture, reset manual suppression after a closed session, stop
+The first review repairs are committed at 938bd68e. Round 2 fixes at 5e77adc5
+retain silent single-track capture, reset manual suppression after a closed session, stop
 blocked local capture and harden retries, retention, upgrade ACLs and folder
-publishing. This follow-up remains in the worktree without a commit. No dashboard
+publishing. Round 3 follows the failed Opus re-review of 5e77adc5 and remains
+uncommitted per Liam's brief. It addresses gap auto-start hold-off, later-calendar
+suppression, process-key stability, bounded chunk IO failures, faulted-job cleanup,
+terminal recovery, render-outage logging and startup access guidance. No dashboard
 code, push, deploy, pairing, secret or production-data change was performed.
 
 Round 2 Release solution build passed with zero warnings/errors. All 152 xUnit
 tests passed, zero failed/skipped, and folder publishing passed with 476 files
 including native runtime libraries alongside the executable. Source QA and tray
 state review passed. Verification is recorded in the running log and review report.
+Round 3 follow-up Release build passed with zero warnings/errors; all 181 xUnit
+tests passed, zero failed/skipped. Build/test logs and TRX are under
+apps/recorder-tray/.build-logs/round3-*. No publish or recorder launch in this run.
 The main session must publish and verify Windows integration and real calls.
 REC.0 stays open. Build steps and hardware/integration checks are in
 apps/recorder-tray/README.md.

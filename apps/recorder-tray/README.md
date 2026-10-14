@@ -4,8 +4,9 @@ REC.0 phase 2 client, from the approved revision 1 spec and Decision #072.
 The server is live at `https://portal.tahi.studio` per Liam's 2026-10-14 brief.
 The exact API contract is [the server handoff](../../docs/recorder-tray-server-handoff.md).
 The initial Windows client is committed as `8665e762`, with first review fixes
-committed as `938bd68e`. Round 2 fixes follow in this worktree without a commit.
-No production operation was performed.
+committed as `938bd68e` and round 2 fixes as `5e77adc5`. Round 3 is the follow-up
+in this worktree and remains uncommitted per Liam's brief. No production
+operation was performed.
 
 ## Project layout
 
@@ -102,10 +103,12 @@ session, at the next-call boundary, at twelve hours, or at scheduled end plus
 fifteen minutes after at least five seconds of inactivity. A manual recording
 ignores inactivity until a meeting session has been seen during it. A new actual
 meeting session ends it. Suspend, session ending and Quit flush capture without
-manual suppression. Active calls may overrun scheduled end. Manual Stop also
-suppresses windows opening within fifteen minutes on the same session key.
-Manual-stop suppression clears after sixty seconds of observed inactivity or
-when the meeting session key changes, allowing the next call in the same app.
+manual suppression. Active calls may overrun scheduled end. Manual Stop
+suppresses a continuously active session regardless of elapsed time.
+Manual-stop suppression clears after sixty seconds of observed inactivity for
+unscheduled calls. A later calendar window that opens after Stop clears it after
+five seconds of observed inactivity, allowing the next call in the same app.
+Process ID changes alone never clear suppression.
 Until then, manual-stop suppression and the one-hour pause persist across restart.
 
 Calendar limits from #072: fifteen-minute sync, lead/deal/client-matched events
@@ -119,8 +122,9 @@ dedicated COM MTA thread. Process ancestry recognises Zoom, Teams (`ms-teams`
 or `teams`, including WebView2 descendants), Chrome, Edge, Vivaldi and Firefox.
 Playback and volume never trigger it. Browser microphone capture is labelled
 Meet because the signal cannot distinguish sites. Other browser microphone
-uses can trigger the unknown-call path. Logs contain observed process names
-and UTC timestamps, no audio or credential.
+uses can trigger the unknown-call path. Detection retains the current process
+while its capture session remains active. Key-change logs contain process names,
+PIDs and UTC timestamps, no audio or credential.
 
 Mic capture uses the default Communications capture endpoint with `WasapiCapture`.
 NAudio 2.2.1 uses the default Communications render endpoint with
@@ -132,8 +136,9 @@ Temporary reconnect errors keep recording. A silent loopback track, including a
 missing render device, stays padded while the microphone delivers audio. A late
 first system packet retains its wall-clock position. Only a gap with no audio
 from either track or a monotonic clock jump above ten seconds ends capture at
-that cap. Start recording remains available after a gap. Fatal persistence
-errors stop safely and disable recording until the storage issue is resolved.
+that cap. Automatic start waits forty-five seconds after a gap; manual Start
+recording remains available. Fatal persistence errors stop safely and disable
+recording until the storage issue is resolved.
 
 Thirty-second chunks and shorter tails use MIME exactly `audio/wav`, a 44-byte
 RIFF header and size `44 + durationMs * 32`. A full chunk is 960,044 bytes.
@@ -174,15 +179,17 @@ polling to about one second. Busy, errors and no progress back off. A server
 failed state is retried three times before becoming final. A poison recording
 is blocked with a fixed message, stops local capture and makes a best-effort
 server stop, resolving an uncertain create by its idempotent clientRef first. Other
-recordings continue. Transient chunk reads and malformed server JSON retain
-audio with retry backoff. Server failed-state retry counts reset when
-transcription makes progress. Restart recovers and seals interrupted captures, then
+recordings continue. Missing chunk files block that recording and make a
+best-effort server stop. Other chunk read IO failures back off for at most ten
+attempts before blocking. Malformed server JSON retains audio with retry backoff.
+Server failed-state retry counts reset when transcription makes progress.
+Restart recovers and seals interrupted captures, then
 resumes upload. Damaged spool/manifest data shows needs attention without
 reopening pairing. Ready/failed recordings, their manifests and leftover audio
 expire after seven days; pending/blocked audio is retained. Logs expire after
 fourteen days. Log retention errors never stop startup or recording ticks.
 Retention runs at startup and hourly, deleting the capture journal last and
-tolerating an absent journal for an already ready recording.
+tolerating an absent journal for an already ready or failed recording.
 
 - Network/timeouts, `409 busy`, retryable `503`: retain audio and back off.
 - `429 open_recording`: let the earlier recording finish. Known local capture
@@ -220,6 +227,10 @@ Round 2 verification: Release solution build succeeded with zero warnings and
 errors; all 152 tests passed, zero failed/skipped. Folder publishing succeeded,
 with native runtime libraries beside the executable. Logs are in
 `.build-logs/round2-build.log`, `round2-tests.log` and `round2-publish.log`.
+Round 3 follow-up verification: Release solution build succeeded with zero
+warnings and errors; all 181 tests passed, zero failed/skipped. Logs are in
+`.build-logs/round3-build.log`, `round3-tests.log` and `round3-tests.trx`.
+No folder publish or recorder launch was performed in this follow-up.
 Before distribution, verify
 pairing/single instance/Windows startup/toast buttons; real
 calendar and unknown Zoom/Meet/Teams calls; muted mic and both-sided transcript;

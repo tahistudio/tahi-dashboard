@@ -1694,8 +1694,8 @@ opening within ten minutes delays unknown-call start until it can link;
 manual recordings ignore calendar split boundaries. The main session must
 publish and obtain real-call proof. Review verification is in the running log.
 
-Client round 2 follow-up, 2026-10-14: fixes to committed 938bd68e remain in this
-worktree without a commit, as Liam requested. The gap limit applies to missing
+Client round 2, 2026-10-14: fixes to 938bd68e are committed as 5e77adc5.
+The gap limit applies to missing
 audio across both tracks and clock discontinuities; ordinary loopback silence
 and a missing render endpoint are padded while mic capture continues. Gap stops
 leave Start recording enabled; persistence failures remain sticky. Manual Stop
@@ -1709,3 +1709,19 @@ native extraction disabled, and validate all bundled files and subdirectories.
 Transient upload reads/JSON back off, transcription progress clears server
 failure retries, and terminal retention deletes the capture journal last.
 Verification is recorded in the running log; hardware/real-call proof remains.
+
+Client round 3 follow-up, 2026-10-14: fixes to 5e77adc5 remain uncommitted per
+Liam's brief. Gap state clears after stop duration is saved, and automatic
+restart waits forty-five seconds while manual Start remains available. Manual
+Stop suppression clears after five seconds of observed inactivity for a later
+calendar window opening after Stop; unscheduled calls still require sixty
+seconds. A continuously active session remains suppressed regardless of elapsed
+time, and process-key changes alone never clear suppression. Detection retains an
+active current PID and logs key changes with process name and PID only.
+Missing chunk files block their recording with a best-effort server stop;
+other chunk read IO failures are capped at ten attempts. Stop jobs are removed
+even when they fail. Terminal ready/failed recovery tolerates a missing journal,
+render-device outages log once per outage, and startup access errors always
+include the folder path and recovery steps. Core owns the capture and retry decisions with
+behavior tests. This repairs the approved client behavior without a new product
+decision. Verification is recorded in the running log; REC.0 remains open.

@@ -91,11 +91,105 @@ public sealed class OutboxTests : IDisposable
             Assert.Equal(0, api.Uploads);
         }
         Assert.Empty(blocked);
+        Assert.Equal(0, api.Stops);
         Assert.True(File.Exists(path));
         clock.Advance(TimeSpan.FromSeconds(2));
         await pump.PumpOnceAsync();
         Assert.True((await store.ReadAsync(id)).Chunks.Single().Confirmed);
         Assert.Equal(1, api.Uploads);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task MissingChunkFileOrDirectoryBlocksAndAttemptsServerStop(bool missingDirectory, bool stopFails)
+    {
+        var (store, id) = await QueuedAsync(includeSystem: true);
+        var folder = Path.Combine(directory, id.ToString("D"));
+        var path = Path.Combine(folder, "mic-0000.wav");
+        var relocated = Path.Combine(directory, "relocated-audio");
+        if (missingDirectory)
+        {
+            // Remove the containing directory after its manifest was read, so the actual chunk read fails.
+            api.Reserving = () => Directory.Move(folder, relocated);
+            api.Stopping = () => Directory.Move(relocated, folder);
+        }
+        else File.Delete(path);
+        if (stopFails) api.StopError = new HttpRequestException();
+        var pump = new OutboxPump(store, api, clock);
+        var blocked = new List<Guid>();
+        pump.RecordingBlocked += blocked.Add;
+        try
+        {
+            await pump.PumpOnceAsync();
+            var item = await store.ReadAsync(id);
+            Assert.Equal("blocked", item.TerminalState);
+            Assert.Equal(OutboxPump.BlockedError, item.LastError);
+            Assert.Equal(clock.GetUtcNow(), item.TerminalUtc);
+            Assert.False(item.Chunks.Single().Confirmed);
+            Assert.Equal(!stopFails, item.StopConfirmed);
+            Assert.Equal(id, Assert.Single(blocked));
+            Assert.Single(api.Created);
+            Assert.Equal(0, api.Uploads);
+            Assert.Equal(1, api.Stops);
+            Assert.Equal(new ExpectedChunks(1, 1), api.Stopped!.ExpectedChunks);
+            Assert.Equal(100, api.Stopped.DurationMs);
+            Assert.Equal(missingDirectory, File.Exists(path));
+            clock.Advance(TimeSpan.FromHours(1));
+            await new OutboxPump(Store, api, clock).PumpOnceAsync();
+            Assert.Equal(1, api.Stops);
+            Assert.Equal(0, api.Uploads);
+        }
+        finally
+        {
+            if (Directory.Exists(relocated)) Directory.Move(relocated, folder);
+        }
+    }
+
+    [Fact]
+    public async Task RepeatedChunkReadFailuresBlockOnTenthAttemptAcrossRestartAndRetainAudio()
+    {
+        var (store, id) = await QueuedAsync();
+        var path = Path.Combine(directory, id.ToString("D"), "mic-0000.wav");
+        var blocked = new List<Guid>();
+        using (var lockedAudio = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            for (var attempt = 1; attempt <= 10; attempt++)
+            {
+                var pump = new OutboxPump(Store, api, clock);
+                pump.RecordingBlocked += blocked.Add;
+                await pump.PumpOnceAsync();
+                var item = await store.ReadAsync(id);
+                Assert.Equal(attempt, item.Failures);
+                Assert.False(item.Chunks.Single().Confirmed);
+                if (attempt < 10)
+                {
+                    Assert.Null(item.TerminalState);
+                    Assert.Empty(blocked);
+                    Assert.Equal(0, api.Stops);
+                    clock.Advance(item.NextAttemptUtc - clock.GetUtcNow());
+                }
+                else
+                {
+                    Assert.Equal("blocked", item.TerminalState);
+                    Assert.Equal(OutboxPump.BlockedError, item.LastError);
+                    Assert.True(item.StopConfirmed);
+                }
+            }
+        }
+        Assert.Equal(id, Assert.Single(blocked));
+        Assert.Equal(1, api.Stops);
+        Assert.Equal(new ExpectedChunks(1, 0), api.Stopped!.ExpectedChunks);
+        Assert.Equal(100, api.Stopped.DurationMs);
+        Assert.Equal(0, api.Uploads);
+        Assert.True(File.Exists(path));
+        clock.Advance(TimeSpan.FromHours(1));
+        await new OutboxPump(Store, api, clock).PumpOnceAsync();
+        Assert.Equal(1, api.Stops);
+        Assert.Equal(0, api.Uploads);
+        Assert.True(File.Exists(path));
     }
 
     [Fact]
@@ -533,6 +627,8 @@ public sealed class OutboxTests : IDisposable
         public Exception? UploadError { get; set; }
         public Exception? ReserveError { get; set; }
         public Exception? StopError { get; set; }
+        public Action? Reserving { get; set; }
+        public Action? Stopping { get; set; }
         public Guid? PoisonClientRef { get; set; }
         public IReadOnlyList<ChunkState> ReadChunks { get; set; } = [];
         public IReadOnlyList<ChunkState> TranscribeChunks { get; set; } = [];
@@ -547,6 +643,7 @@ public sealed class OutboxTests : IDisposable
         { Created.Add(request); if (CreateError is not null) throw CreateError; return Task.FromResult(new RecordingState(request.ClientRef.ToString("N"), "recording")); }
         public Task<ChunkReservation> ReserveAsync(string id, ChunkMetadata metadata, CancellationToken ct)
         {
+            Reserving?.Invoke();
             if (ReserveError is not null) throw ReserveError;
             return Task.FromResult(id == PoisonClientRef?.ToString("N")
                 ? new ChunkReservation("https://off-origin.invalid/upload", false, false) : Reservation);
@@ -562,6 +659,7 @@ public sealed class OutboxTests : IDisposable
         {
             Stops++;
             Stopped = request;
+            Stopping?.Invoke();
             if (StopError is not null) throw StopError;
             var enabledTracks = Created.Find(item => item.ClientRef.ToString("N") == id)?.Tracks ?? [];
             if (request.ExpectedChunks.Mic + request.ExpectedChunks.System > 0

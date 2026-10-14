@@ -17,6 +17,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly Stopwatch _clock = new();
     private readonly Dictionary<string, CaptureChannel> _channels = [];
+    private readonly RenderDeviceOutagePolicy _renderOutage = new();
     private CaptureSpool? _spool;
     private CancellationTokenSource? _captureCancellation;
     private Task? _pump;
@@ -124,15 +125,18 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             capture.RecordingStopped += (_, args) => OnCaptureStopped(channel, args);
             capture.StartRecording();
             channel.RetryAt = DateTimeOffset.MaxValue;
+            if (channel.Track == "system")
+                _renderOutage.ObserveAvailability(isAvailable: true);
         }
         catch (Exception exception) when (exception is COMException or InvalidOperationException
             or ArgumentException)
         {
             CloseChannel(channel);
             channel.RetryAt = DateTimeOffset.UtcNow.AddSeconds(5);
-            ReportError(channel.Track, channel.Track == "mic"
-                ? "Microphone capture is unavailable. Reconnecting while preserving the recording timeline."
-                : "System audio is unavailable. Recording the microphone with system silence until the output device reconnects.");
+            if (channel.Track == "mic" || _renderOutage.ObserveAvailability(isAvailable: false))
+                ReportError(channel.Track, channel.Track == "mic"
+                    ? "Microphone capture is unavailable. Reconnecting while preserving the recording timeline."
+                    : "System audio is unavailable. Recording the microphone with system silence until the output device reconnects.");
         }
     }
 
@@ -178,7 +182,8 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             Interlocked.Exchange(ref _reopenMic, 1);
         else
             Interlocked.Exchange(ref _reopenSystem, 1);
-        ReportError(channel.Track, "The audio device disconnected. Reconnecting without resetting the recording timeline.");
+        if (channel.Track == "mic" || _renderOutage.ObserveAvailability(isAvailable: false))
+            ReportError(channel.Track, "The audio device disconnected. Reconnecting without resetting the recording timeline.");
     }
 
     private async Task PumpAsync(CancellationToken cancellationToken)
@@ -300,6 +305,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
                         _clock.Stop();
                         LastDurationMs = CaptureEndDurationMs();
                         _running = false;
+                        Interlocked.Exchange(ref _audioGapStopDurationMs, -1);
                         try { _spool?.Dispose(); }
                         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                         {
