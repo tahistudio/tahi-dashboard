@@ -146,6 +146,53 @@ public sealed class CaptureSpoolTests : IDisposable
     }
 
     [Fact]
+    public void ContinuousMicWithSilentSystemTrackRunsForSixtySeconds()
+    {
+        using var spool = new DurableCaptureSpool(_directory, _clientRef);
+        var chunks = new List<SpoolChunk>();
+        for (var second = 0; second < 60; second++)
+        {
+            spool.AddAt("mic", second * 16_000L, Pcm(1_000, 7));
+            chunks.AddRange(spool.Advance((second + 1) * 1_000, complete: false));
+        }
+        chunks.AddRange(spool.Advance(60_000, complete: true));
+        Assert.Equal(4, chunks.Count);
+        Assert.All(chunks.Where(chunk => chunk.Track == "mic").SelectMany(Payload), value => Assert.Equal(7, value));
+        Assert.All(chunks.Where(chunk => chunk.Track == "system").SelectMany(Payload), value => Assert.Equal(0, value));
+        AssertCanonical(chunks);
+    }
+
+    [Fact]
+    public void FirstSystemPacketAtFifteenSecondsIsAcceptedAtItsWallClockPosition()
+    {
+        using var spool = new DurableCaptureSpool(_directory, _clientRef);
+        for (var second = 0; second < 16; second++)
+        {
+            spool.AddAt("mic", second * 16_000L, Pcm(1_000, 7));
+            spool.Advance((second + 1) * 1_000, complete: false);
+        }
+        spool.AddAt("system", 15_000 * 16L, Pcm(1_000, 6));
+        var chunks = spool.Advance(16_000, complete: true);
+        var system = Payload(chunks.Single(chunk => chunk.Track == "system"));
+        Assert.All(system.Take(15_000 * CanonicalWav.BytesPerMillisecond), value => Assert.Equal(0, value));
+        Assert.All(system.Skip(15_000 * CanonicalWav.BytesPerMillisecond), value => Assert.Equal(6, value));
+        AssertCanonical(chunks);
+    }
+
+    [Fact]
+    public void BothTracksSilentThroughTwentySecondClockJumpEndsRecording()
+    {
+        using var spool = new DurableCaptureSpool(_directory, _clientRef);
+        AddBoth(spool, 0, Pcm(1_000, 7));
+        spool.Advance(1_000, complete: false);
+        var error = Assert.Throws<CaptureGapExceededException>(() => spool.Advance(21_000, complete: false));
+        Assert.Equal(11_000, error.StopDurationMs);
+        var chunks = spool.Advance(error.StopDurationMs, complete: true);
+        Assert.All(chunks, chunk => Assert.Equal(11_000, chunk.DurationMs));
+        AssertCanonical(chunks);
+    }
+
+    [Fact]
     public void InvalidJournalDoesNotPreventAnotherCaptureFromRecovering()
     {
         var valid = Guid.NewGuid();

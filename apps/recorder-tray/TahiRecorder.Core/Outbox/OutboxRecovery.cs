@@ -18,7 +18,10 @@ public static class OutboxRecovery
                 var recording = await store.ReadAsync(id, cancellationToken).ConfigureAwait(false);
                 if (store.NeedsAttention(id) || recording.TerminalState == "blocked") { attention = true; continue; }
                 recovered.TryGetValue(id, out var capture);
-                if (capture is null && Directory.Exists(Path.Combine(spoolDirectory, id.ToString("D"))))
+                var captureFolder = Path.Combine(spoolDirectory, id.ToString("D"));
+                if (capture is null && recording.TerminalState == "ready"
+                    && !File.Exists(Path.Combine(captureFolder, "session.json"))) continue;
+                if (capture is null && Directory.Exists(captureFolder))
                     throw new InvalidDataException("Capture journal needs attention.");
                 if (capture is not null)
                 {
@@ -37,6 +40,11 @@ public static class OutboxRecovery
                         chunk.Metadata.StartMs + chunk.Metadata.DurationMs).DefaultIfEmpty().Max();
                     await store.StopAsync(id, duration, cancellationToken).ConfigureAwait(false);
                 }
+            }
+            catch (IOException)
+            {
+                // A temporary read failure is not proof of damaged audio. Preserve it for a later recovery attempt.
+                attention = true;
             }
             catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {

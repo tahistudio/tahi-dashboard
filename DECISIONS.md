@@ -1686,10 +1686,26 @@ The client queues create/clientRef before capture, isolates outbox/spool and
 DPAPI credentials by device identity, and saves upload confirmation before
 deleting audio. Per-device credential binding avoids a crash pairing a new
 token with an old device's outbox. No participant notice is added. Review
-repairs remain uncommitted and preserve both framework targets. They enforce
+repairs are committed as 938bd68e and preserve both framework targets. They enforce
 current-user-owned protected storage and trusted install writers before
 registration, isolate poison recordings, add bounded polling/retention,
 and flush lifecycle stops without manual suppression. A calendar window
 opening within ten minutes delays unknown-call start until it can link;
 manual recordings ignore calendar split boundaries. The main session must
 publish and obtain real-call proof. Review verification is in the running log.
+
+Client round 2 follow-up, 2026-10-14: fixes to committed 938bd68e remain in this
+worktree without a commit, as Liam requested. The gap limit applies to missing
+audio across both tracks and clock discontinuities; ordinary loopback silence
+and a missing render endpoint are padded while mic capture continues. Gap stops
+leave Start recording enabled; persistence failures remain sticky. Manual Stop
+suppression clears after sixty seconds of observed inactivity or a changed
+session key. A permanently blocked recording stops its local capture and
+suppresses immediate automatic restart of that session, while manual Start
+remains available. Current-user-owned legacy roots with inherited-only foreign
+permissions upgrade safely in place, after acquiring the single-instance mutex.
+Correct ACLs are left alone. Publish the entire self-contained folder with
+native extraction disabled, and validate all bundled files and subdirectories.
+Transient upload reads/JSON back off, transcription progress clears server
+failure retries, and terminal retention deletes the capture journal last.
+Verification is recorded in the running log; hardware/real-call proof remains.

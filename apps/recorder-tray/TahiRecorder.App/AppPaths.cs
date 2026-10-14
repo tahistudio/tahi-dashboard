@@ -1,4 +1,5 @@
 using System.Security.Principal;
+using System.Runtime.Versioning;
 using TahiRecorder.Core.Security;
 
 namespace TahiRecorder.App;
@@ -12,6 +13,7 @@ internal static class AppPaths
     internal static string Outbox(string deviceId) => Path.Combine(Root, "outbox", SafeDeviceId(deviceId));
     internal static string Capture(string deviceId) => Path.Combine(Root, "capture", SafeDeviceId(deviceId));
 
+    [SupportedOSPlatform("windows")]
     internal static void EnsureDirectories()
     {
         using var identity = WindowsIdentity.GetCurrent();
@@ -32,13 +34,26 @@ internal static class HostLog
 {
     private static readonly object Gate = new();
 
-    internal static void Prune()
+    internal static void Prune() => Prune(AppPaths.Logs, DateTime.UtcNow.AddDays(-14));
+
+    internal static void Prune(string directory, DateTime cutoff)
     {
         lock (Gate)
         {
-            var cutoff = DateTime.UtcNow.AddDays(-14);
-            foreach (var file in Directory.EnumerateFiles(AppPaths.Logs, "*.log"))
-                if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file);
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(directory, "*.log"))
+                {
+                    try
+                    {
+                        if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file);
+                    }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 

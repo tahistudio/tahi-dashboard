@@ -68,7 +68,9 @@ public sealed class DurableCaptureSpool : IDisposable
             startSample = minimumSample;
         }
         if (pcm.IsEmpty) return;
-        if (startSample - state.AudioEndSample > MaximumPaddingMs * SamplesPerMillisecond)
+        // Loopback is silent when nothing is playing. Only a gap shared by all
+        // tracks indicates missing capture, so a late first packet stays aligned.
+        if (startSample - LatestAudioEndSample() > MaximumPaddingMs * SamplesPerMillisecond)
             throw new CaptureGapExceededException(PaddingLimitMs());
         startSample = Math.Min(startSample, (long)MaximumDurationMs * SamplesPerMillisecond);
         var maximumBytes = (int)Math.Min(pcm.Length, ((long)MaximumDurationMs * SamplesPerMillisecond - startSample) * 2);
@@ -112,8 +114,10 @@ public sealed class DurableCaptureSpool : IDisposable
         return result;
     }
 
+    private long LatestAudioEndSample() => _tracks.Values.Max(state => state.AudioEndSample);
+
     private int PaddingLimitMs() => checked((int)Math.Min(MaximumDurationMs,
-        _tracks.Values.Min(state => state.AudioEndSample) / SamplesPerMillisecond + MaximumPaddingMs));
+        LatestAudioEndSample() / SamplesPerMillisecond + MaximumPaddingMs));
 
     private SpoolChunk FinalizeChunk(string track, TrackState state, int durationMs)
     {

@@ -32,13 +32,25 @@ public static class RecorderDirectorySecurity
     public static bool IsTrustedRoot(DirectorySecurity security, SecurityIdentifier currentUser)
     {
         if (!currentUser.Equals(security.GetOwner(typeof(SecurityIdentifier)))) return false;
+        if (!security.AreAccessRulesProtected) return false;
         var rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
         var expected = new[] { currentUser, SystemSid, AdministratorsSid }.Distinct().ToArray();
         return rules.Length == expected.Length && rules.All(rule =>
+            !rule.IsInherited &&
             expected.Contains((SecurityIdentifier)rule.IdentityReference) &&
             rule.AccessControlType == AccessControlType.Allow && rule.FileSystemRights == FileSystemRights.FullControl &&
             rule.InheritanceFlags == Children && rule.PropagationFlags == PropagationFlags.None) &&
             expected.All(sid => rules.Count(rule => rule.IdentityReference.Equals(sid)) == 1);
+    }
+
+    public static bool CanReprotectRoot(DirectorySecurity security, SecurityIdentifier currentUser)
+    {
+        if (!currentUser.Equals(security.GetOwner(typeof(SecurityIdentifier)))) return false;
+        var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
+        if (descriptor.DiscretionaryAcl is null) return false;
+        var trusted = new[] { currentUser, SystemSid, AdministratorsSid };
+        return security.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+            .All(rule => trusted.Contains((SecurityIdentifier)rule.IdentityReference));
     }
 
     public static bool IsSafeInstallAcl(FileSystemSecurity security, SecurityIdentifier currentUser)
@@ -69,14 +81,18 @@ public static class RecorderDirectorySecurity
         if (root.Exists)
         {
             RejectLink(root);
-            if (!IsTrustedRoot(root.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access), currentUser))
-                throw new UnauthorizedAccessException("Recorder folder owner or permissions are unsafe.");
-            root.SetAccessControl(BuildRootAcl(currentUser));
+            var security = root.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+            if (!IsTrustedRoot(security, currentUser))
+            {
+                if (!CanReprotectRoot(security, currentUser))
+                    throw new UnauthorizedAccessException(RootRecoveryMessage(root.FullName));
+                root.SetAccessControl(BuildRootAcl(currentUser));
+            }
         }
         else root.Create(BuildRootAcl(currentUser));
 
         if (!IsTrustedRoot(root.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access), currentUser))
-            throw new UnauthorizedAccessException("Recorder folder permissions could not be protected.");
+            throw new UnauthorizedAccessException(RootRecoveryMessage(root.FullName));
         foreach (var name in new[] { "outbox", "capture", "tokens", "logs" })
             Directory.CreateDirectory(Path.Combine(root.FullName, name));
         InheritDescendants(root);
@@ -90,17 +106,47 @@ public static class RecorderDirectorySecurity
             if (item is DirectoryInfo directory)
             {
                 var security = directory.GetAccessControl(AccessControlSections.Access);
-                PrepareDescendantAcl(security);
-                directory.SetAccessControl(security);
+                if (NeedsDescendantAclRepair(security))
+                {
+                    PrepareDescendantAcl(security);
+                    directory.SetAccessControl(security);
+                }
                 InheritDescendants(directory);
             }
             else if (item is FileInfo file)
             {
                 var security = file.GetAccessControl(AccessControlSections.Access);
-                PrepareDescendantAcl(security);
-                file.SetAccessControl(security);
+                if (NeedsDescendantAclRepair(security))
+                {
+                    PrepareDescendantAcl(security);
+                    file.SetAccessControl(security);
+                }
             }
         }
+    }
+
+    public static bool NeedsDescendantAclRepair(FileSystemSecurity security) =>
+        security.AreAccessRulesProtected ||
+        security.GetAccessRules(true, false, typeof(SecurityIdentifier)).Count != 0;
+
+    public static bool IsSafeInstallDirectory(string path, SecurityIdentifier currentUser)
+    {
+        var directory = new DirectoryInfo(path);
+        if ((directory.Attributes & FileAttributes.ReparsePoint) != 0 ||
+            !IsSafeInstallAcl(directory.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access), currentUser))
+            return false;
+        foreach (var item in directory.EnumerateFileSystemInfos())
+        {
+            if ((item.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+            if (item is DirectoryInfo child)
+            {
+                if (!IsSafeInstallDirectory(child.FullName, currentUser)) return false;
+            }
+            else if (item is FileInfo file &&
+                !IsSafeInstallAcl(file.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access), currentUser))
+                return false;
+        }
+        return true;
     }
 
     public static void PrepareDescendantAcl(FileSystemSecurity security)
@@ -113,6 +159,9 @@ public static class RecorderDirectorySecurity
     private static void RejectLink(FileSystemInfo item)
     {
         if ((item.Attributes & FileAttributes.ReparsePoint) != 0)
-            throw new UnauthorizedAccessException("Recorder storage must not contain links.");
+            throw new UnauthorizedAccessException($"Recorder storage '{item.FullName}' must not contain links. Close Tahi Recorder and remove the link, preserving any recording data in its target first.");
     }
+
+    private static string RootRecoveryMessage(string path) =>
+        $"Recorder folder '{path}' has an unsafe owner or explicit permissions. Close Tahi Recorder and set its owner to your Windows account and remove explicit permissions for other users. Alternatively, back up retained recordings and delete this folder so Tahi Recorder can recreate it.";
 }

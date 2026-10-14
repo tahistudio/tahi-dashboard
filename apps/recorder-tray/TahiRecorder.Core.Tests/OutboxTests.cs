@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TahiRecorder.Core.Api;
 using TahiRecorder.Core.Audio;
 using TahiRecorder.Core.Outbox;
@@ -69,6 +70,82 @@ public sealed class OutboxTests : IDisposable
         Assert.Null(item.TerminalState);
         Assert.True(item.NextAttemptUtc >= clock.GetUtcNow().AddSeconds(minimumSeconds));
         Assert.True(File.Exists(Path.Combine(directory, id.ToString("D"), "mic-0000.wav")));
+    }
+
+    [Fact]
+    public async Task TransientChunkReadFailurePreservesAudioAndRetriesAfterBackoff()
+    {
+        var (store, id) = await QueuedAsync();
+        var path = Path.Combine(directory, id.ToString("D"), "mic-0000.wav");
+        var pump = new OutboxPump(store, api, clock);
+        var blocked = new List<Guid>();
+        pump.RecordingBlocked += blocked.Add;
+        using (var lockedAudio = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await pump.PumpOnceAsync();
+            var delayed = await store.ReadAsync(id);
+            Assert.Null(delayed.TerminalState);
+            Assert.False(delayed.Chunks.Single().Confirmed);
+            Assert.Equal(clock.GetUtcNow().AddSeconds(2), delayed.NextAttemptUtc);
+            await pump.PumpOnceAsync();
+            Assert.Equal(0, api.Uploads);
+        }
+        Assert.Empty(blocked);
+        Assert.True(File.Exists(path));
+        clock.Advance(TimeSpan.FromSeconds(2));
+        await pump.PumpOnceAsync();
+        Assert.True((await store.ReadAsync(id)).Chunks.Single().Confirmed);
+        Assert.Equal(1, api.Uploads);
+    }
+
+    [Fact]
+    public async Task TransientManifestReadFailureDefersOnlyThatRecordingAndDoesNotMarkDamaged()
+    {
+        var (store, id) = await QueuedAsync();
+        var second = Guid.NewGuid();
+        await store.CreateAsync(new(second, "Second", ["mic"]));
+        await store.AddChunkAsync(second, "mic", 0, 0, 100, CanonicalWav.Write([], 100));
+        var path = Path.Combine(directory, id.ToString("D"), "recording.json");
+        var pump = new OutboxPump(store, api, clock);
+        var blocked = new List<Guid>();
+        pump.RecordingBlocked += blocked.Add;
+        using (var lockedManifest = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.True(await pump.HasPendingAsync());
+            await pump.PumpOnceAsync();
+            Assert.Equal(second, Assert.Single(api.Created).ClientRef);
+            Assert.False(File.Exists(Path.Combine(directory, id.ToString("D"), "needs-attention.json")));
+        }
+        await pump.PumpOnceAsync();
+        Assert.Single(api.Created);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        await pump.PumpOnceAsync();
+        Assert.Contains(api.Created, request => request.ClientRef == id);
+        Assert.True((await store.ReadAsync(id)).Chunks.Single().Confirmed);
+        Assert.Empty(blocked);
+    }
+
+    [Fact]
+    public async Task TransientApiJsonFailurePreservesAudioAndRetriesAfterBackoff()
+    {
+        var (store, id) = await QueuedAsync();
+        api.CreateError = new JsonException();
+        var pump = new OutboxPump(store, api, clock);
+        var blocked = new List<Guid>();
+        pump.RecordingBlocked += blocked.Add;
+        await pump.PumpOnceAsync();
+        var delayed = await store.ReadAsync(id);
+        Assert.Null(delayed.TerminalState);
+        Assert.Equal(clock.GetUtcNow().AddSeconds(2), delayed.NextAttemptUtc);
+        Assert.True(File.Exists(Path.Combine(directory, id.ToString("D"), "mic-0000.wav")));
+        await pump.PumpOnceAsync();
+        Assert.Single(api.Created);
+        api.CreateError = null;
+        clock.Advance(TimeSpan.FromSeconds(2));
+        await pump.PumpOnceAsync();
+        Assert.Equal(2, api.Created.Count);
+        Assert.True((await store.ReadAsync(id)).Chunks.Single().Confirmed);
+        Assert.Empty(blocked);
     }
 
     [Fact]
@@ -183,8 +260,16 @@ public sealed class OutboxTests : IDisposable
         await store.CreateAsync(new(second, "Second", ["mic", "system"]));
         await store.AddChunkAsync(second, "mic", 0, 0, 100, CanonicalWav.Write([], 100));
         api.PoisonClientRef = poison;
-        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        var pump = new OutboxPump(store, api, clock);
+        var blockedIds = new List<Guid>();
+        pump.RecordingBlocked += id =>
+        {
+            Assert.Equal(0, api.Stops);
+            blockedIds.Add(id);
+        };
+        await pump.PumpOnceAsync();
         var blocked = await store.ReadAsync(poison);
+        Assert.Equal(new[] { poison }, blockedIds);
         Assert.Equal("blocked", blocked.TerminalState);
         Assert.Equal(OutboxPump.BlockedError, blocked.LastError);
         Assert.False(blocked.Chunks.Single().Confirmed);
@@ -195,6 +280,38 @@ public sealed class OutboxTests : IDisposable
         Assert.Equal(new ExpectedChunks(1, 1), api.Stopped!.ExpectedChunks);
         Assert.Equal(100, api.Stopped.DurationMs);
         Assert.True(File.Exists(Path.Combine(directory, poison.ToString("D"), "mic-0000.wav")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BlockingUncertainCreateRecoversIdAndAttemptsStop(bool stopFails)
+    {
+        var (store, id) = await QueuedAsync(includeSystem: true);
+        api.CreateError = new HttpRequestException();
+        var pump = new OutboxPump(store, api, clock);
+        await pump.PumpOnceAsync();
+        Assert.Null((await store.ReadAsync(id)).RecordingId);
+        var notified = false;
+        pump.RecordingBlocked += blockedId =>
+        {
+            Assert.Equal(id, blockedId);
+            Assert.Single(api.Created);
+            notified = true;
+        };
+        api.CreateError = null;
+        if (stopFails) api.StopError = new HttpRequestException();
+        await pump.BlockRecordingAsync(id);
+        var blocked = await store.ReadAsync(id);
+        Assert.True(notified);
+        Assert.Equal("blocked", blocked.TerminalState);
+        Assert.Equal(id.ToString("N"), blocked.RecordingId);
+        Assert.Equal(!stopFails, blocked.StopConfirmed);
+        Assert.Equal(2, api.Created.Count);
+        Assert.All(api.Created, request => Assert.Equal(id, request.ClientRef));
+        Assert.Equal(1, api.Stops);
+        Assert.Equal(new ExpectedChunks(1, 1), api.Stopped!.ExpectedChunks);
+        Assert.True(File.Exists(Path.Combine(directory, id.ToString("D"), "mic-0000.wav")));
     }
 
     [Fact]
@@ -237,6 +354,68 @@ public sealed class OutboxTests : IDisposable
         await pump.PumpOnceAsync();
         Assert.Equal("ready", (await store.ReadAsync(id)).TerminalState);
         Assert.Equal(2, api.Transcribes);
+    }
+
+    [Fact]
+    public async Task SuccessfulTranscribeProgressResetsServerFailureRetries()
+    {
+        var (store, id) = await QueuedAsync();
+        await store.StopAsync(id, 100);
+        api.TranscribeState = "failed";
+        var pump = new OutboxPump(store, api, clock);
+        await pump.PumpOnceAsync();
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await pump.PumpOnceAsync();
+        Assert.Equal(1, (await store.ReadAsync(id)).ServerFailureRetries);
+        api.TranscribeState = "transcribing";
+        api.TranscribeChunks = [new("mic", 0, true, "ready")];
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await pump.PumpOnceAsync();
+        var progressed = await store.ReadAsync(id);
+        Assert.False(progressed.ServerFailed);
+        Assert.Equal(0, progressed.ServerFailureRetries);
+        api.ReadChunks = api.TranscribeChunks;
+        api.TranscribeState = "failed";
+        for (var retry = 0; retry < 3; retry++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(1));
+            await pump.PumpOnceAsync();
+        }
+        var retrying = await store.ReadAsync(id);
+        Assert.Null(retrying.TerminalState);
+        Assert.Equal(2, retrying.ServerFailureRetries);
+    }
+
+    [Fact]
+    public async Task ReadyChunkProgressResetsRetriesEvenWhenAggregateStateRemainsFailed()
+    {
+        var (store, id) = await QueuedAsync();
+        await store.StopAsync(id, 100);
+        api.TranscribeState = "failed";
+        var pump = new OutboxPump(store, api, clock);
+        await pump.PumpOnceAsync();
+        for (var retry = 0; retry < 2; retry++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(1));
+            await pump.PumpOnceAsync();
+        }
+        Assert.Equal(2, (await store.ReadAsync(id)).ServerFailureRetries);
+        api.TranscribeChunks = [new("mic", 0, true, "ready")];
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await pump.PumpOnceAsync();
+        var progressed = await store.ReadAsync(id);
+        Assert.True(progressed.ServerFailed);
+        Assert.Null(progressed.TerminalState);
+        Assert.Equal(0, progressed.ServerFailureRetries);
+        Assert.Equal(clock.GetUtcNow().AddSeconds(1), progressed.NextAttemptUtc);
+        api.ReadChunks = api.TranscribeChunks;
+        for (var retry = 0; retry < 3; retry++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(1));
+            await pump.PumpOnceAsync();
+        }
+        Assert.Equal("failed", (await store.ReadAsync(id)).TerminalState);
+        Assert.Equal(7, api.Transcribes);
     }
 
     [Theory]
@@ -286,6 +465,30 @@ public sealed class OutboxTests : IDisposable
         Assert.Equal(new[] { pending }, store.RecordingIds());
     }
 
+    [Fact]
+    public async Task InterruptedPruneRetainsCaptureJournalUntilAudioIsDeleted()
+    {
+        var (store, id) = await QueuedAsync();
+        await store.StopAsync(id, 100);
+        api.StopState = "ready";
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        var captureDirectory = Path.Combine(directory, "capture");
+        var captureFolder = Path.Combine(captureDirectory, id.ToString("D"));
+        Directory.CreateDirectory(captureFolder);
+        var journal = Path.Combine(captureFolder, "session.json");
+        var audio = Path.Combine(captureFolder, "mic-0000.pcm");
+        await File.WriteAllTextAsync(journal, "{}");
+        await File.WriteAllBytesAsync(audio, [1, 2]);
+        using (var lockedAudio = new FileStream(audio, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Empty(await store.PruneTerminalAsync(clock.GetUtcNow().AddDays(7), captureDirectory: captureDirectory));
+            Assert.True(File.Exists(journal));
+            Assert.True(await store.ContainsAsync(id));
+        }
+        Assert.Equal(new[] { id }, await store.PruneTerminalAsync(clock.GetUtcNow().AddDays(7), captureDirectory: captureDirectory));
+        Assert.False(Directory.Exists(captureFolder));
+    }
+
     [Theory]
     [InlineData("{")]
     [InlineData("[]")]
@@ -329,6 +532,7 @@ public sealed class OutboxTests : IDisposable
         public Exception? CreateError { get; set; }
         public Exception? UploadError { get; set; }
         public Exception? ReserveError { get; set; }
+        public Exception? StopError { get; set; }
         public Guid? PoisonClientRef { get; set; }
         public IReadOnlyList<ChunkState> ReadChunks { get; set; } = [];
         public IReadOnlyList<ChunkState> TranscribeChunks { get; set; } = [];
@@ -358,6 +562,7 @@ public sealed class OutboxTests : IDisposable
         {
             Stops++;
             Stopped = request;
+            if (StopError is not null) throw StopError;
             var enabledTracks = Created.Find(item => item.ClientRef.ToString("N") == id)?.Tracks ?? [];
             if (request.ExpectedChunks.Mic + request.ExpectedChunks.System > 0
                 && (request.ExpectedChunks.Mic < 1 || enabledTracks.Contains("system") && request.ExpectedChunks.System < 1))

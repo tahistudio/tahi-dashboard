@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TahiRecorder.Core.Audio;
 using TahiRecorder.Core.Outbox;
 
@@ -34,6 +35,49 @@ public sealed class OutboxRecoveryTests : IDisposable
         Assert.Equal(2, recovered.Chunks.Count);
         Assert.True(File.Exists(Path.Combine(store.DirectoryPath, damaged.ToString("D"), "needs-attention.json")));
         Assert.Equal("{", File.ReadAllText(file));
+    }
+
+    [Theory]
+    [InlineData("ready", false)]
+    [InlineData("failed", true)]
+    [InlineData(null, true)]
+    public async Task MissingJournalAfterPruneIsToleratedOnlyForReadyRecording(string? terminalState, bool needsAttention)
+    {
+        var store = new FileOutboxStore(Path.Combine(_root, "outbox"));
+        var spoolDirectory = Path.Combine(_root, "capture");
+        var id = Guid.NewGuid();
+        var recording = await store.CreateAsync(new(id, "Completed", ["mic", "system"]));
+        recording.CaptureStopped = true;
+        recording.TerminalState = terminalState;
+        await FileOutboxStore.AtomicWriteAsync(Path.Combine(store.DirectoryPath, id.ToString("D"), "recording.json"),
+            JsonSerializer.SerializeToUtf8Bytes(recording, new JsonSerializerOptions(JsonSerializerDefaults.Web)), default);
+        var captureFolder = Path.Combine(spoolDirectory, id.ToString("D"));
+        Directory.CreateDirectory(captureFolder);
+        var audio = Path.Combine(captureFolder, "mic-0000.pcm");
+        await File.WriteAllBytesAsync(audio, [1, 2]);
+        Assert.Equal(needsAttention, await OutboxRecovery.RecoverAsync(store, spoolDirectory));
+        Assert.Equal(needsAttention, File.Exists(Path.Combine(store.DirectoryPath, id.ToString("D"), "needs-attention.json")));
+        Assert.True(File.Exists(audio));
+    }
+
+    [Fact]
+    public async Task TransientManifestReadFailurePreservesRecoveryAndDoesNotMarkDamaged()
+    {
+        var store = new FileOutboxStore(Path.Combine(_root, "outbox"));
+        var spoolDirectory = Path.Combine(_root, "capture");
+        var id = Guid.NewGuid();
+        await store.CreateAsync(new(id, "Interrupted", ["mic", "system"]));
+        var manifest = Path.Combine(store.DirectoryPath, id.ToString("D"), "recording.json");
+        var blocked = new List<Guid>();
+        using (var lockedManifest = new FileStream(manifest, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.True(await OutboxRecovery.RecoverAsync(store, spoolDirectory,
+                blockRecording: (blockedId, _) => { blocked.Add(blockedId); return Task.CompletedTask; }));
+            Assert.False(File.Exists(Path.Combine(store.DirectoryPath, id.ToString("D"), "needs-attention.json")));
+            Assert.Empty(blocked);
+        }
+        Assert.False(await OutboxRecovery.RecoverAsync(store, spoolDirectory));
+        Assert.True((await store.ReadAsync(id)).CaptureStopped);
     }
 
     public void Dispose()

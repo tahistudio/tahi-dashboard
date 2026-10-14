@@ -10,12 +10,6 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        try { AppPaths.EnsureDirectories(); }
-        catch (Exception)
-        {
-            ShowStartupError("Recorder needs attention. The local data folder has an unsafe owner or permissions, or could not be protected. Recording is disabled. Check %LOCALAPPDATA%\\TahiRecorder permissions.");
-            return;
-        }
         SingleInstance singleInstance;
         try { singleInstance = new SingleInstance(); }
         catch (Exception error)
@@ -25,6 +19,17 @@ internal static class Program
             return;
         }
         using var instanceLease = singleInstance;
+        if (singleInstance.IsOwner)
+        {
+            try { AppPaths.EnsureDirectories(); }
+            catch (Exception error)
+            {
+                var recovery = error is UnauthorizedAccessException ? error.Message :
+                    $"The local data folder '{AppPaths.Root}' could not be protected. Close Tahi Recorder, back up retained recordings, and fix the folder permissions or delete it so the recorder can recreate it.";
+                ShowStartupError("Recorder needs attention. Recording is disabled. " + recovery);
+                return;
+            }
+        }
         if (!WindowsInstallSecurity.IsSafe())
         {
             ShowStartupError(WindowsInstallSecurity.InstallMessage);

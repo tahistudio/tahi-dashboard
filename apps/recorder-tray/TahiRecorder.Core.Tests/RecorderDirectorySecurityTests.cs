@@ -44,6 +44,43 @@ public sealed class RecorderDirectorySecurityTests
     }
 
     [Fact]
+    public void OwnedLegacyRootWithOnlyInheritedForeignPermissionsCanBeReprotected()
+    {
+        var acl = new DirectorySecurity();
+        acl.SetSecurityDescriptorSddlForm($"O:{User.Value}D:AI(A;OICIID;FA;;;WD)");
+        Assert.False(RecorderDirectorySecurity.IsTrustedRoot(acl, User));
+        Assert.True(RecorderDirectorySecurity.CanReprotectRoot(acl, User));
+        Assert.True(RecorderDirectorySecurity.IsTrustedRoot(RecorderDirectorySecurity.BuildRootAcl(User), User));
+    }
+
+    [Fact]
+    public void OwnedLegacyRootWithTrustedExplicitPermissionsCanBeReprotected()
+    {
+        var acl = new DirectorySecurity();
+        acl.SetSecurityDescriptorSddlForm($"O:{User.Value}D:AI(A;OICI;FA;;;{User.Value})(A;OICIID;FR;;;WD)");
+        Assert.True(RecorderDirectorySecurity.CanReprotectRoot(acl, User));
+    }
+
+    [Fact]
+    public void LegacyRootRejectsForeignExplicitPermissionAndWrongOwner()
+    {
+        var acl = new DirectorySecurity();
+        acl.SetSecurityDescriptorSddlForm($"O:{User.Value}D:AI(A;OICI;FR;;;WD)");
+        Assert.False(RecorderDirectorySecurity.CanReprotectRoot(acl, User));
+        acl.SetSecurityDescriptorSddlForm("O:BAD:AI(A;OICIID;FA;;;WD)");
+        Assert.False(RecorderDirectorySecurity.CanReprotectRoot(acl, User));
+    }
+
+    [Fact]
+    public void TrustedRootRequiresInheritanceProtection()
+    {
+        var acl = RecorderDirectorySecurity.BuildRootAcl(User);
+        acl.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+        Assert.False(RecorderDirectorySecurity.IsTrustedRoot(acl, User));
+        Assert.True(RecorderDirectorySecurity.CanReprotectRoot(acl, User));
+    }
+
+    [Fact]
     public void InstallRejectsBroadWriteButPermitsBroadRead()
     {
         var acl = RecorderDirectorySecurity.BuildRootAcl(User);
@@ -63,6 +100,39 @@ public sealed class RecorderDirectorySecurityTests
         RecorderDirectorySecurity.PrepareDescendantAcl(acl);
         Assert.False(acl.AreAccessRulesProtected);
         Assert.Empty(acl.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>());
+    }
+
+    [Fact]
+    public void DescendantsAlreadyInheritingDoNotNeedAnAclWrite()
+    {
+        var acl = new FileSecurity();
+        acl.SetSecurityDescriptorSddlForm($"O:{User.Value}D:AI(A;ID;FA;;;{User.Value})");
+        Assert.False(RecorderDirectorySecurity.NeedsDescendantAclRepair(acl));
+        acl.AddAccessRule(new FileSystemAccessRule(User, FileSystemRights.Read, AccessControlType.Allow));
+        Assert.True(RecorderDirectorySecurity.NeedsDescendantAclRepair(acl));
+        RecorderDirectorySecurity.PrepareDescendantAcl(acl);
+        Assert.False(RecorderDirectorySecurity.NeedsDescendantAclRepair(acl));
+    }
+
+    [Fact]
+    public void ProtectedDescendantNeedsAnAclRepair()
+    {
+        var acl = new FileSecurity();
+        acl.SetSecurityDescriptorSddlForm($"O:{User.Value}D:P(A;;FA;;;{User.Value})");
+        Assert.True(RecorderDirectorySecurity.NeedsDescendantAclRepair(acl));
+    }
+
+    [Fact]
+    public void BundledNativeLibraryRejectsForeignWriteAndForeignOwnership()
+    {
+        var acl = new FileSecurity();
+        acl.SetSecurityDescriptorSddlForm($"O:{User.Value}D:(A;;FA;;;{User.Value})(A;;FR;;;WD)");
+        Assert.True(RecorderDirectorySecurity.IsSafeInstallAcl(acl, User));
+        acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.Write, AccessControlType.Allow));
+        Assert.False(RecorderDirectorySecurity.IsSafeInstallAcl(acl, User));
+        acl.SetSecurityDescriptorSddlForm($"O:WDD:(A;;FA;;;{User.Value})");
+        Assert.False(RecorderDirectorySecurity.IsSafeInstallAcl(acl, User));
     }
 
     [Theory]

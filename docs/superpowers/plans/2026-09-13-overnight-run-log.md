@@ -1400,3 +1400,63 @@ Raw logs: apps/recorder-tray/.build-logs/review-build.log,
 review-host-source-build.log and review-tests-final-pass.log/.trx.
 QA/UIUX source findings were fixed and re-reviewed. Native Windows integration
 and real-call proof remain pending; REC.0 stays open. No completed/live claim.
+
+## 2026-10-14, REC.0 Windows tray round 2 fixes, local follow-up to 938bd68e
+
+Started clean on feat/rec0-tray-app at 938bd68e. First-review fixes are
+committed at that HEAD, superseding the stale preparation wording in README,
+STATUS, TASKS and Decision #072. Liam instructed no commit and only the listed
+Opus re-review repairs. No commit, push, deploy, pairing, secret or production
+operation was performed; REC.0 remains open for installed Windows/real calls.
+
+P0-1: DurableCaptureSpool uses latest audio delivery across both tracks for the
+ten-second cap. A silent system track stays padded while mic delivers audio;
+a first system packet at fifteen seconds aligns, and both-track silence over
+a twenty-second clock jump stops at the cap. The unavailable-render message
+now describes microphone capture with system silence. P1-1: capture gaps use a
+lifecycle stop without latching the persistence fault, keeping Start enabled.
+P1-2: manual session suppression clears after observed InactiveStopDelay or a
+changed key; the 10:25 Stop, closed session, 10:30 same-key call starts.
+
+P2-1: current-user-owned inherited legacy roots without explicit foreign ACEs
+upgrade in place, while refused roots show their path and backup/fix/delete
+steps. P2-2: HostLog catches enumeration and per-file IO/access failures.
+P2-3: folder publishing disables native self-extraction; README installs the
+whole folder to C:/Program Files/Tahi Recorder/. M2 validates all installed
+files/subdirectories and rejects links or untrusted writers.
+
+P3: transient upload chunk IO/API JSON and manifest read IO back off without
+permanent blocking. Corrupt local JSON manifests retain existing damage guards.
+Blocked records signal local Stop before remote network waits, suppress that
+session's immediate automatic restart, and refresh tray state after physical
+Stop before outbox draining. Prune deletes session.json and recording.json last;
+ready recovery tolerates a missing session.json. Any successful transcribe
+progress, including ready-chunk growth with failed finalization, clears server
+failure retries. Only the single-instance mutex owner checks storage before
+capture, and correct root/descendant ACLs are left unchanged. A blocked uncertain
+create resolves its server id using the same clientRef before best-effort stop.
+
+Independent source QA and tray state/touch review passed after fixing retry
+progress under failed finalization and immediate tray refresh after local Stop.
+Required audio/automation tests and ACL, retention, retry/recovery regressions
+were added. git diff --check passed; no em/en dashes were introduced.
+
+Final Release gate, exit 0 for build and tests:
+    dotnet build TahiRecorder.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false
+    Build succeeded. 0 Warning(s), 0 Error(s). Time Elapsed 00:00:00.64.
+    dotnet test TahiRecorder.sln -c Release --no-build --no-restore -m:1
+    Passed! Failed: 0, Passed: 152, Skipped: 0, Total: 152, Duration: 2 s.
+One xUnit test assembly, all three solution projects built. Restored .packages
+were used without downloads. Default multi-node solution MSBuild returned exit
+1 with no warnings/errors in this restricted environment; -m:1 succeeded.
+The shared compiler pipe also timed out before direct fallback, so the final
+gate disabled shared compilation. A fresh custom DOTNET_CLI_HOME failed workload
+verification; the working gate uses the existing default CLI environment.
+
+Folder publish, exit 0:
+    dotnet publish TahiRecorder.App/TahiRecorder.App.csproj -c Release -r win-x64 --self-contained --no-restore -m:1 -p:UseSharedCompilation=false -p:PublishSingleFile=false -p:IncludeNativeLibrariesForSelfExtract=false -o publish
+Verified 476 published files; coreclr.dll, hostfxr.dll and hostpolicy.dll are
+beside TahiRecorder.App.exe. No installation or recorder launch was performed.
+Raw logs and TRX: apps/recorder-tray/.build-logs/round2-build.log,
+round2-tests.log, round2-tests.trx and round2-publish.log. Published artifacts
+remain under ignored apps/recorder-tray/publish/ for installation review.

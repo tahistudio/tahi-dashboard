@@ -147,9 +147,9 @@ public sealed class FileOutboxStore
                         if (!captureFolder.StartsWith(Path.TrimEndingDirectorySeparator(captureRoot) + Path.DirectorySeparatorChar,
                             StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Invalid capture retention path.");
                         // Keep the manifest until both locations are clean, so interruption is retryable.
-                        if (Directory.Exists(captureFolder)) Directory.Delete(captureFolder, true);
+                        if (Directory.Exists(captureFolder)) DeleteDirectoryJournalLast(captureFolder, "session.json");
                     }
-                    Directory.Delete(Folder(id), true);
+                    DeleteDirectoryJournalLast(Folder(id), "recording.json");
                     removed.Add(id);
                 }
                 catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
@@ -157,6 +157,18 @@ public sealed class FileOutboxStore
             }, cancellationToken);
         }
         return removed;
+    }
+
+    private static void DeleteDirectoryJournalLast(string directory, string journalName)
+    {
+        foreach (var path in Directory.EnumerateFiles(directory))
+        {
+            if (!string.Equals(Path.GetFileName(path), journalName, StringComparison.OrdinalIgnoreCase)) File.Delete(path);
+        }
+        foreach (var path in Directory.EnumerateDirectories(directory)) Directory.Delete(path, true);
+        // An interrupted or failed audio cleanup retains the journal for recovery and the next prune.
+        File.Delete(Path.Combine(directory, journalName));
+        Directory.Delete(directory);
     }
 
     internal bool NeedsAttention(Guid id) => damagedRecordings.ContainsKey(id)

@@ -14,7 +14,8 @@ public enum RecordingStopReason
     SystemSuspend,
     SessionEnding,
     Shutdown,
-    CaptureGap
+    CaptureGap,
+    RecordingBlocked
 }
 
 public sealed record RecordingPlan(
@@ -181,7 +182,14 @@ public sealed class RecorderAutomation
         return [Start(now, null, platform, false, title)];
     }
 
-    public IReadOnlyList<RecordingAction> ManualStop(DateTimeOffset now)
+    public IReadOnlyList<RecordingAction> ManualStop(DateTimeOffset now) =>
+        StopWithSuppression(now, RecordingStopReason.Manual);
+
+    /// <summary>A blocked server recording stops capture and holds the failed session until it closes.</summary>
+    public IReadOnlyList<RecordingAction> StopForBlockedRecording(DateTimeOffset now) =>
+        StopWithSuppression(now, RecordingStopReason.RecordingBlocked);
+
+    private IReadOnlyList<RecordingAction> StopWithSuppression(DateTimeOffset now, RecordingStopReason reason)
     {
         if (Current is null) return [];
         var representedStart = RepresentedCalendarStart();
@@ -192,7 +200,7 @@ public sealed class RecorderAutomation
         _suppressCurrentSession = true;
         _manuallyStoppedAt = now;
         _manuallyStoppedSessionKey = _recordingSessionKey;
-        return Stop(RecordingStopReason.Manual);
+        return Stop(reason);
     }
 
     /// <summary>Host lifecycle events stop capture without suppressing later calls.</summary>
@@ -229,6 +237,12 @@ public sealed class RecorderAutomation
     {
         if (active)
         {
+            if (_inactiveSince is { } inactive && now - inactive >= InactiveStopDelay ||
+                _manuallyStoppedSessionKey is { } stoppedSession && stoppedSession != sessionKey)
+            {
+                _suppressCurrentSession = false;
+                _manuallyStoppedSessionKey = null;
+            }
             if (_observedSessionKey != sessionKey) _activeSince = now;
             _observedSessionKey = sessionKey;
             _activeSince ??= now;
@@ -240,7 +254,10 @@ public sealed class RecorderAutomation
             _observedSessionKey = null;
             _inactiveSince ??= now;
             if (now - _inactiveSince.Value >= InactiveStopDelay)
+            {
                 _suppressCurrentSession = false;
+                _manuallyStoppedSessionKey = null;
+            }
         }
     }
 

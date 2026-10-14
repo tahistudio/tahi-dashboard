@@ -132,7 +132,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             channel.RetryAt = DateTimeOffset.UtcNow.AddSeconds(5);
             ReportError(channel.Track, channel.Track == "mic"
                 ? "Microphone capture is unavailable. Reconnecting while preserving the recording timeline."
-                : "System audio is unavailable. Recording silence until the output device reconnects.");
+                : "System audio is unavailable. Recording the microphone with system silence until the output device reconnects.");
         }
     }
 

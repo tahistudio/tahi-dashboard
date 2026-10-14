@@ -3,6 +3,7 @@ using Microsoft.Win32;
 using TahiRecorder.App.Capture;
 using TahiRecorder.App.Integration;
 using TahiRecorder.Core.Api;
+using TahiRecorder.Core.Audio;
 using TahiRecorder.Core.Automation;
 using TahiRecorder.Core.Outbox;
 
@@ -198,10 +199,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 RefreshTray();
                 return;
             }
-            _captureFault = true;
+            var persistenceFailure = CaptureFailurePolicy.RequiresRecorderDisable(_capture?.HasPersistenceFailure == true);
             var audioGap = _capture?.HasAudioGap == true;
-            await StopForLifecycleAsync(RecordingStopReason.CaptureGap);
-            _detail = audioGap ? "Recording stopped after an audio gap longer than 10 seconds. Local audio is retained."
+            if (!persistenceFailure && !audioGap) return;
+            _captureFault |= persistenceFailure;
+            await StopForLifecycleAsync(audioGap && !persistenceFailure
+                ? RecordingStopReason.CaptureGap : RecordingStopReason.Shutdown);
+            _detail = audioGap && !persistenceFailure ? "Recording stopped after an audio gap longer than 10 seconds. Local audio is retained."
                 : "Capture stopped because audio could not be saved. Check disk space and folder access.";
             RefreshTray();
         });
@@ -217,6 +221,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
         };
         _pump.StatusChanged += status => Post(() => { _detail = status; RefreshTray(); });
+        _pump.RecordingBlocked += clientRef => Post(async () =>
+        {
+            if (await StopForLifecycleAsync(RecordingStopReason.RecordingBlocked, clientRef))
+            {
+                _detail = OutboxPump.BlockedError;
+                RefreshTray();
+            }
+        });
         _paired = true;
         _accessEnded = false;
         _captureFault = needsAttention;
@@ -258,6 +270,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
             if (_paired && !_captureFault)
             {
+                if (_capture?.HasPersistenceFailure == true)
+                    throw new IOException("Capture cannot persist audio.");
                 if (_capture?.HasAudioGap == true)
                 {
                     lock (_automationGate) _automation.StopForLifecycle(RecordingStopReason.CaptureGap);
@@ -266,8 +280,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     RefreshTray();
                     return;
                 }
-                if (_capture?.HasPersistenceFailure == true)
-                    throw new IOException("Capture cannot persist audio.");
                 var meeting = _detector.Poll();
                 _meetingActive = meeting.IsActive;
                 _platform = meeting.Platform;
@@ -359,7 +371,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (Exception error) { HostLog.Error("System event retained interrupted capture", error); }
     }
 
-    private async Task StopForLifecycleAsync(RecordingStopReason reason)
+    private async Task<bool> StopForLifecycleAsync(RecordingStopReason reason, Guid? expectedClientRef = null)
     {
         await _operations.WaitAsync().ConfigureAwait(false);
         try
@@ -368,11 +380,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
             lock (_automationGate)
             {
                 clientRef = _automation.Current?.ClientRef ?? _settings.ActiveCaptureRef;
-                _automation.StopForLifecycle(reason);
+                if (expectedClientRef is not null && clientRef != expectedClientRef) return false;
+                if (reason == RecordingStopReason.RecordingBlocked)
+                    _automation.StopForBlockedRecording(DateTimeOffset.UtcNow);
+                else
+                    _automation.StopForLifecycle(reason);
             }
+            if (reason == RecordingStopReason.RecordingBlocked) _detail = OutboxPump.BlockedError;
             await StopCaptureAsync(clientRef).ConfigureAwait(false);
-            TryPersistState();
+            _captureFault |= !TryPersistState();
             Post(RefreshTray);
+            return true;
         }
         finally { _operations.Release(); }
     }
@@ -398,6 +416,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_capture is null || _store is null) return;
         // Physical capture stops before any fallible settings/outbox write.
         await _capture.StopAsync(_lifetime.Token).ConfigureAwait(false);
+        _notifications.RemoveRecording();
+        _pending = true;
+        // Outbox draining may wait on a network operation. Show the physical stop immediately.
+        Post(RefreshTray);
         Task[] chunks;
         lock (_chunksGate) chunks = _chunkJobs.ToArray();
         await Task.WhenAll(chunks).ConfigureAwait(false);
@@ -410,8 +432,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (clientRef is not null && await _store.ContainsAsync(clientRef.Value, _lifetime.Token).ConfigureAwait(false))
             await _store.StopAsync(clientRef.Value, _capture.LastDurationMs, _lifetime.Token).ConfigureAwait(false);
         _settings = _settings with { ActiveCaptureRef = null };
-        _notifications.RemoveRecording();
-        _pending = true;
         PersistState();
     }
 

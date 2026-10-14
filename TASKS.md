@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client committed at 8665e762, review repairs uncommitted).
+Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client review repairs committed at 938bd68e, round 2 fixes in the worktree without a commit).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1343,8 +1343,12 @@ scheduled; each needs a scope before building.
   15de17d7, where the server is live per Liam's tray brief. Core, WinForms host
   and xUnit projects implement capture/automation/pairing/tray/durable outbox.
   The committed baseline builds with zero warnings and tests pass with restored
-  packages. The Windows review repairs remain uncommitted; verification is in
-  the running log and review report. Publish and real calls remain required
+  packages. The first Windows review repairs are committed at 938bd68e; round 2
+  silence, suppression, blocked capture, retries, ACL and folder publishing fixes
+  remain in the worktree without a commit. Verification is in
+  the running log and review report. Round 2 Release build: zero warnings/errors;
+  all 152 tests pass, zero failed/skipped. Folder publish passes with native
+  libraries alongside the executable. Installed Windows checks and real calls remain required
   before closing REC.0. No commit, push, deploy, live pairing or production
   write in this review run.
   Automatic known and unknown call capture,

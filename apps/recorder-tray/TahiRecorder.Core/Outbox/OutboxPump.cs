@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
 using TahiRecorder.Core.Api;
 
 namespace TahiRecorder.Core.Outbox;
@@ -9,7 +11,9 @@ public sealed class OutboxPump
     private readonly IRecorderApi api;
     private readonly TimeProvider clock;
     private readonly SemaphoreSlim pumpGate = new(1, 1);
+    private readonly ConcurrentDictionary<Guid, (int Failures, DateTimeOffset NextAttemptUtc)> manifestReadRetries = new();
     public event Action<Guid>? CreateSending;
+    public event Action<Guid>? RecordingBlocked;
     public event Action<string>? StatusChanged;
     public bool AuthenticationRequired { get; private set; }
 
@@ -27,6 +31,7 @@ public sealed class OutboxPump
             catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 await store.MarkDamagedUnsafeAsync(clientRef, cancellationToken);
+                RecordingBlocked?.Invoke(clientRef);
             }
             return true;
         }, cancellationToken);
@@ -37,11 +42,22 @@ public sealed class OutboxPump
         foreach (var id in store.RecordingIds())
         {
             if (store.NeedsAttention(id)) { StatusChanged?.Invoke(BlockedError); continue; }
-            try { pending |= (await store.ReadAsync(id, cancellationToken)).TerminalState is null; }
+            if (ManifestReadDeferred(id)) { pending = true; continue; }
+            try
+            {
+                pending |= (await store.ReadAsync(id, cancellationToken)).TerminalState is null;
+                manifestReadRetries.TryRemove(id, out _);
+            }
+            catch (IOException)
+            {
+                DeferManifestRead(id);
+                pending = true;
+            }
             catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 await store.LockedAsync(id, async () =>
                 { await store.MarkDamagedUnsafeAsync(id, cancellationToken); return true; }, cancellationToken);
+                RecordingBlocked?.Invoke(id);
                 StatusChanged?.Invoke(BlockedError);
             }
         }
@@ -62,7 +78,9 @@ public sealed class OutboxPump
                     try
                     {
                         if (store.NeedsAttention(id)) return false;
+                        if (ManifestReadDeferred(id)) return false;
                         recording = await store.LoadUnsafeAsync(id, cancellationToken);
+                        manifestReadRetries.TryRemove(id, out _);
                         if (recording.TerminalState is not null || recording.NextAttemptUtc > clock.GetUtcNow()
                             || recording.NotBeforeUtc > clock.GetUtcNow()) return false;
                         var result = await AdvanceAsync(recording, cancellationToken);
@@ -85,7 +103,13 @@ public sealed class OutboxPump
                     {
                         if (recording is null)
                         {
+                            if (error is IOException)
+                            {
+                                DeferManifestRead(id);
+                                return true;
+                            }
                             await store.MarkDamagedUnsafeAsync(id, cancellationToken);
+                            RecordingBlocked?.Invoke(id);
                             StatusChanged?.Invoke(BlockedError);
                         }
                         else await HandleFailureAsync(recording, error, cancellationToken);
@@ -98,6 +122,22 @@ public sealed class OutboxPump
         finally { pumpGate.Release(); }
     }
 
+    private bool ManifestReadDeferred(Guid id) => manifestReadRetries.TryGetValue(id, out var retry)
+        && retry.NextAttemptUtc > clock.GetUtcNow();
+
+    private void DeferManifestRead(Guid id)
+    {
+        // An unreadable manifest cannot safely be rewritten. Keep its retry state separate and leave the bytes intact.
+        var now = clock.GetUtcNow();
+        manifestReadRetries.AddOrUpdate(id, _ => (1, now.AddSeconds(2)), (_, retry) =>
+        {
+            if (retry.NextAttemptUtc > now) return retry;
+            var failures = retry.Failures + 1;
+            return (failures, now.AddSeconds(Math.Min(300, Math.Pow(2, Math.Min(8, failures)))));
+        });
+        StatusChanged?.Invoke("Upload delayed. Audio is saved for retry.");
+    }
+
     private async Task HandleFailureAsync(OutboxRecording recording, Exception error, CancellationToken cancellationToken)
     {
         var apiError = error as RecorderApiException;
@@ -106,7 +146,8 @@ public sealed class OutboxPump
         // Persist only fixed messages. Exception bodies can contain upload grants.
         recording.LastError = "Upload delayed. Audio is saved for retry.";
         var retryable = apiError?.IsRetryable == true || apiError?.IsAuthenticationFailure == true
-            || error is HttpRequestException || error is OperationCanceledException;
+            || error is HttpRequestException or OperationCanceledException or JsonException
+            || error is IOException;
         var delay = apiError?.RetryAfter ?? TimeSpan.FromSeconds(Math.Min(300, Math.Pow(2, Math.Min(8, recording.Failures))));
         if (apiError?.Code == "daily_quota") delay = delay < TimeSpan.FromMinutes(15) ? TimeSpan.FromMinutes(15) : delay;
         if (apiError?.Code == "open_recording") delay = delay < TimeSpan.FromSeconds(30) ? TimeSpan.FromSeconds(30) : delay;
@@ -115,12 +156,17 @@ public sealed class OutboxPump
             recording.TerminalState = "blocked";
             recording.TerminalUtc = clock.GetUtcNow();
             recording.LastError = BlockedError;
+            // The host queues its local stop before any remote recovery or stop can wait on the network.
+            RecordingBlocked?.Invoke(recording.Request.ClientRef);
             await BestEffortStopAsync(recording, cancellationToken);
         }
         recording.NextAttemptUtc = clock.GetUtcNow() + (delay < TimeSpan.Zero ? TimeSpan.FromSeconds(2) : delay);
         try { await store.SaveUnsafeAsync(recording, cancellationToken); }
         catch (Exception saveError) when (saveError is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        { await store.MarkDamagedUnsafeAsync(recording.Request.ClientRef, cancellationToken); }
+        {
+            await store.MarkDamagedUnsafeAsync(recording.Request.ClientRef, cancellationToken);
+            RecordingBlocked?.Invoke(recording.Request.ClientRef);
+        }
         StatusChanged?.Invoke(!retryable ? BlockedError
             : AuthenticationRequired ? "Device access ended. Pair again to resume new recordings."
             : apiError?.Code == "daily_quota" ? "Daily quota reached. Audio is saved for retry."
@@ -130,9 +176,15 @@ public sealed class OutboxPump
 
     private async Task BestEffortStopAsync(OutboxRecording recording, CancellationToken cancellationToken)
     {
-        if (recording.RecordingId is null || recording.StopConfirmed) return;
+        if (recording.StopConfirmed) return;
         try
         {
+            if (recording.RecordingId is null)
+            {
+                if (!recording.CreateSent) return;
+                // A lost create response can still occupy a server slot. Recover its id using the same clientRef.
+                recording.RecordingId = (await api.CreateAsync(recording.Request, cancellationToken)).Id;
+            }
             await api.StopAsync(recording.RecordingId, StopRequest(recording, releaseOpenSlot: true), cancellationToken);
             recording.StopConfirmed = true;
         }
@@ -224,18 +276,21 @@ public sealed class OutboxPump
             recording.ServerFailureRetries++;
         }
         var transcribed = await api.TranscribeAsync(recording.RecordingId, cancellationToken);
+        var readyBefore = current.Chunks.Count(c => c.State == "ready");
+        var readyAfter = transcribed.Chunks.Count(c => c.State == "ready");
+        var chunksProgressed = readyAfter > readyBefore;
+        if (chunksProgressed) recording.ServerFailureRetries = 0;
         if (UpdateTerminal(recording, transcribed)) return AdvanceResult.NoProgress;
         if (transcribed.Recording.State == "failed")
         {
             recording.ServerFailed = true;
             if (recording.ServerFailureRetries >= 3) SetTerminal(recording, "failed");
-            return AdvanceResult.ServerFailed;
+            return chunksProgressed ? AdvanceResult.Progress : AdvanceResult.ServerFailed;
         }
         recording.ServerFailed = false;
-        var readyBefore = current.Chunks.Count(c => c.State == "ready");
-        var readyAfter = transcribed.Chunks.Count(c => c.State == "ready");
-        return readyAfter > readyBefore || transcribed.Recording.State != current.Recording.State
-            ? AdvanceResult.Progress : AdvanceResult.NoProgress;
+        var progressed = chunksProgressed || transcribed.Recording.State != current.Recording.State;
+        if (progressed) recording.ServerFailureRetries = 0;
+        return progressed ? AdvanceResult.Progress : AdvanceResult.NoProgress;
     }
 
     private bool UpdateTerminal(OutboxRecording recording, RecordingDetail detail)
@@ -250,6 +305,7 @@ public sealed class OutboxPump
         recording.TerminalState = state;
         recording.TerminalUtc = clock.GetUtcNow();
         recording.TranscriptionPolls = 0;
+        if (state == "ready") recording.ServerFailureRetries = 0;
         StatusChanged?.Invoke(state == "ready" ? "Transcript ready in recordings." : "Transcription failed. Open recordings to review.");
     }
 

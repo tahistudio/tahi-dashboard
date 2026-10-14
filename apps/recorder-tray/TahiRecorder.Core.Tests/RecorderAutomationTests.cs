@@ -295,6 +295,21 @@ public sealed class RecorderAutomationTests
     }
 
     [Fact]
+    public void BlockedRecordingStopsAndSuppressesSameMeetingWhileManualStartRemainsAvailable()
+    {
+        var call = Call("first", Noon, TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        var original = Assert.Single(recorder.Tick(Noon, true, "zoom", [call], "same-session")).Plan;
+        var stop = Assert.Single(recorder.StopForBlockedRecording(Noon.AddMinutes(1)));
+        Assert.Equal(RecordingStopReason.RecordingBlocked, stop.StopReason);
+        Assert.Equal(original, stop.Plan);
+        Assert.Null(recorder.Current);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(2), true, "zoom", [call], "same-session"));
+        var manual = Assert.Single(recorder.ManualStart(Noon.AddMinutes(2), "zoom"));
+        Assert.False(manual.Plan.IsAutomatic);
+    }
+
+    [Fact]
     public void ReactivationBeforeSixtySecondsCancelsInactiveStop()
     {
         var recorder = new RecorderAutomation();
@@ -397,7 +412,7 @@ public sealed class RecorderAutomationTests
     }
 
     [Fact]
-    public void UpcomingManualStopSuppressionAlsoAppliesAfterInactiveSuppressionResets()
+    public void UpcomingManualStopSuppressionClearsAfterInactiveSuppressionResets()
     {
         var call = Call("next", Noon.AddMinutes(7), TimeSpan.FromMinutes(30));
         var recorder = new RecorderAutomation();
@@ -407,7 +422,38 @@ public sealed class RecorderAutomationTests
         recorder.Tick(Noon.AddMinutes(1), false, "unknown", [call]);
         recorder.Tick(Noon.AddMinutes(2), false, "unknown", [call]);
         Assert.False(recorder.ExportState().SuppressCurrentSession);
-        Assert.Empty(recorder.Tick(Noon.AddMinutes(7), true, "zoom", [call], "same-session"));
+        Assert.Null(recorder.ExportState().ManuallyStoppedSessionKey);
+        var start = Assert.Single(recorder.Tick(Noon.AddMinutes(7), true, "zoom", [call], "same-session"));
+        Assert.Equal(call, start.Plan.Call);
+    }
+
+    [Fact]
+    public void StopAtTenTwentyFiveThenSessionClosesAndTenThirtyCallStartsOnSameKey()
+    {
+        var tenTwentyFive = new DateTimeOffset(2026, 10, 14, 10, 25, 0, TimeSpan.Zero);
+        var call = Call("ten-thirty", tenTwentyFive.AddMinutes(5), TimeSpan.FromMinutes(30));
+        var recorder = new RecorderAutomation();
+        recorder.ManualStart(tenTwentyFive.AddMinutes(-10));
+        recorder.Tick(tenTwentyFive.AddSeconds(-1), true, "zoom", [call], "zoom-process");
+        recorder.ManualStop(tenTwentyFive);
+        recorder.Tick(tenTwentyFive.AddSeconds(1), false, "unknown", [call], "zoom-process");
+        // Qualification also resets if the next observation follows the inactive delay.
+        var start = Assert.Single(recorder.Tick(tenTwentyFive.AddMinutes(5), true, "zoom", [call], "zoom-process"));
+        Assert.Equal(call, start.Plan.Call);
+        Assert.Null(recorder.ExportState().ManuallyStoppedSessionKey);
+    }
+
+    [Fact]
+    public void ManualStopSuppressionClearsWhenMeetingSessionKeyChangesWithoutCalendar()
+    {
+        var recorder = new RecorderAutomation();
+        recorder.ManualStart(Noon.AddMinutes(-1));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [], "first-session");
+        recorder.ManualStop(Noon);
+        Assert.Empty(recorder.Tick(Noon.AddSeconds(1), true, "zoom", [], "second-session"));
+        Assert.False(recorder.ExportState().SuppressCurrentSession);
+        Assert.Null(recorder.ExportState().ManuallyStoppedSessionKey);
+        Assert.Single(recorder.Tick(Noon.AddSeconds(21), true, "zoom", [], "second-session"));
     }
 
     [Fact]
@@ -419,6 +465,8 @@ public sealed class RecorderAutomationTests
         recorder.Tick(Noon.AddSeconds(-2), true, "zoom", [], "same-session");
         recorder.Tick(Noon.AddSeconds(-1), false, "unknown", []);
         recorder.ManualStop(Noon);
+        Assert.Equal("same-session", recorder.ExportState().ManuallyStoppedSessionKey);
+        Assert.Empty(recorder.Tick(Noon.AddSeconds(1), true, "zoom", [], "same-session"));
         Assert.Equal("same-session", recorder.ExportState().ManuallyStoppedSessionKey);
         Assert.Empty(recorder.Tick(Noon.AddMinutes(7), true, "zoom", [call], "same-session"));
     }
