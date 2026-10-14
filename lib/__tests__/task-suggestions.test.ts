@@ -377,9 +377,9 @@ describe('decideSuggestion', () => {
     expect(created[0]).toMatchObject({ orgId: 'o_elevate', type: 'internal_client_task', dueDate: '2026-10-16', description: '' })
   })
 
-  it('refuses an unresolved client on every approval surface, including force and an override removing choices', async () => {
+  it.each([1, 2])('refuses %s unresolved client choices on every approval surface, including force and an override removing choices', async count => {
     const unresolved = suggestionRow({ orgId: null, sourceKind: 'note', proposal: JSON.stringify({ title: 'Send invoice',
-      slackClientChoices: [{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }],
+      slackClientChoices: [{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }].slice(0, count),
     }) })
     const { database, updated } = fakeDb({ task_suggestions: [unresolved] })
     for (const via of ['dashboard', 'slack', 'mcp'] as const) {

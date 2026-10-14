@@ -309,7 +309,7 @@ export async function handleSlackDm(event: SlackDmEvent, deps: SlackDmDeps): Pro
   }
 
   const answerIntent = async (text: string): Promise<SlackDmOutcome | null> => {
-    const intent = detectSlackIntent(text)
+    const intent = detectSlackIntent(text, { voice })
     if (intent.kind === 'note') return null
     const reply = intent.kind === 'help'
       ? slackHelpLine(identity.level)

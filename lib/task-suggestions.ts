@@ -1620,7 +1620,7 @@ export async function applySuggestion(
 ): Promise<ApplyOutcome> {
   try {
     const proposal = parseProposal(row.proposal)
-    if (!row.orgId && clientChoicesFromProposal(proposal).length > 1) {
+    if (!row.orgId && clientChoicesFromProposal(proposal).length > 0) {
       return { ok: false, appliedTaskId: null, appliedRequestId: null, error: CLIENT_REQUIRED }
     }
     const actor = { actorType: 'system' as const, actorId: ctx.actorId }
@@ -1897,7 +1897,7 @@ export async function decideSuggestion(
   }
 
   // Use the stored metadata, never an override that could remove the choice guard.
-  if (decision.action === 'approve' && !row.orgId && clientChoicesFromProposal(row.proposal).length > 1) {
+  if (decision.action === 'approve' && !row.orgId && clientChoicesFromProposal(row.proposal).length > 0) {
     return { suggestion: row, changed: false, error: CLIENT_REQUIRED, appliedTaskId: null, appliedRequestId: null }
   }
 

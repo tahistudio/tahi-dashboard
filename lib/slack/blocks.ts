@@ -167,7 +167,7 @@ export function quoteBlock(quote: string, limit = 600): string {
 function headerLine(input: SuggestionMessageInput): string {
   const parts: string[] = []
   const choices = clientChoicesFromProposal(input.proposal)
-  parts.push(input.orgName ? `*${escapeSlackText(input.orgName)}*` : choices.length > 1 ? '*Client?*' : '*Studio*')
+  parts.push(input.orgName ? `*${escapeSlackText(input.orgName)}*` : choices.length > 0 ? '*Client?*' : '*Studio*')
   if (input.callTitle) parts.push(escapeSlackText(input.callTitle))
   const day = formatCallDay(input.callScheduledAt ?? null)
   if (day) parts.push(day)
@@ -322,14 +322,14 @@ export function suggestionMessage(
     })
   }
 
-  if (choices.length < 2) buttons.push({
+  if (choices.length === 0) buttons.push({
     type: 'button',
     text: plain(duplicate ? 'Approve anyway' : 'Approve'),
     action_id: suggestionActionId(duplicate ? 'approve_anyway' : 'approve', input.id),
     style: 'primary',
   })
   const tweakUrl = options.tweakUrl === undefined ? suggestionTweakUrl(input.id) : options.tweakUrl
-  if (choices.length > 1) {
+  if (choices.length > 0) {
     buttons.push({ type: 'button', text: plain('Tweak'), action_id: suggestionActionId('tweak', input.id), value: 'choose_client' })
   } else if (tweakUrl) {
     buttons.push({
@@ -345,7 +345,7 @@ export function suggestionMessage(
 
   blocks.push({ type: 'actions', elements: buttons })
 
-  if (choices.length > 1 && options.chooseClient) {
+  if (choices.length > 0 && options.chooseClient) {
     blocks.push({ type: 'context', elements: [mrkdwn('Client? Choose one, then approve the updated card.')] })
     for (const [index, choice] of choices.slice(0, MAX_CLIENT_CHOICES).entries()) {
       blocks.push({ type: 'section', text: mrkdwn(escapeSlackText(choice.name)), accessory: {

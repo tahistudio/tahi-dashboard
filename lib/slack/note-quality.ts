@@ -42,13 +42,22 @@ export function matchOrgsFromText(text: string, orgs: readonly OrgNameOption[]):
   const haystack = ` ${normalise(text)} `
   const mentions = orgs.flatMap(org => {
     const [legalName, tradingName] = org.name.split(/\btrading\s+as\s+/i).map(part => part.trim())
-    const names = [org.name, legalName, tradingName, ...(org.aliases ?? []), ...(org.contactNames ?? [])]
+    const contactNames = (org.contactNames ?? []).filter(name => normalise(name).split(' ').length >= 2)
+    const names = [org.name, legalName, tradingName, ...(org.aliases ?? []), ...contactNames]
       .filter((name): name is string => typeof name === 'string')
       .map(normalise).filter(name => name.length >= 2)
-    return [...new Set(names)].filter(name => haystack.includes(` ${name} `)).map(name => ({ org, name }))
+    return [...new Set(names)].flatMap(name => {
+      const spans: Array<{ org: OrgNameOption; name: string; start: number; end: number }> = []
+      let start = haystack.indexOf(` ${name} `)
+      while (start >= 0) {
+        spans.push({ org, name, start: start + 1, end: start + 1 + name.length })
+        start = haystack.indexOf(` ${name} `, start + 1)
+      }
+      return spans
+    })
   })
   const explicit = mentions.filter(mention => !mentions.some(other => (
-    other.name !== mention.name && ` ${other.name} `.includes(` ${mention.name} `)
+    other.name !== mention.name && other.start <= mention.start && other.end >= mention.end
   )))
   const choices = new Map<string, SlackClientChoice>()
   for (const { org } of explicit) choices.set(org.id, { id: org.id, name: org.name })
@@ -93,7 +102,10 @@ export function relativeDueDate(text: string, at: Date): string | null {
       const weekday = WEEKDAYS.indexOf(phrase.replace(/^next\s+/, ''))
       if (weekday < 0) continue
       let offset = (weekday - day.getUTCDay() + 7) % 7
-      if (phrase.startsWith('next ')) offset = offset || 7
+      // The studio week starts on Monday. "Next" always means next week's day.
+      const currentWeekday = (day.getUTCDay() + 6) % 7
+      const targetWeekday = (weekday + 6) % 7
+      if (phrase.startsWith('next ') && targetWeekday >= currentWeekday) offset += 7
       day.setUTCDate(day.getUTCDate() + offset)
     }
     dates.add(day.toISOString().slice(0, 10))
@@ -156,7 +168,7 @@ export function enrichNoteProposal(input: {
     if (!input.orgId) proposal.type = 'tahi_internal'
     else if (proposal.type !== 'client_task') proposal.type = 'internal_client_task'
   }
-  if (input.choices.length > 1) proposal.slackClientChoices = [...input.choices]
+  if (!input.orgId && input.choices.length > 0) proposal.slackClientChoices = [...input.choices]
   if (dueDate) proposal.dueDate = dueDate
   else if (hasRelativeDate) delete proposal.dueDate
   proposal.description = descriptionBeyondTitle(typeof proposal.title === 'string' ? proposal.title : '', proposal.description)

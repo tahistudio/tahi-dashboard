@@ -216,7 +216,7 @@ describe('transcribeAudio', () => {
 })
 
 describe('handleSlackDm', () => {
-  it.each(['Hi', 'hello', 'hey', 'help', 'what can you do'])('answers %s with help before the note or status path', async text => {
+  it.each(['Hi', 'hello', 'hey', 'hi there', 'thanks', 'thank you', 'cheers', 'hey,', 'help', 'what can you do'])('answers %s with help before the note or status path', async text => {
     const setStatus = vi.fn()
     const result = await handleSlackDm(event({ text }), deps({ setStatus }))
     expect(result.reason).toBe('help')
@@ -227,7 +227,7 @@ describe('handleSlackDm', () => {
     expect(posted[0].text).toContain('Task for me:')
   })
 
-  it.each(['What should I work on today?', 'what is waiting on me', "what's due today", "what's due this week", "what's overdue", 'my tasks', 'what needs approving', 'Who owns this client?'])('never files the question %s', async text => {
+  it.each(['What should I work on today?', 'what is waiting on me', "what's due today", "what's due this week", "what's overdue", 'my tasks', 'what needs approving'])('never files the question %s', async text => {
     const result = await handleSlackDm(event({ text }), deps())
     expect(result.reason).toBe('question')
     expect(noteCalls).toHaveLength(0)
@@ -239,6 +239,48 @@ describe('handleSlackDm', () => {
     const result = await handleSlackDm(event({ text: '', files: [AUDIO_FILE] }), deps({ downloadFile: async () => new Uint8Array([1]).buffer }))
     expect(result.reason).toBe('question')
     expect(result.voice).toBe(true)
+    expect(noteCalls).toHaveLength(0)
+  })
+
+  it.each([
+    'what should I do about the Elevate invoice, create a task to chase them',
+    'Can you create a task to chase Elevate for the October invoice',
+    'Could you please update our homepage hero?',
+    'Do the Elevate invoice by Friday',
+    'Will needs to review the homepage by Friday',
+    'Is the homepage done? If not, task for Staci to finish by Friday',
+    'Task: ask Elevate whether they want the blog redesign?',
+    'So I spoke to Elevate today. They want the invoice by Friday. Can you remind me?',
+    'what is waiting on me, also make a task to chase Elevate',
+    'my tasks for Elevate need a review by Friday, add one to chase the logo',
+    'Who owns this client?',
+  ])('files the work note %s through the approval path', async text => {
+    const result = await handleSlackDm(event({ text }), deps())
+    expect(result.reason).toBe('ok')
+    expect(noteCalls).toHaveLength(1)
+    expect(noteCalls[0].text).toBe(text)
+  })
+
+  it.each([
+    'Can you create a task to chase Elevate for the October invoice',
+    'what is waiting on me, also make a task to chase Elevate',
+    'I asked what is due this week',
+    'Who owns this client?',
+    'hi there',
+  ])('files the voice transcript %s through the approval path', async text => {
+    cfEnv.AI = { run: async () => ({ text }) }
+    const result = await handleSlackDm(event({ text: '', files: [AUDIO_FILE] }), deps({ downloadFile: async () => new Uint8Array([1]).buffer }))
+    expect(result.reason).toBe('ok')
+    expect(result.voice).toBe(true)
+    expect(noteCalls).toHaveLength(1)
+    expect(noteCalls[0].text).toBe(text)
+  })
+
+  it('greets a client without advertising request filing', async () => {
+    const result = await handleSlackDm(event({ text: 'hi there' }), deps({ identity: identity(TIM) }))
+    expect(result.reason).toBe('help')
+    expect(posted[0].text).toContain('your own requests')
+    expect(posted[0].text).not.toMatch(/draft|send notes|voice notes|Request:/i)
     expect(noteCalls).toHaveLength(0)
   })
 

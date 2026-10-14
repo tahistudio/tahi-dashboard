@@ -179,8 +179,8 @@ describe('the quote, the assignee and the confidence', () => {
 })
 
 describe('the buttons', () => {
-  it('labels an ambiguous client and reveals the choices only through Tweak', () => {
-    const input = row({ orgName: null, proposal: { title: 'Send invoice', slackClientChoices: [{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }] } })
+  it.each([1, 2])('labels %s unresolved client choices and reveals them only through Tweak', count => {
+    const input = row({ orgName: null, proposal: { title: 'Send invoice', slackClientChoices: [{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }].slice(0, count) } })
     const initial = suggestionMessage(input)
     expect(textOf(initial)).toContain('*Client?*')
     expect(buttons(initial).map(button => button.label)).toEqual(['Tweak', 'Tonight', 'This week', 'Reject'])
@@ -188,7 +188,7 @@ describe('the buttons', () => {
     const tweaked = suggestionMessage(input, { chooseClient: true })
     expect(textOf(tweaked)).toContain('Choose one, then approve')
     expect(textOf(tweaked)).toContain('"value":"one"')
-    expect(textOf(tweaked)).toContain('"value":"two"')
+    if (count === 2) expect(textOf(tweaked)).toContain('"value":"two"')
     expect(textOf(initial)).not.toContain('"value":"one"')
     for (const block of tweaked.blocks) {
       if (block.type === 'actions') expect(new Set(block.elements.map(button => button.action_id)).size).toBe(block.elements.length)

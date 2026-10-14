@@ -119,7 +119,7 @@ export const VIEW_SUBMISSION_ACK = { response_action: 'clear' } as const
 const WELCOME_LINES: Record<SlackLevel, string> = {
   founder: slackHelpLine('founder'),
   member: slackHelpLine('member'),
-  client: 'Tell me what you need and I will draft the request. You confirm it before it reaches the studio.',
+  client: slackHelpLine('client'),
   unknown: DENIAL_LINE,
 }
 
@@ -134,12 +134,12 @@ export const ASSISTANT_PROMPTS: readonly SlackSuggestedPrompt[] = [
   { title: 'What is waiting on me', message: 'What is waiting on me?' },
 ]
 
-/** Client openers only advertise their own requests, never studio tasks. */
+/** Client welcomes make no filing promise before the request gate is checked. */
 export function promptsForLevel(level: SlackLevel): readonly SlackSuggestedPrompt[] {
   if (level === 'unknown') return []
   if (level === 'client') return [
-    { title: 'New request', message: 'Please help with ' },
     { title: 'My requests', message: 'What is waiting on me?' },
+    { title: 'Due this week', message: 'What is due this week?' },
   ]
   return ASSISTANT_PROMPTS
 }

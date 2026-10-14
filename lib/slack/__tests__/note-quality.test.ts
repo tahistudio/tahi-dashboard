@@ -29,6 +29,10 @@ describe('client matching', () => {
     expect(matchOrgsFromText('Telecoms needs an invoice', [org])).toEqual([])
   })
 
+  it('ignores single-word contact names even when they match the note exactly', () => {
+    expect(matchOrgsFromText('Will needs to review', [{ ...ELEVATE, contactNames: ['Will'] }])).toEqual([])
+  })
+
   it('keeps multiple candidates when aliases or contact names collide', () => {
     const other = { id: 'other', name: 'Other Limited', aliases: ['Elevate'], contactNames: ['Sam Smith'] }
     expect(matchOrgsFromText('Send Elevate an invoice', [ELEVATE, other])).toEqual([ELEVATE, { id: 'other', name: 'Other Limited' }])
@@ -40,6 +44,14 @@ describe('client matching', () => {
     const group = { id: 'group', name: 'Giant Group' }
     expect(matchOrgsFromText('Giant Group wants the deck', [giant, group])).toEqual([group])
     expect(matchOrgsFromText('Giant Group and Elevate want the deck', [giant, group, ELEVATE])).toEqual([group, ELEVATE])
+  })
+
+  it('suppresses contained names only inside the same mention span', () => {
+    const elevate = { id: 'elevate', name: 'Elevate' }
+    const health = { id: 'health', name: 'Elevate Health' }
+    expect(matchOrgsFromText('Elevate Health wants the deck', [elevate, health])).toEqual([health])
+    expect(matchOrgsFromText('Elevate and Elevate Health want the deck', [elevate, health])).toEqual([elevate, health])
+    expect(matchOrgsFromText('Elevate Health and Elevate want the deck', [elevate, health])).toEqual([elevate, health])
   })
 })
 
@@ -68,6 +80,23 @@ describe('Pacific/Auckland due dates', () => {
   it('starts next week on Monday, including on a Monday', () => {
     expect(relativeDueDate('next week', new Date('2026-10-18T00:00:00Z'))).toBe('2026-10-19')
     expect(relativeDueDate('next week', new Date('2026-10-19T00:00:00Z'))).toBe('2026-10-26')
+  })
+
+  it.each([
+    ['next Monday', '2026-10-19'], ['next Tuesday', '2026-10-20'],
+    ['next Wednesday', '2026-10-21'], ['next Thursday', '2026-10-22'],
+    ['next Friday', '2026-10-23'], ['next Saturday', '2026-10-24'],
+    ['next Sunday', '2026-10-25'],
+  ])('resolves %s into the following studio week', (phrase, expected) => {
+    expect(relativeDueDate(phrase, AT)).toBe(expected)
+  })
+
+  it('keeps next weekday dates in the following week across the Sunday boundary', () => {
+    expect(relativeDueDate('next Sunday', new Date('2026-10-17T00:00:00Z'))).toBe('2026-10-25')
+    expect(relativeDueDate('next Sunday', new Date('2026-10-18T00:00:00Z'))).toBe('2026-10-25')
+    expect(relativeDueDate('next Monday', new Date('2026-10-18T00:00:00Z'))).toBe('2026-10-19')
+    expect(relativeDueDate('next Friday', new Date('2026-10-18T00:00:00Z'))).toBe('2026-10-23')
+    expect(relativeDueDate('next Friday', new Date('2026-10-16T00:00:00Z'))).toBe('2026-10-23')
   })
 
   it('handles leap years, year boundaries and conflicting dates', () => {
@@ -102,6 +131,13 @@ describe('proposal quality', () => {
       quote: 'send Elevate their invoice', proposal: { title: 'Send invoice', slackClientChoices: [{ id: 'invented', name: 'Invented' }] },
     })
     expect(proposal).toMatchObject({ orgId: null, type: 'tahi_internal', slackClientChoices: choices })
+  })
+
+  it('stores even one unresolved contact-name choice for sender confirmation', () => {
+    const proposal = enrichNoteProposal({ kind: 'create_task', at: AT, orgId: null, choices: [ELEVATE],
+      quote: 'Send Sam Smith the invoice', proposal: { title: 'Send invoice', orgId: 'invented' },
+    })
+    expect(proposal).toMatchObject({ orgId: null, type: 'tahi_internal', slackClientChoices: [ELEVATE] })
   })
 
   it('parses dates into update fields and does not invent one without relative date words', () => {

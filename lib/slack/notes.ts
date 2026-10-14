@@ -20,8 +20,9 @@
  *   one failure the whole feature exists to avoid.
  *
  *   THE ORG, for a studio note. Legal names, trading names, CRM aliases and
- *   contact names are matched against the roster. An ambiguous create waits
- *   for its sender to choose a client on Tweak before it can be approved.
+ *   full contact names are matched against the roster. An ambiguous create or
+ *   a contact-only match waits for its sender to choose a client on Tweak
+ *   before it can be approved.
  *
  *   THE CLIENT PATH, which never reaches the model. A client's DM IS the
  *   request. Running it through a suggester would hand them a paraphrase to
@@ -176,6 +177,7 @@ export interface DraftFromNoteInput {
  * The match is on a word boundary so "Kiwi Labs" does not fire on
  * "kiwilabsomething", and it is case blind because nobody capitalises a
  * client correctly while dictating into a phone.
+ * A full contact name can suggest a client but cannot assign one by itself.
  *
  * When two DIFFERENT clients are named the answer is null, because a note
  * that mentions two clients has not told us which one it is for. When two
@@ -185,7 +187,9 @@ export interface DraftFromNoteInput {
  */
 export function resolveOrgFromText(text: string, orgs: readonly OrgNameOption[]): string | null {
   const matches = matchOrgsFromText(text, orgs)
-  return matches.length === 1 ? matches[0].id : null
+  if (matches.length !== 1) return null
+  const namedOrgs = matchOrgsFromText(text, orgs.map(org => ({ ...org, contactNames: [] })))
+  return namedOrgs.some(org => org.id === matches[0].id) ? matches[0].id : null
 }
 
 async function loadOrgRoster(database: Drizzle): Promise<OrgNameOption[]> {
@@ -384,7 +388,7 @@ async function studioNoteDraft(
 
   const roster = await loadOrgRoster(database)
   const choices = matchOrgsFromText(text, roster)
-  const orgId = choices.length === 1 ? choices[0].id : null
+  const orgId = resolveOrgFromText(text, roster)
   const orgName = orgId ? roster.find(org => org.id === orgId)?.name ?? null : null
   if (choices.length > MAX_CLIENT_CHOICES) {
     return { ok: false, reason: 'nothing_understood', reply: 'Name one client more specifically, then send the note again.',
@@ -400,8 +404,8 @@ async function studioNoteDraft(
   // Notes can propose both kinds of work. Do not load mixed context or file
   // cards unless the sender can use both features, including with no client.
   if (!await studioReachesOrg(database, teamMemberId, orgId, ['tasks', 'requests'])) return denied()
-  // An ambiguous note must not reveal names outside this sender's access.
-  for (const choice of choices.length > 1 ? choices : []) {
+  // Unresolved choices, including full contact names, must remain in scope.
+  for (const choice of orgId ? [] : choices) {
     if (!await studioReachesOrg(database, teamMemberId, choice.id, ['tasks', 'requests'])) return denied()
   }
 

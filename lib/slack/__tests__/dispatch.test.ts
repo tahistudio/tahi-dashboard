@@ -385,9 +385,10 @@ describe('the assistant pane (contract section 6b)', () => {
     ])
   })
 
-  it('opens a client thread with the client line', async () => {
+  it('opens a client thread without promising request filing', async () => {
     await handleAssistantThreadStarted(identity('client'), started)
-    expect(String(posted[0].text)).toContain('draft the request')
+    expect(String(posted[0].text)).toContain('your own requests')
+    expect(String(posted[0].text)).not.toMatch(/draft|send notes|voice notes|Request:/i)
     expect(prompts).toHaveLength(1)
     expect(JSON.stringify(prompts[0])).not.toContain('Task for me')
   })
@@ -420,6 +421,8 @@ describe('new agent_view Messages open', () => {
   it('keeps client prompts personal and gives strangers no prompts', async () => {
     await handleAppHomeOpened(identity('client'), opened)
     expect(JSON.stringify(prompts)).toContain('My requests')
+    expect(JSON.stringify(prompts)).toContain('Due this week')
+    expect(JSON.stringify(prompts)).not.toMatch(/New request|Please help with/)
     expect(JSON.stringify(prompts)).not.toContain('Task for me')
     prompts.length = 0
     await handleAppHomeOpened(identity('unknown'), opened)

@@ -316,7 +316,7 @@ async function clientChoicePress(
   const choices = clientChoicesFromProposal(row.proposal)
   if (!isStudioLevel(identity.level) || !actorId || row.approverType !== 'member' || row.approverId !== actorId
     || row.sourceKind !== 'note' || row.orgId !== null || row.status !== 'pending'
-    || (row.kind !== 'create_task' && row.kind !== 'create_request') || choices.length < 2 || choices.length > MAX_CLIENT_CHOICES
+    || (row.kind !== 'create_task' && row.kind !== 'create_request') || choices.length < 1 || choices.length > MAX_CLIENT_CHOICES
     || !ctx.payload.channelId || ctx.payload.channelId !== identity.dmChannelId || !ctx.payload.messageTs) {
     return answer(SLACK_DENIED_LINE)
   }

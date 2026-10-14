@@ -1601,3 +1601,35 @@ assertions. Their existing unconditional Clerk-auth skips remain; neither
 listing nor type-check is client-session proof. No new live QA, production
 data read/write, migration apply, secret operation, commit, push or deploy.
 All changes are intentionally left uncommitted. Final git diff --check passes.
+
+## 2026-10-14, Slack bot failed-review repairs (Codex)
+
+Started clean on feat/slack-bot-qa at 5b7990f1, as requested. Repaired the
+seven supplied Opus findings only. Short known queries are start-anchored
+and reject work verbs; arbitrary question marks and leading question words
+no longer swallow notes. Voice uses only known short-query patterns.
+Contact names need two words and contact-only matches require sender
+confirmation, including a single stored choice. Shared approval guards and
+Slack cards enforce that confirmation while retaining current scope checks
+and the conditional pending/proposal/approver/null-org update.
+
+Used Liam's permitted dashboard fallback: "Choose the client in Slack
+(Tweak)". The row stays visible; Approve, dashboard Tweak, keyboard and bulk
+approval respect unresolved choices. A client_required response never
+becomes a success toast. No new dashboard picker or decide action.
+Next weekdays resolve in the following Monday through Sunday studio week;
+client containment is based on actual mention spans. Whole-message thanks
+and greetings are widened, and client welcomes/prompts make no filing promise.
+
+Independent QA and UX source review passed. Fail-closed gate, CI=true,
+native exit 0: type-check zero errors; lint zero errors with existing warnings
+outside changed files; 10 Vitest files and 511 tests passed in 4.60s. Seven
+actual React static-render cases cover inbox guidance/disabled actions.
+Standard Vitest/esbuild and Git Bash startup were sandbox-blocked, so the
+gate used cmd's && chain and the existing native-loader Vitest config.
+Raw log: .wrangler/slack-review-repairs-gate.log. Detailed scope and evidence:
+docs/superpowers/audits/2026-10-14-slack-bot-qa.md.
+
+No commit, push, deploy, migration, manifest, production-data or secret
+operation. No live or browser-render claim, and no backlog item is closed.
+The changed working tree is ready for the main session's re-review.

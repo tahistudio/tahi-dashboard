@@ -97,3 +97,64 @@ Standard Vitest could not start esbuild in the sandbox (spawn EPERM). The ignore
 The first combined run had 550 passed and one failed assertion: `expected 'New task: Send invoice' to contain 'Chosen Client'`. The added retry-card regression inspected the notification fallback, while the client name is shown in the card's header blocks. The test was corrected to inspect those blocks; no product code changed for that correction. The complete gate above then passed. The earlier raw log remains .wrangler/slack-bot-qa-final-gate.log.
 
 Both source review findings are resolved: long legal names now render in full beside short numbered client-choice buttons, and My tasks links See all to the permitted Tasks page. The selected-client retry also rechecks the stored row's current client access before returning a name or card. Live Slack verification remains the main session's next step after deployment.
+
+## Failed Opus review repairs, 2026-10-14
+
+Liam's follow-up starts from clean feat/slack-bot-qa at 5b7990f1. The Opus
+review failed on P1. This follow-up fixes only the seven supplied findings
+and leaves all changes uncommitted, with no push or deploy.
+
+1. Intent detection no longer has a catch-all for question marks or leading
+   question words. Known queries are start-anchored, at most ten words and
+   contain no listed work verb. Voice uses only those query patterns. All
+   ten supplied work notes reach drafting; the genuine queries still answer.
+2. Contact names require at least two words. A contact-only match remains
+   unresolved with stored choices, including a single choice. Shared approve
+   and apply guards refuse it until selection. Slack reuses its current
+   scope checks and conditional pending-row update; selection never applies
+   the work. A contact named Will does not assign an organisation.
+3. The dashboard uses the expressly permitted fallback, not a new picker:
+   "Choose the client in Slack (Tweak)". Unresolved rows show the instruction
+   and disable Approve and dashboard Tweak. Keyboard, forced confirmation
+   and bulk approval obey the same gate. A client_required response preserves
+   the row and produces a warning rather than a success message. The decide
+   route already returns that error and needs no change.
+4. Next weekdays use the following Monday through Sunday studio week.
+   Next Friday said on Wednesday resolves to the following week's Friday.
+5. Client-name containment compares the actual mention spans. Separately
+   mentioning Elevate and Elevate Health offers both choices.
+6. Whole-message greetings and thanks include hi there, thanks, thank you,
+   cheers and hey,. Greeting prefixes in work notes do not consume the note.
+7. Client DM and assistant welcomes make no request-filing promise. Client
+   welcome prompts offer personal request queries, including Due this week.
+
+Independent QA and UX source reviews pass. Seven React static-render
+regressions verify the fallback and disabled buttons for both create kinds,
+resolved clients and internal tasks. Browser rendering and live Slack checks
+remain outside this no-deploy follow-up.
+
+The fail-closed gate uses cmd's && chain with CI=true and preserves its
+native exit status in PowerShell. Git Bash could not start (CreateFileMapping
+access denied), and standard Vitest could not spawn esbuild; the existing
+ignored native-loader config runs the actual assertions.
+
+```text
+npm run type-check
+tsc --noEmit: zero errors
+
+npm run lint
+next lint: zero errors, existing warnings outside the changed files
+
+npm run test -- --run --config .wrangler/vitest-sandbox.config.mjs --configLoader native
+Test Files  10 passed (10)
+Tests       511 passed (511)
+Duration    4.60s
+Native exit 0
+```
+
+Filters: lib/slack/__tests__/{intents,dispatch-dm,dispatch,note-quality,notes,
+client-choice}.test.ts, lib/__tests__/{slack-blocks,slack-dispatch-actions,
+task-suggestions}.test.ts and
+components/tahi/tasks/__tests__/tasks-suggestions-client-required.test.tsx.
+Raw log: .wrangler/slack-review-repairs-gate.log. No route or page file changed.
+No schema, migration, manifest, permission-model or production-data change.

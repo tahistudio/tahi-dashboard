@@ -204,6 +204,13 @@ describe('resolveOrgFromText', () => {
   it('does not match a name inside a longer word', () => {
     expect(resolveOrgFromText('the kiwilabsomething repo', [{ id: 'o_kiwi', name: 'Kiwi Labs' }])).toBeNull()
   })
+
+  it('does not assign a client from a contact name alone', () => {
+    const org = { id: 'o_giant', name: 'Giant Group', contactNames: ['Will', 'Sam Smith'] }
+    expect(resolveOrgFromText('Will needs to review', [org])).toBeNull()
+    expect(resolveOrgFromText('Sam Smith needs to review', [org])).toBeNull()
+    expect(resolveOrgFromText('Sam Smith needs to review for Giant Group', [org])).toBe('o_giant')
+  })
 })
 
 describe('draftFromNote, a team member', () => {
@@ -222,14 +229,39 @@ describe('draftFromNote, a team member', () => {
     } })
   })
 
-  it('loads aliases and contact names from the existing CRM fields', async () => {
+  it('loads aliases from CRM and keeps a full contact-name match for confirmation', async () => {
     const org = { id: 'o_elevate', name: 'Telcom Networks Limited', customFields: '{"shortName":"Elevate"}' }
     for (const text of ['Send Elevate an invoice', 'Send Sam Smith an invoice']) {
       await draftFromNote({ database: fakeDb({ organisations: [org], contacts: [{ orgId: org.id, name: 'Sam Smith' }] }),
         text, identity: identity(), suggest: suggesterReturning([suggestion({ quote: text })]),
       })
     }
-    expect(insertedDrafts.map(batch => batch[0].orgId)).toEqual(['o_elevate', 'o_elevate'])
+    expect(contextReads).toEqual(['o_elevate', null])
+    expect(insertedDrafts.map(batch => batch[0].orgId)).toEqual(['o_elevate', null])
+    expect(insertedDrafts[1][0].proposal).toMatchObject({ orgId: null, slackClientChoices: [{ id: org.id, name: org.name }] })
+  })
+
+  it('does not match a single-word contact named Will to a client', async () => {
+    const text = 'Will needs to review'
+    await draftFromNote({ database: fakeDb({ organisations: ORGS, contacts: [{ orgId: 'o_giant', name: 'Will' }] }),
+      text, identity: identity(), suggest: suggesterReturning([suggestion({ quote: text })]),
+    })
+    expect(contextReads).toEqual([null])
+    expect(insertedDrafts[0][0]).toMatchObject({ orgId: null, proposal: { orgId: null, type: 'tahi_internal' } })
+    expect((insertedDrafts[0][0].proposal as Record<string, unknown>).slackClientChoices).toBeUndefined()
+  })
+
+  it('rechecks access before exposing a single contact-only client choice', async () => {
+    scopeFor = () => ['o_kiwi']
+    const model = vi.fn(suggesterReturning([suggestion()]))
+    const result = await draftFromNote({ database: fakeDb({ organisations: ORGS,
+      contacts: [{ orgId: 'o_giant', name: 'Sam Smith' }] }),
+      text: 'Sam Smith needs to review', identity: identity({ level: 'member' }), suggest: model,
+    })
+    expect(result.reason).toBe('denied')
+    expect(model).not.toHaveBeenCalled()
+    expect(contextReads).toEqual([])
+    expect(insertedDrafts).toEqual([])
   })
 
   it('parses the full note date for one item when the model quote omits it', async () => {

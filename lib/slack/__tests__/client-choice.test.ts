@@ -74,6 +74,18 @@ beforeEach(() => {
 })
 
 describe('Tweak client choices on the sender private card', () => {
+  it('requires confirmation for a single contact-only client candidate', async () => {
+    row.proposal = JSON.stringify({ title: 'Review homepage', type: 'tahi_internal', slackClientChoices: choices.slice(0, 1) })
+    expect(await click('tweak', 'choose_client')).toMatchObject({ reply: null })
+    expect(writes).toHaveLength(0)
+    expect(JSON.stringify(updateMessage.mock.calls)).toContain('Client?')
+    expect(await click('choose_client', 'one')).toMatchObject({ reply: null })
+    expect(writes).toHaveLength(1)
+    expect(writes[0].values.orgId).toBe('one')
+    expect(valuesIn(writes[0].condition)).toContain(row.proposal)
+    expect(decideSuggestion).not.toHaveBeenCalled()
+  })
+
   it('shows current client names only after rechecking each candidate scope, with no item writes', async () => {
     orgs.set('one', { id: 'one', name: 'Renamed Client One' })
     expect(await click('tweak', 'choose_client')).toMatchObject({ reply: null })
