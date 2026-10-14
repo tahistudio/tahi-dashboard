@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
   const t0 = Date.now()
   // Two auth paths: admin session OR cron secret (matches /api/admin/cron/*).
   const hasCronAuth = hasCronSecretAuth(req)
-  let userId = 'system'
+  // Synced inserts belong to the system, not the member running the sync.
+  const userId = 'system'
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)
     if (!isTahiAdmin(auth.orgId)) {
@@ -44,7 +45,6 @@ export async function POST(req: NextRequest) {
     if (!auth.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    userId = auth.userId
     const denied = await requireFeature(auth, 'settings.integrations')
     if (denied) return denied
   }

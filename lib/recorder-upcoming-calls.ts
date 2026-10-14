@@ -22,6 +22,7 @@ interface CallCandidate {
   status: string
   meetingUrl: string | null
   createdById?: string | null
+  googleCalendarEventId?: string | null
 }
 
 interface CallMemberIdentity {
@@ -72,7 +73,9 @@ export function filterRecorderUpcomingCalls(
     const ownAttendee = !!email && attends(row.attendees, email)
     // Google currently records its account email, but not the connecting member.
     const ownGoogleAccount = !!email && accountEmail === email && attends(row.attendees, accountEmail)
-    const ownCreator = !!identity && (row.createdById === identity.clerkUserId || row.createdById === identity.id)
+    // A synced call's creator may be its sync operator, not a participant.
+    const ownCreator = row.googleCalendarEventId == null && !!identity
+      && (row.createdById === identity.clerkUserId || row.createdById === identity.id)
     if (row.status !== 'scheduled' || !(ownAttendee || ownGoogleAccount || ownCreator) || !Number.isFinite(startMs)
       || !Number.isFinite(endMs) || endMs <= startMs || startMs - 120_000 > nowMs + 900_000 || endMs + 600_000 < nowMs) return []
     return [{ id: row.id, kind, title: row.title ?? 'Call', startMs, endMs, platform: recorderMeetingPlatform(row.meetingUrl) }]
@@ -97,6 +100,7 @@ export async function recorderUpcomingCalls(database: DB, auth: RequestAuthResul
     id: schema.discoveryCalls.id, title: schema.discoveryCalls.title, scheduledAt: schema.discoveryCalls.scheduledAt,
     durationMinutes: schema.discoveryCalls.durationMinutes, attendees: schema.discoveryCalls.attendees,
     status: schema.discoveryCalls.status, meetingUrl: schema.discoveryCalls.googleMeetUrl, createdById: schema.discoveryCalls.createdById,
+    googleCalendarEventId: schema.discoveryCalls.googleCalendarEventId,
   }).from(schema.discoveryCalls).where(and(eq(schema.discoveryCalls.status, 'scheduled'),
     gte(schema.discoveryCalls.scheduledAt, since), lte(schema.discoveryCalls.scheduledAt, until)))
   const scheduled = await database.select({

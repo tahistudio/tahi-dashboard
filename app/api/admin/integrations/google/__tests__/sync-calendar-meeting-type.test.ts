@@ -125,6 +125,27 @@ beforeEach(() => {
 })
 
 describe('sync-calendar, meetingType classification', () => {
+  it('attributes synced calls and activity stamps to the system rather than the sync initiator', async () => {
+    vi.mocked(listCalendarEvents).mockResolvedValue([
+      event({ id: 'evt-synced', attendees: [{ email: 'business@tahi.studio' }, { email: 'lead@prospect.test' }] }),
+    ])
+    const { handle, queries } = makeDb([
+      ...preloop([{ id: 'lead-1', email: 'lead@prospect.test', status: 'new', website: null }], []),
+      [],
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+
+    const inserts = queries.filter(q => q[0].method === 'insert')
+      .map(q => q.find(c => c.method === 'values')?.args[0])
+    expect(inserts).toEqual([
+      expect.objectContaining({ googleCalendarEventId: 'evt-synced', createdById: 'system' }),
+      expect.objectContaining({ type: 'lead_call_scheduled', createdById: 'system' }),
+    ])
+  })
+
   it('classifies an unmatched "mentor" title as mentoring', async () => {
     vi.mocked(listCalendarEvents).mockResolvedValue([
       event({ id: 'evt-mentor', summary: 'Mentor session with Jane' }),

@@ -111,7 +111,7 @@ beforeEach(() => {
     CREATE TABLE task_suggestions (id text, transcript_id text);
     CREATE TABLE team_members (id text PRIMARY KEY, clerk_user_id text, name text, email text);
     CREATE TABLE scheduled_calls (id text PRIMARY KEY,org_id text,title text,scheduled_at text,duration_minutes integer,status text,attendees text,meeting_url text,created_by_id text);
-    CREATE TABLE discovery_calls (id text PRIMARY KEY,org_id text,title text,scheduled_at text,duration_minutes integer,status text,attendees text,google_meet_url text,transcript text,transcript_source text,updated_at text,created_by_id text);
+    CREATE TABLE discovery_calls (id text PRIMARY KEY,org_id text,title text,scheduled_at text,duration_minutes integer,status text,attendees text,google_meet_url text,transcript text,transcript_source text,updated_at text,created_by_id text,google_calendar_event_id text);
     CREATE TABLE integrations (id text PRIMARY KEY, service text, config text, status text);
     INSERT INTO organisations VALUES ('client-a', 'Client A');
     INSERT INTO team_members VALUES ('member-liam','liam','Liam Miller','business@tahi.studio');`)
@@ -335,7 +335,27 @@ describe('device audio quotas and payloads', () => {
     expect((await reserve(request(`/${next}/chunks`, metadata()), params(next))).status).toBe(200)
   })
 
-  it('accepts seven hours on each of two tracks as seven microphone hours', async () => {
+  it('limits system reservations independently while the create check stays mic-only', async () => {
+    const id = await create()
+    sqlite.prepare("INSERT INTO meeting_recording_chunks (id,recording_id,track,sequence,start_ms,duration_ms,mime_type,size,storage_key,upload_token,state,created_at,updated_at) VALUES ('used',?,'system',999,0,?,'audio/wav',960044,'key','token','reserved',?,?)")
+      .run(id, RECORDER_DAILY_AUDIO_MS - 30_000, new Date(NOW - 60_000).toISOString(), new Date(NOW - 60_000).toISOString())
+    const system = metadata({ track: 'system' })
+    expect((await reserve(request(`/${id}/chunks`, system), params(id))).status).toBe(200)
+    const exceeded = await reserve(request(`/${id}/chunks`, metadata({ track: 'system', sequence: 1, startMs: 30_000, durationMs: 1, size: 76 })), params(id))
+    expect(exceeded.status).toBe(429)
+    expect(await exceeded.json()).toMatchObject({ code: 'daily_quota' })
+    expect((await reserve(request(`/${id}/chunks`, metadata()), params(id))).status).toBe(200)
+    const duplicate = await reserve(request(`/${id}/chunks`, system), params(id))
+    expect(duplicate.status).toBe(200)
+    expect(await duplicate.json()).toMatchObject({ duplicate: false, uploaded: false })
+    close(id)
+    const next = await create({ clientRef: crypto.randomUUID() })
+    expect((await reserve(request(`/${next}/chunks`, system), params(next))).status).toBe(429)
+    vi.setSystemTime(NOW + 86400_000)
+    expect((await reserve(request(`/${next}/chunks`, system), params(next))).status).toBe(200)
+  })
+
+  it('accepts seven hours on each track under their independent limits', async () => {
     const id = await create()
     for (const track of ['mic', 'system']) {
       sqlite.prepare("INSERT INTO meeting_recording_chunks (id,recording_id,track,sequence,start_ms,duration_ms,mime_type,size,storage_key,upload_token,state,created_at,updated_at) VALUES (?, ?, ?,999,0,?,'audio/wav',960044,'key','token','reserved',?,?)")

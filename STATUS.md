@@ -1,20 +1,20 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 phases 1 and 1b live per Liam; phase 2 committed, review repair uncommitted). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 phases 1 and 1b live per Liam; phase 2 server side committed on feat/rec0-tray-server, 0114 shipped). Older sections retain their dates. Reading order for any agent: AGENTS.md.
 
 ## REC.0 phase 2 dashboard, prepared 2026-10-14
 
 Phases 1 and 1b are live per Liam's current brief, main 729cc282. The live
 five-second WAV probe passed for both tracks; retain Whisper vad_filter.
 The tray dashboard implementation is committed on feat/rec0-tray-server:
-migration 0114 alone at 97b0b0ae, server/UI at e961108f, restricted device auth/pairing, owned slim recording
+migration 0114 shipped alone at 97b0b0ae, server/UI at e961108f, restricted device auth/pairing, owned slim recording
 APIs, quotas, upcoming calls, Settings devices and full-profile list/revoke
-MCP tools. The review repair is uncommitted on top: overlapping call windows,
-member matching, empty/stale recording recovery, rolling mic quota, pairing
+MCP tools. The review repair is committed at 54b14081: overlapping call windows,
+member matching, empty/stale recording recovery, rolling audio quotas, pairing
 limits/HMAC/audits, batched reads and Settings fixes. Decision #072 records
 the fixed choices and pairing's MCP exception.
-The main session must ship/apply 0114 first, review and deploy the server,
+0114 is shipped. The main session must review and deploy the server,
 then verify signed-in 375/768 light/dark states. No migration apply, deploy,
 secret change or C# app is performed here. REC.0 stays open. The following
 phase 1b notes are historical preparation details superseded by this live status.

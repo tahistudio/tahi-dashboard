@@ -346,11 +346,11 @@ describe('recorder pairing', () => {
     expect((await exchange('ZZZZZZZZ', '2001:db8:1234:5679::1')).status).toBe(400)
   })
 
-  it('atomically caps concurrent failures at fifty across all IPs for fifteen minutes', async () => {
-    const results = await Promise.all(Array.from({ length: 60 }, (_, index) => exchange('ZZZZZZZZ', `192.0.2.${index + 1}`)))
-    expect(results.filter(result => result.status === 400)).toHaveLength(50)
+  it('atomically caps concurrent failures at five hundred across all IPs for fifteen minutes', async () => {
+    const results = await Promise.all(Array.from({ length: 510 }, (_, index) => exchange('ZZZZZZZZ', `198.18.${Math.floor(index / 254)}.${index % 254 + 1}`)))
+    expect(results.filter(result => result.status === 400)).toHaveLength(500)
     expect(results.filter(result => result.status === 429)).toHaveLength(10)
-    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM recorder_pairing_attempts WHERE succeeded = 0').get()?.n).toBe(50)
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM recorder_pairing_attempts WHERE succeeded = 0').get()?.n).toBe(500)
     const blocked = await exchange('ZZZZZZZZ', '198.51.100.1')
     expect(blocked.status).toBe(429)
     expect(blocked.headers.get('Retry-After')).toBe('900')
@@ -384,7 +384,7 @@ describe('recorder pairing', () => {
 
   it('does not count successful exchanges as failures', async () => {
     const insert = sqlite.prepare('INSERT INTO recorder_pairing_attempts VALUES (?, ?, ?, 1)')
-    for (let index = 0; index < 50; index++) insert.run(`success-${index}`, `ip-key-${index}`, now)
+    for (let index = 0; index < 500; index++) insert.run(`success-${index}`, `ip-key-${index}`, now)
     for (let index = 0; index < 6; index++) expect((await exchange(await pairingCode())).status).toBe(201)
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM recorder_pairing_attempts WHERE succeeded = 0').get()?.n).toBe(0)
   })

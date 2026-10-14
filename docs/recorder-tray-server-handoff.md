@@ -1,16 +1,16 @@
-﻿# Tray recorder server handoff
+# Tray recorder server handoff
 
-REC.0 phase 2 dashboard changes are prepared on feat/rec0-tray-server from
-729cc282. Migration 0114 is committed separately as 97b0b0ae and the server
-implementation as e961108f. This review repair is uncommitted on top of
-e961108f. No migration apply or deployment is performed in this session.
+REC.0 phase 2 server side is committed on feat/rec0-tray-server from
+729cc282. Migration 0114 is shipped separately as 97b0b0ae, the server
+implementation is e961108f and its review repair is 54b14081.
+No migration apply or deployment is performed in this session.
 Phases 1 and 1b are live per Liam's 2026-10-14 brief. Decision #072 records the
 approved automatic capture choices and the successful live WAV probe.
 
-## Ship order
+## Migration and remaining handoff
 
-First ship only these migration files, then apply 0114 through the normal
-admin migration endpoint before deploying the remaining server code:
+Migration 0114 is shipped separately before the server implementation,
+with these migration files:
 
 - lib/recorder-devices-migration.ts
 - drizzle/migrations/0114_recorder_devices.sql
@@ -18,8 +18,8 @@ admin migration endpoint before deploying the remaining server code:
 
 The registration description is: Apply BEFORE deploying the tray recorder
 server code. All statements are CREATE TABLE or CREATE INDEX IF NOT EXISTS.
-The later code change includes matching db/schema.ts declarations. Main
-session owns migration, deploy, production proof and security/Opus review.
+The server code includes matching db/schema.ts declarations. Main
+session owns server deploy, production proof and security/Opus review.
 
 ## Pairing and device management
 
@@ -35,13 +35,15 @@ The client exchanges { code, deviceName } through POST /api/public/recorder/pair
 The 201 response is { token, device: { id, name } }. The bearer is tahi_rec_
 followed by 32 random bytes in base64url. Only its SHA-256 is stored. Responses
 containing secrets are no-store. Five failed attempts from one Cloudflare IP
-prefix, or fifty across all prefixes, within fifteen minutes block further
+prefix, or 500 across all prefixes, within fifteen minutes block further
 exchanges with 429. IPv6 uses its /64 prefix. Prefixes are stored as HMACs
 using a purpose-specific HKDF key derived from the existing MCP_IDENTITY_SECRET
 (CLERK_SECRET_KEY fallback). Attempts older than one day are purged during
 exchange. Atomic D1 consumption prevents two devices using one code. Audit
 actions recorder_device.pairing_code_created and recorder_device.paired never
 contain a code or token; successful pairing identifies the device id.
+A distributed attacker can still exhaust the global cap and block legitimate
+pairing until attempts leave the fifteen-minute window (Decision #072).
 
 GET /api/admin/recorder-devices returns { items }. POST
 /api/admin/recorder-devices/{id}/revoke returns { success: true }. These use
@@ -97,9 +99,10 @@ permissions. Clerk organisation membership is cached for fifteen minutes.
 A definite removal revokes the token; a Clerk outage returns retryable 503
 with Retry-After, preserving local audio. Thirty idle days expire a device;
 last-seen writes occur at most once per five minutes. Quotas allow one open
-recording and twelve hours of reserved microphone audio per device over a
-rolling 24 hours. System audio does not count, so seven hours on both tracks
-uses seven hours of quota. Reservations count before upload so concurrency
+recording and separate twelve-hour caps of reserved audio for each track per
+device over a rolling 24 hours. Seven hours on both tracks uses seven hours of
+each track's quota. Recording creation checks only the microphone quota.
+Reservations count before upload so concurrency
 cannot bypass the limit. Open recordings older than the maximum recording
 duration (12 hours) plus one hour do not occupy the open slot. A 429 code
 open_recording means stop or resolve the open recording; daily_quota means
@@ -109,7 +112,10 @@ retain audio and wait for the rolling quota to free up.
 
 Upcoming calls must be scheduled and match this member: their email is in
 attendees (case-insensitive), or the connected Google account email is in
-attendees and belongs to this member, or they created the call. The Google
+attendees and belongs to this member, or they created a call without a
+googleCalendarEventId. Synced discovery rows ignore the creator, including
+legacy rows attributed to whoever pressed Sync now; new synced inserts use
+system. The Google
 integration currently records its account email, with no connecting member
 identity, so account ownership is checked against the member's email.
 Return calls whose window overlaps [now, now + 15 minutes], where each window

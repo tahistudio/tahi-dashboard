@@ -113,7 +113,7 @@ export async function exchangeRecorderPairingCode(req: NextRequest): Promise<Nex
   const attempts = await database.all<{ id: string }>(sql`INSERT INTO recorder_pairing_attempts (id, ip_hash, attempted_at, succeeded)
     SELECT ${attemptId}, ${ipHash}, ${now}, 0 WHERE
     (SELECT COUNT(*) FROM recorder_pairing_attempts WHERE ip_hash = ${ipHash} AND attempted_at > ${cutoff} AND succeeded = 0) < 5
-    AND (SELECT COUNT(*) FROM recorder_pairing_attempts WHERE attempted_at > ${cutoff} AND succeeded = 0) < 50 RETURNING id`)
+    AND (SELECT COUNT(*) FROM recorder_pairing_attempts WHERE attempted_at > ${cutoff} AND succeeded = 0) < 500 RETURNING id`)
   if (!attempts.length) return NextResponse.json({ error: 'Too many pairing attempts. Try again in 15 minutes.' }, { status: 429, headers: { 'Retry-After': '900' } })
   const body: unknown = await req.json().catch(() => null)
   if (!body || typeof body !== 'object') throw new RecorderDevicesError('Enter a pairing code and device name.', 400)

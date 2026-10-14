@@ -59,9 +59,9 @@ export function recorderQuotaStart(now = new Date()): string {
   return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
 }
 
-/** Reserved mic audio counts over a rolling 24 hours, independently of the system track. */
-export function recorderAudioQuota(deviceId: string, additionalMs: number, cutoff = recorderQuotaStart()) {
+/** Each track's reserved audio counts independently over a rolling 24 hours. */
+export function recorderAudioQuota(deviceId: string, track: RecordingTrack, additionalMs: number, cutoff = recorderQuotaStart()) {
   return sql`(SELECT COALESCE(SUM(c.duration_ms), 0) FROM meeting_recording_chunks c
     INNER JOIN recorder_recordings rr ON rr.recording_id = c.recording_id
-    WHERE rr.device_id = ${deviceId} AND c.track = 'mic' AND c.created_at > ${cutoff}) + ${additionalMs} <= ${RECORDER_DAILY_AUDIO_MS}`
+    WHERE rr.device_id = ${deviceId} AND c.track = ${track} AND c.created_at > ${cutoff}) + ${additionalMs} <= ${RECORDER_DAILY_AUDIO_MS}`
 }

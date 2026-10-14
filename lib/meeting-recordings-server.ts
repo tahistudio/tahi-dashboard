@@ -384,10 +384,10 @@ export async function reserveChunk(context: RecordingContext, value: unknown): P
         ${metadata.mimeType}, ${metadata.size}, ${`meeting-recordings/${row.id}/${metadata.track}/${metadata.sequence}.audio`},
         ${crypto.randomUUID()}, 'reserved', ${now}, ${now}
       WHERE EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease} AND deleted_at IS NULL)
-      AND ${context.auth.recorderDevice && metadata.track === 'mic' ? recorderAudioQuota(context.auth.recorderDevice.id, metadata.durationMs) : sql`1 = 1`}
+      AND ${context.auth.recorderDevice ? recorderAudioQuota(context.auth.recorderDevice.id, metadata.track, metadata.durationMs) : sql`1 = 1`}
       ON CONFLICT (recording_id, track, sequence) DO NOTHING`)
     const [chunk] = await context.database.select().from(chunks).where(eq(chunks.id, id)).limit(1)
-    if (!chunk && context.auth.recorderDevice) throw new RecordingError('This device has reached its rolling 24-hour microphone audio limit.', 429, 'daily_quota')
+    if (!chunk && context.auth.recorderDevice) throw new RecordingError(`This device has reached its rolling 24-hour ${metadata.track === 'mic' ? 'microphone' : 'system'} audio limit.`, 429, 'daily_quota')
     if (!chunk || (['startMs', 'durationMs', 'mimeType', 'size'] as const).some(key => chunk[key] !== metadata[key])) {
       throw new RecordingError('A different chunk already uses this sequence.', 409)
     }

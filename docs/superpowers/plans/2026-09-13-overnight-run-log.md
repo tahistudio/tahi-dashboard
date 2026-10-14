@@ -1292,3 +1292,40 @@ rec0-tray-review-worker-tsc.log and rec0-tray-review-vitest.log. Independent QA
 and UIUX source reviews pass after fixing terminal replay and local long-name
 overflow findings. No browser/live proof or build is claimed in this repair.
 Full item/file/line report: docs/superpowers/audits/2026-10-14-rec0-tray-review-fixes.md.
+
+## 2026-10-14, REC.0 tray server final security fixes, local on 54b14081
+
+Started with clean git status on feat/rec0-tray-server at 54b14081. Fixed only
+M1, M2, L1 and L2 from Liam's security re-review brief. These final changes
+remain uncommitted. No push, deploy, migration apply, secret or production
+change was performed. The 0114 migration files and schema are unchanged.
+The server implementation and earlier review repairs are committed on the
+branch; 0114 is shipped separately as 97b0b0ae, per Liam's brief.
+
+M1: synced discovery calls select googleCalendarEventId and ignore creator
+membership whenever it is non-null. Calendar sync stamps inserted calls
+and activities as system. A legacy synced row created by Staci with Liam
+and a client attending returns no calls for Staci and the call for Liam.
+M2: mic and system reservations each have an independent twelve-hour cap
+per device over a rolling 24 hours. Create remains mic-only. The system
+exact limit is accepted, one additional millisecond returns daily_quota,
+and seven hours on each track is accepted. Duplicate reservations, cross-call
+aggregation and rolling expiry remain covered.
+L1: global pairing failures now cap at 500 per fifteen minutes; the five
+per-prefix limit is unchanged. The concurrent threshold test passes, and
+Decision #072 records residual distributed global lockout risk.
+L2: STATUS, TASKS, Decision #072 and the server handoff identify committed
+server work and shipped 0114. Decision and handoff quota, calendar and
+pairing descriptions match the final fixes. REC.0 remains open.
+
+Requested fail-closed gate passed: npm run type-check exit 0; CI=1 npm run
+lint exit 0 with existing warnings; worker tsc --noEmit exit 0; four touched
+Vitest files / 72 tests passed, exit 0. File counts: upcoming calls 14,
+recorder recordings 22, device auth/pairing 30, calendar sync 6.
+Standard Vitest startup was blocked by esbuild spawn EPERM before tests ran;
+the successful gate used the existing ignored .claude/vitest-sandbox.config.mjs
+with --configLoader native. Raw logs: .wrangler/rec0-tray-final-security-type-check.log,
+.wrangler/rec0-tray-final-security-lint.log,
+.wrangler/rec0-tray-final-security-worker-tsc.log and
+.wrangler/rec0-tray-final-security-vitest.log. Independent source QA found no
+blockers. No UI changes, build or browser/live proof is claimed in this run.

@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 phases 1 and 1b live per Liam; phase 2 committed, review repair uncommitted).
+Last updated: 2026-10-14 (REC.0 phases 1 and 1b live per Liam; phase 2 server side committed on feat/rec0-tray-server, 0114 shipped).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1334,17 +1334,18 @@ scheduled; each needs a scope before building.
   paragraphs and speaker names, durable uploads, optional Nova group mode,
   transcript linking and PWA reminders. The live WAV probe passed both tracks;
   retain Whisper vad_filter. Phase 2 dashboard implementation is committed on
-  feat/rec0-tray-server: migration 0114 alone at 97b0b0ae, server/UI at e961108f,
+  feat/rec0-tray-server: migration 0114 shipped alone at 97b0b0ae, server/UI at e961108f,
   device auth/pairing, idempotent creates,
   owned slim reads, quotas, upcoming calls, Settings devices and blocked-designer
-  MCP list/revoke. Main session ships/applies the separable migration first,
-  then security/Opus review, server deploy and signed-in 375/768/dark proof.
+  MCP list/revoke. 0114 is shipped; main session owns security/Opus review,
+  server deploy and signed-in 375/768/dark proof.
   The C# tray app is a separate run. Automatic known and unknown call capture,
   no recording notice and the pairing MCP exception are approved in #072.
-  Review repair stays uncommitted on top of e961108f: call windows/member
-  matching, stuck recording recovery, rolling mic quota, pairing security/audit,
-  batched reads and Settings fixes. No commit, push, migration apply, deploy or
-  secret change in this repair session; migration files remain unchanged.
+  Review repair is committed at 54b14081: call windows/member
+  matching, stuck recording recovery, rolling audio quotas, pairing security/audit,
+  batched reads and Settings fixes. The final security fixes are verified locally;
+  no commit, push, migration apply, deploy or secret change in this session.
+  Migration files remain unchanged.
   See docs/recorder-tray-server-handoff.md and the 2026-10-14 run log.
 - [ ] LP.1 - [BE] Scope changes caught on a call: the suggester proposes a
   change request with the quote, included or billable, cost and days added

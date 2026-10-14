@@ -72,7 +72,7 @@ describe('tray call membership and bounded database reads', () => {
     sqlite.exec(`CREATE TABLE team_members (id TEXT, email TEXT, clerk_user_id TEXT);
       CREATE TABLE integrations (service TEXT, status TEXT, config TEXT);
       CREATE TABLE discovery_calls (id TEXT, title TEXT, scheduled_at TEXT, duration_minutes INTEGER,
-        attendees TEXT, status TEXT, google_meet_url TEXT, created_by_id TEXT);
+        attendees TEXT, status TEXT, google_meet_url TEXT, created_by_id TEXT, google_calendar_event_id TEXT);
       CREATE TABLE scheduled_calls (id TEXT, title TEXT, scheduled_at TEXT, duration_minutes INTEGER,
         attendees TEXT, status TEXT, meeting_url TEXT, created_by_id TEXT);
       INSERT INTO team_members VALUES ('member-liam', 'business@tahi.studio', 'user-liam');
@@ -119,6 +119,15 @@ describe('tray call membership and bounded database reads', () => {
     insertCall('scheduled', 'staci-attending', ['staci@tahi.studio', 'client@example.com'])
     expect((await recorderUpcomingCalls(database, liamAuth, NOW)).map(row => row.id)).toEqual(['liam-calendar'])
     expect((await recorderUpcomingCalls(database, staciAuth, NOW)).map(row => row.id)).toEqual(['staci-attending'])
+  })
+
+  it('does not treat the member who synced a calendar call as a participant', async () => {
+    googleAccount('business@tahi.studio')
+    insertCall('discovery', 'liam-calendar', ['business@tahi.studio', 'client@example.com'], 'user-staci')
+    sqlite.prepare('UPDATE discovery_calls SET google_calendar_event_id = ? WHERE id = ?')
+      .run('google-liam-call', 'liam-calendar')
+    expect(await recorderUpcomingCalls(database, staciAuth, NOW)).toEqual([])
+    expect((await recorderUpcomingCalls(database, liamAuth, NOW)).map(row => row.id)).toEqual(['liam-calendar'])
   })
 
   it('does not treat the connected calendar as proof of attendance when its account is absent', async () => {
