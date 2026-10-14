@@ -1,0 +1,6 @@
+**/bin/
+**/obj/
+.packages/
+.build-home/
+.build-logs/
+publish/

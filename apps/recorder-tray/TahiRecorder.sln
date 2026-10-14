@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TahiRecorder.Core", "TahiRecorder.Core\TahiRecorder.Core.csproj", "{DA99DDAA-E700-48AE-B205-913880E24ED1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TahiRecorder.App", "TahiRecorder.App\TahiRecorder.App.csproj", "{33D04023-18ED-499A-A036-31052DE8C2EC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TahiRecorder.Core.Tests", "TahiRecorder.Core.Tests\TahiRecorder.Core.Tests.csproj", "{4A29AC88-1B2D-42C7-BA04-37C452CD09B6}"
+EndProject
+Global
+  GlobalSection(SolutionConfigurationPlatforms) = preSolution
+    Debug|Any CPU = Debug|Any CPU
+    Release|Any CPU = Release|Any CPU
+  EndGlobalSection
+  GlobalSection(ProjectConfigurationPlatforms) = postSolution
+    {DA99DDAA-E700-48AE-B205-913880E24ED1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {DA99DDAA-E700-48AE-B205-913880E24ED1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {DA99DDAA-E700-48AE-B205-913880E24ED1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {DA99DDAA-E700-48AE-B205-913880E24ED1}.Release|Any CPU.Build.0 = Release|Any CPU
+    {33D04023-18ED-499A-A036-31052DE8C2EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {33D04023-18ED-499A-A036-31052DE8C2EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {33D04023-18ED-499A-A036-31052DE8C2EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {33D04023-18ED-499A-A036-31052DE8C2EC}.Release|Any CPU.Build.0 = Release|Any CPU
+    {4A29AC88-1B2D-42C7-BA04-37C452CD09B6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {4A29AC88-1B2D-42C7-BA04-37C452CD09B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {4A29AC88-1B2D-42C7-BA04-37C452CD09B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {4A29AC88-1B2D-42C7-BA04-37C452CD09B6}.Release|Any CPU.Build.0 = Release|Any CPU
+  EndGlobalSection
+EndGlobal

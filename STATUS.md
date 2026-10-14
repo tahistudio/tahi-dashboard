@@ -1,7 +1,25 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 phases 1 and 1b live per Liam; phase 2 server side committed on feat/rec0-tray-server, 0114 shipped). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (REC.0 server live per Liam; Windows client uncommitted, package and real-call validation pending). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+
+## REC.0 phase 2 Windows client, prepared 2026-10-14
+
+Liam's tray-app brief confirms the server side is live on production at main
+15de17d7. Earlier server preparation notes below remain historical.
+The clean feat/rec0-tray-app worktree now contains the uncommitted .NET 8 Core,
+WinForms host and xUnit projects under apps/recorder-tray. Known-call automatic
+start, twenty-second unknown-call capture, stop/split/pause rules, DPAPI,
+WASAPI two-track capture, visible tray/toast controls and a durable per-device
+outbox are implemented. No dashboard code, commit, push, deploy, pairing,
+secret or production-data change was performed in this client run.
+
+Core restored and built with zero warnings/errors; the separate package-free
+smoke passed 35 checks. App/xUnit dependencies could not restore (NU1301);
+the full build and xUnit run stopped on missing package assets. Main session
+must restore/build/test/publish and verify Windows integration and real calls.
+REC.0 stays open. Build steps and hardware/integration checks are in
+apps/recorder-tray/README.md.
 
 ## REC.0 phase 2 dashboard, prepared 2026-10-14
 

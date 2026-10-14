@@ -1329,3 +1329,40 @@ with --configLoader native. Raw logs: .wrangler/rec0-tray-final-security-type-ch
 .wrangler/rec0-tray-final-security-worker-tsc.log and
 .wrangler/rec0-tray-final-security-vitest.log. Independent source QA found no
 blockers. No UI changes, build or browser/live proof is claimed in this run.
+
+## 2026-10-14, REC.0 Windows tray client, uncommitted on 15de17d7
+
+Started clean on feat/rec0-tray-app at 15de17d7. Liam confirms the phase 2 server
+is live. Read the approved revision 1 spec, exact server handoff, #072 and repo
+sources before building. Added portable .NET 8 Core, required Windows WinForms
+host, solution and 70 authored xUnit cases under apps/recorder-tray.
+Implemented automatic known/twenty-second unknown recording, conservative
+calendar matching, saved Stop/pause, back-to-back splitting, native capture
+process detection, WASAPI mic/default-render loopback, shared-clock WAV padding,
+default-device reconnection, durable crash spool/create/outbox, per-device DPAPI,
+retry/transcription, pairing, tray/startup/single-instance and toast buttons.
+
+Independent QA/UIUX source review passes after repairing ambiguity/start
+boundaries, same-process qualification, physical Stop on storage failures,
+transient reconnect handling, toast blocking, per-device credential binding,
+re-pair job draining and uploaded-body read reconciliation. No audio or token
+is logged. README documents build/publish/pairing/troubleshooting and remaining
+hardware checks. STATUS/TASKS/#072 record preparation without closing REC.0.
+
+Core restore and Release build passed, zero warnings/errors. The separate
+package-free rebuilt Core smoke passed 35 checks, exit 0, not xUnit. NuGet
+restore is blocked by NU1301; App build --no-restore exits 1 with NU1301, and
+dotnet test --no-restore exits 1 with NETSDK1004 (missing test assets). Optional
+workload discovery and user-config access were bypassed using local build env
+paths, without changing SDK or user config. Raw build/test logs and supplemental
+smoke are under ignored apps/recorder-tray/.build-logs. QA's dashboard baseline
+type-check passed; lint stopped on Wrangler proxy spawn EPERM. No dashboard code
+was changed. Full source/test/limit report:
+docs/superpowers/audits/2026-10-14-rec0-tray-app.md.
+
+Main session must restore/build/test/publish with NuGet access and verify real
+Windows pairing/capture/toasts/devices/crash/sleep/revocation and both-sided live
+transcripts. Orphaned server open recordings without local metadata need
+dashboard resolution; local audio stays retained. No executable/xUnit/live
+pass is claimed. All changes remain uncommitted. No commit, push, deploy,
+migration, real pairing/capture, secret or production-data operation occurred.
