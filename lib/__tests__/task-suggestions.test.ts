@@ -368,6 +368,29 @@ describe('snoozePreset', () => {
 })
 
 describe('decideSuggestion', () => {
+  it('approves the stored client and parsed due date through the existing task write path', async () => {
+    const { database } = fakeDb({ task_suggestions: [suggestionRow({ orgId: 'o_elevate', proposal: JSON.stringify({
+      title: 'Send Elevate October invoice', type: 'internal_client_task', orgId: 'o_elevate', dueDate: '2026-10-16', description: '',
+    }) })] })
+    const result = await decideSuggestion(database, 's1', { action: 'approve', force: true }, { actorId: 'tm_liam', via: 'slack' })
+    expect(result?.suggestion.status).toBe('applied')
+    expect(created[0]).toMatchObject({ orgId: 'o_elevate', type: 'internal_client_task', dueDate: '2026-10-16', description: '' })
+  })
+
+  it.each([1, 2])('refuses %s unresolved client choices on every approval surface, including force and an override removing choices', async count => {
+    const unresolved = suggestionRow({ orgId: null, sourceKind: 'note', proposal: JSON.stringify({ title: 'Send invoice',
+      slackClientChoices: [{ id: 'one', name: 'One' }, { id: 'two', name: 'Two' }].slice(0, count),
+    }) })
+    const { database, updated } = fakeDb({ task_suggestions: [unresolved] })
+    for (const via of ['dashboard', 'slack', 'mcp'] as const) {
+      const result = await decideSuggestion(database, 's1', { action: 'approve', force: true, proposalOverride: { title: 'Send invoice' } }, { actorId: 'tm_liam', via })
+      expect(result).toMatchObject({ changed: false, error: 'client_required' })
+    }
+    expect(created).toHaveLength(0)
+    expect(updated).toHaveLength(0)
+    expect(await applySuggestion(database, unresolved as never, CTX)).toMatchObject({ ok: false, error: 'client_required' })
+  })
+
   it('approves a pending row, applies it and stamps the task it created', async () => {
     const { database, updated } = fakeDb({
       task_suggestions: [suggestionRow()],

@@ -8,9 +8,8 @@
  * the same summariser (lib/suggestion-summary.ts): the client and the call,
  * the kind in words, the proposal in one line, the exact words from the call
  * as a quote, who it suggests does it, and the five things a founder can do
- * about it. Approve, Tonight, This week and Reject decide the row; Tweak is a
- * link into the dashboard, because editing a proposal is a screen, not a
- * button.
+ * about it. Approve, Tonight, This week and Reject decide the row. Tweak
+ * opens the dashboard, or reveals the client choices for an ambiguous note.
  *
  * A client's own "Is this the request?" card is NOT this message. It has its
  * own two renderers below (clientDraftMessage and clientDecidedMessage),
@@ -25,6 +24,8 @@
  */
 
 import { publicUrl } from '@/lib/app-url'
+import { asRecord } from '@/lib/suggestion-summary'
+import { clientChoicesFromProposal, MAX_CLIENT_CHOICES } from './note-quality'
 import {
   attachButtonLabel,
   confidenceLabel,
@@ -54,7 +55,7 @@ export interface SlackButtonElement {
 }
 
 export type SlackBlock =
-  | { type: 'section'; text: SlackTextObject }
+  | { type: 'section'; text: SlackTextObject; accessory?: SlackButtonElement }
   | { type: 'context'; elements: SlackTextObject[] }
   | { type: 'actions'; elements: SlackButtonElement[] }
   | { type: 'divider' }
@@ -79,9 +80,10 @@ export type SuggestionActionName =
   | 'snooze_week'
   | 'reject'
   | 'attach'
+  | 'choose_client'
 
 const ACTION_NAMES: readonly SuggestionActionName[] = [
-  'approve', 'approve_anyway', 'tweak', 'snooze_tonight', 'snooze_week', 'reject', 'attach',
+  'approve', 'approve_anyway', 'tweak', 'snooze_tonight', 'snooze_week', 'reject', 'attach', 'choose_client',
 ]
 
 /**
@@ -164,7 +166,8 @@ export function quoteBlock(quote: string, limit = 600): string {
 /** "Nga Motu, Kickoff call, 18 Sep" and whatever of it is known. */
 function headerLine(input: SuggestionMessageInput): string {
   const parts: string[] = []
-  parts.push(input.orgName ? `*${escapeSlackText(input.orgName)}*` : '*Studio*')
+  const choices = clientChoicesFromProposal(input.proposal)
+  parts.push(input.orgName ? `*${escapeSlackText(input.orgName)}*` : choices.length > 0 ? '*Client?*' : '*Studio*')
   if (input.callTitle) parts.push(escapeSlackText(input.callTitle))
   const day = formatCallDay(input.callScheduledAt ?? null)
   if (day) parts.push(day)
@@ -180,6 +183,17 @@ export function formatCallDay(iso: string | null): string | null {
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return null
   return `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}`
+}
+
+/** A due date is a calendar day, never an instant shifted by the Slack user's zone. */
+export function dueDateLine(proposal: unknown): string | null {
+  const record = asRecord(proposal)
+  const dueDate = record.dueDate ?? asRecord(record.fields).dueDate
+  if (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return null
+  const day = new Date(`${dueDate}T00:00:00Z`)
+  if (Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== dueDate) return null
+  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getUTCDay()]
+  return `Due ${weekday} ${day.getUTCDate()} ${MONTHS[day.getUTCMonth()]}`
 }
 
 /** The row a Slack message is built from. Structural, so the decorated row
@@ -223,6 +237,8 @@ export interface SuggestionMessageOptions {
    * that lands somebody on a permission error is worse than no button.
    */
   tweakUrl?: string | null
+  /** Tweak on an unresolved client reveals only the server-derived candidates. */
+  chooseClient?: boolean
 }
 
 /**
@@ -262,6 +278,7 @@ export function suggestionMessage(
   const similar = input.similar ?? []
   const duplicate = options.duplicate === true && similar.length > 0
   const blocks: SlackBlock[] = []
+  const choices = clientChoicesFromProposal(input.proposal)
 
   blocks.push({ type: 'section', text: mrkdwn(headerLine(input)) })
 
@@ -273,6 +290,8 @@ export function suggestionMessage(
   if (target) chip.push(escapeSlackText(target))
   const confidence = confidenceLabel(input.confidence ?? null)
   if (confidence) chip.push(confidence)
+  const due = dueDateLine(input.proposal)
+  if (due) chip.push(due)
   blocks.push({ type: 'context', elements: [mrkdwn(chip.join(' · '))] })
 
   blocks.push({ type: 'section', text: mrkdwn(escapeSlackText(summariseProposal(input.kind, input.proposal))) })
@@ -303,14 +322,16 @@ export function suggestionMessage(
     })
   }
 
-  buttons.push({
+  if (choices.length === 0) buttons.push({
     type: 'button',
     text: plain(duplicate ? 'Approve anyway' : 'Approve'),
     action_id: suggestionActionId(duplicate ? 'approve_anyway' : 'approve', input.id),
     style: 'primary',
   })
   const tweakUrl = options.tweakUrl === undefined ? suggestionTweakUrl(input.id) : options.tweakUrl
-  if (tweakUrl) {
+  if (choices.length > 0) {
+    buttons.push({ type: 'button', text: plain('Tweak'), action_id: suggestionActionId('tweak', input.id), value: 'choose_client' })
+  } else if (tweakUrl) {
     buttons.push({
       type: 'button',
       text: plain('Tweak'),
@@ -323,6 +344,16 @@ export function suggestionMessage(
   buttons.push({ type: 'button', text: plain('Reject'), action_id: suggestionActionId('reject', input.id), style: 'danger' })
 
   blocks.push({ type: 'actions', elements: buttons })
+
+  if (choices.length > 0 && options.chooseClient) {
+    blocks.push({ type: 'context', elements: [mrkdwn('Client? Choose one, then approve the updated card.')] })
+    for (const [index, choice] of choices.slice(0, MAX_CLIENT_CHOICES).entries()) {
+      blocks.push({ type: 'section', text: mrkdwn(escapeSlackText(choice.name)), accessory: {
+        type: 'button', text: plain(`Choose ${index + 1}`),
+        action_id: suggestionActionId('choose_client', input.id), value: choice.id,
+      } })
+    }
+  }
 
   return { text: fallbackText(input), blocks }
 }
@@ -356,9 +387,10 @@ export interface ClientDraftInput {
  * is worse than no button.
  */
 export function clientDraftMessage(input: ClientDraftInput): SlackMessagePayload {
+  const due = dueDateLine(input.proposal)
   const blocks: SlackBlock[] = [
     { type: 'section', text: mrkdwn(input.orgName ? `*${escapeSlackText(input.orgName)}*` : '*Your request*') },
-    { type: 'context', elements: [mrkdwn(escapeSlackText(suggestionKindLabel(input.kind)))] },
+    { type: 'context', elements: [mrkdwn(escapeSlackText([suggestionKindLabel(input.kind), due].filter(Boolean).join(' · ')))] },
     { type: 'section', text: mrkdwn(escapeSlackText(summariseProposal(input.kind, input.proposal))) },
   ]
   if (input.quote.trim()) {

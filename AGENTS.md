@@ -76,6 +76,7 @@
 - **Every list view has loading, empty and populated states**; filters live in a left rail on list pages; headline KPI cards share one anatomy across pages.
 
 ### Commits and docs
+- **Integrations use separate commits.** Integration work lands as explicit commits, never one large merge commit containing code that appears on neither parent (an "evil merge"). Any permission change made during integration or merge resolution gets its own fresh Opus sign-off before it lands, even if the branch already passed review. Record the reviewed commit and outcome in the run log.
 - Commit straight to main after the gate (no pull requests). Subject in plain language, body says why (Ship Studio reads the body as the team feed). Add the trailer your tool's own guidance asks for (Made-With or Co-Authored-By).
 - Update TASKS.md and the run log in the same push as the code; a task flips to `[x]` only with a commit id and a live observation.
 - New or changed emails: run the preview sender (POST /api/admin/emails/preview as Liam) so he sees the design.

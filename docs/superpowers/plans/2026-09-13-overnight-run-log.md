@@ -1609,3 +1609,83 @@ standard esbuild config startup is denied with spawn EPERM. The gate includes
 all touched tests, middleware schedule coverage, currency/shared cash and
 overview regressions. Output: .wrangler/batch-b-review-gates.log. Live yield
 sync, runtime secret confirmation and deployed UI checks remain pending.
+## 2026-10-14, next-20 batch A, uncommitted docs and test handoff
+
+First command confirmed clean git status on chore/next20-n20a at 749b56b4.
+Liam authorised items 10, 13, 14 and 19, with no commit, push or deployment.
+This batch alone edits TASKS.md and STATUS.md while other batches run.
+
+Reconciliation checks source and git history for all 24 inventory contradiction
+rows, plus the duplicate CL.1. TASKS.md and STATUS.md record shipped portions
+and remaining proof consistently; the inventory ends with the evidence and
+resolution for each row. Next-20 items 1 to 7 are done with source/release
+references: 962b184b deployed green on 2026-10-11; items 2 to 7 live at
+6f9f2170 per Liam. Decision #070's connector and REC.0 phases 1/1b/phase 2
+server are live, and 0113/0114 applied, per the supplied confirmations. The
+Windows tray app is built through 93ce4c62, with installed-call proof still
+open. DL.3 external design-project readback and other incomplete live laps
+remain explicit. Historical yield figures are dated, with no current cash
+claim. Files expansion becomes FILES.1, preserving shipped Clerk-delete CL.1.
+
+The Messages-negative e2e assertions already shipped in 2f81243f. Refreshed
+mobile/portal specs now cover Overview, Requests, Files and the More menu,
+with Messages/Services denied by default. Both use the existing tour primer.
+No product behavior changes. The 2026-10-13 8f01919a SQLite invoice-delete
+race tests already cover a payment/status change between read and conditional
+delete. Retained and ran those. Added only missing real-SQLite bulk invoice
+default no-create cases, a linked-customer control, and cron unlinked-summary
+response/logging tests. Independent source QA passed without findings.
+
+AGENTS.md and new Decision #073 require explicit integration commits and a
+fresh Opus sign-off for any merge-time permission change. This is the process
+rule requested by item 19; this batch changes no permissions or integration.
+
+Final fail-closed gate, CI=true, native exit 0:
+    npm run type-check && npm run lint && npm run test -- --run --config .wrangler/vitest-sandbox.config.mjs --configLoader native lib/__tests__/stripe-import-sqlite.test.ts app/api/__tests__/cron-sync-stripe-unlinked.test.ts app/api/__tests__/invoice-ledger-routes.test.ts
+Type-check: zero errors. Lint: zero errors, existing warnings. Ordinary lint
+hits spawn EPERM in the dev Cloudflare proxy; CI=true uses the existing config
+guard to skip that proxy. Standard Vitest hits esbuild spawn EPERM before
+collection; the ignored native sandbox config runs the real tests:
+    Test Files 3 passed (3)
+    Tests 70 passed (70)
+Per-file totals: stripe-import-sqlite 32, cron-sync-stripe-unlinked 3,
+invoice-ledger-routes 35. Raw final log: .wrangler/n20a-final-gate.log.
+
+Playwright listing passes: 14 tests in 2 files for Chromium. Execution of
+the two specs with workers=1 fails with Error: spawn EPERM, before browser
+assertions. Their existing unconditional Clerk-auth skips remain; neither
+listing nor type-check is client-session proof. No new live QA, production
+data read/write, migration apply, secret operation, commit, push or deploy.
+All changes are intentionally left uncommitted. Final git diff --check passes.
+
+## 2026-10-14, Slack bot failed-review repairs (Codex)
+
+Started clean on feat/slack-bot-qa at 5b7990f1, as requested. Repaired the
+seven supplied Opus findings only. Short known queries are start-anchored
+and reject work verbs; arbitrary question marks and leading question words
+no longer swallow notes. Voice uses only known short-query patterns.
+Contact names need two words and contact-only matches require sender
+confirmation, including a single stored choice. Shared approval guards and
+Slack cards enforce that confirmation while retaining current scope checks
+and the conditional pending/proposal/approver/null-org update.
+
+Used Liam's permitted dashboard fallback: "Choose the client in Slack
+(Tweak)". The row stays visible; Approve, dashboard Tweak, keyboard and bulk
+approval respect unresolved choices. A client_required response never
+becomes a success toast. No new dashboard picker or decide action.
+Next weekdays resolve in the following Monday through Sunday studio week;
+client containment is based on actual mention spans. Whole-message thanks
+and greetings are widened, and client welcomes/prompts make no filing promise.
+
+Independent QA and UX source review passed. Fail-closed gate, CI=true,
+native exit 0: type-check zero errors; lint zero errors with existing warnings
+outside changed files; 10 Vitest files and 511 tests passed in 4.60s. Seven
+actual React static-render cases cover inbox guidance/disabled actions.
+Standard Vitest/esbuild and Git Bash startup were sandbox-blocked, so the
+gate used cmd's && chain and the existing native-loader Vitest config.
+Raw log: .wrangler/slack-review-repairs-gate.log. Detailed scope and evidence:
+docs/superpowers/audits/2026-10-14-slack-bot-qa.md.
+
+No commit, push, deploy, migration, manifest, production-data or secret
+operation. No live or browser-render claim, and no backlog item is closed.
+The changed working tree is ready for the main session's re-review.
