@@ -6,6 +6,7 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: (orgId: string | null) => orgId === 'org-tahi',
 }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn().mockResolvedValue(null) }))
+vi.mock('@/lib/internal-route-access', () => ({ requireStudioAdmin: vi.fn().mockResolvedValue(null) }))
 vi.mock('@/lib/db', () => ({ db: vi.fn().mockResolvedValue({}) }))
 vi.mock('@/lib/stripe-key', () => ({ stripeSecretKey: vi.fn().mockReturnValue('sk_test_isolated') }))
 vi.mock('@/lib/cron-runs', () => ({
