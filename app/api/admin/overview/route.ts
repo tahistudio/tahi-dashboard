@@ -15,6 +15,7 @@ import {
 } from '@/lib/overview-aggregates'
 import { computeCashPosition } from '@/lib/cash-position'
 import type { YieldFreshness } from '@/lib/yield-holdings'
+import { fxFreshness, type FxFreshness } from '@/lib/fx-freshness'
 import { elapsedSeconds } from '@/lib/timer-helpers'
 import { loadTaskSuggestionsOverview } from '@/lib/task-suggestions-overview'
 import { readMrrDelta } from '@/lib/mrr-delta'
@@ -24,9 +25,9 @@ export const dynamic = 'force-dynamic'
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 // See lib/currency.ts for the conversion math (tested in lib/__tests__/currency.test.ts)
-async function getRateMap(drizzle: D1): Promise<RateMap> {
+async function getRateMap(drizzle: D1): Promise<{ rateMap: RateMap; rateFreshness: FxFreshness }> {
   const rates = await drizzle.select().from(schema.exchangeRates)
-  return buildRateMap(rates)
+  return { rateMap: buildRateMap(rates), rateFreshness: fxFreshness(rates) }
 }
 
 // ── GET /api/admin/overview ───────────────────────────────────────────────────
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
   const canSeeInvoices = can(access, 'invoices')
 
   // Load exchange rates for currency conversion
-  const rateMap = await getRateMap(drizzle)
+  const { rateMap, rateFreshness } = await getRateMap(drizzle)
 
   // Calculate date 6 months ago for revenue query
   const now = new Date()
@@ -233,13 +234,14 @@ export async function GET(req: NextRequest) {
     monthlySurplusNzd: number
     disposableNzd: number
     yieldFreshness: YieldFreshness
+    fxFreshness: FxFreshness
   } | null = null
   if (canSeeMrr) {
     try {
       // One source for every money card: lib/cash-position.ts. The card used to
       // average three months of Xero P&L here while /financial-reports summed
       // the expense commitments, so the same screen printed two burns.
-      const position = await computeCashPosition(drizzle, { rateMap })
+      const position = await computeCashPosition(drizzle, { rateMap, rateFreshness })
       cash = {
         totalNzd: Math.round(position.totalCashNzd),
         // Gross runway: "if revenue stopped", on cash the IRD bill is already
@@ -249,6 +251,7 @@ export async function GET(req: NextRequest) {
         monthlySurplusNzd: Math.round(position.monthlySurplusNzd),
         disposableNzd: Math.round(position.disposableNzd),
         yieldFreshness: position.yieldFreshness,
+        fxFreshness: position.fxFreshness,
       }
     } catch {
       // Bank balances table missing, so degrade to null.

@@ -90,6 +90,9 @@ const isPublicRoute = createRouteMatcher([
   '/api/admin/integrations/google/sync-calendar(.*)',
   '/api/admin/integrations/google/sync-drive-transcripts(.*)',
   '/api/admin/integrations/airwallex/sync(.*)',
+  // FX refresh checks the cron secret or admin session in its POST handler.
+  // GET still requires a Tahi admin session before returning cached rates.
+  '/api/admin/exchange-rates',
   '/api/admin/overview/brief/refresh(.*)',
   // OAuth callbacks from third-party providers (Google, Xero, etc.) need
   // to bypass Clerk middleware because the cross-origin redirect from

@@ -88,6 +88,26 @@ describe('GET cash-flow forecast with real SQLite', () => {
     expect(db).not.toHaveBeenCalled()
   })
 
+  it('keeps overdue open deals in the current month while respecting delayed recurring starts and future closes', async () => {
+    sqlite.exec(`
+      INSERT INTO deals VALUES
+        ('overdue', 'open', 2200, 2200, 1000, 1000, 100, 100, 'NZD', '2026-08-15', NULL, NULL, NULL, NULL),
+        ('overdue-delayed', 'open', 2200, 2200, 1000, 1000, 100, 100, 'NZD', '2026-09-15', '2026-12-01', NULL, NULL, NULL),
+        ('future', 'open', 2200, 2200, 1000, 1000, 100, 100, 'NZD', '2027-01-15', '2026-09-01', NULL, NULL, NULL);
+    `)
+
+    const response = await GET(request())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      months: [
+        { month: '2026-10', revenuePipeline: 1550 },
+        { month: '2026-11', revenuePipeline: 600 },
+        { month: '2026-12', revenuePipeline: 250 },
+      ],
+      summary: { pipelineBasis: expect.stringContaining('Overdue closes land in the current month') },
+    })
+  })
+
   it('refuses clients before reading money', async () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'client', orgId: 'org-client', sessionId: null })
     expect((await GET(request())).status).toBe(403)

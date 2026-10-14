@@ -24,6 +24,7 @@ export interface PipelineCashFlowDeal extends Pick<DealForMath,
 }
 
 export const PIPELINE_CASH_FLOW_BASIS = 'Weighted upfront at expected close; monthly from recurring start. '
+  + 'Overdue closes land in the current month. '
   + 'Undated closes spread evenly across the forecast window.'
 
 /**
@@ -50,7 +51,12 @@ export function projectPipelineByMonth(
       ? deal.monthlyValueNzd ?? toNzd(deal.monthlyValue ?? 0, currency, rateMap)
       : 0
     const probability = (deal.probability ?? 50) / 100
-    const closeMonth = deal.expectedCloseDate?.slice(0, 7)
+    const expectedCloseMonth = deal.expectedCloseDate?.slice(0, 7)
+    // Open deals with an overdue close are still prospective receipts. Bring
+    // their close into the current month without backfilling recurring arrears.
+    const closeMonth = expectedCloseMonth && expectedCloseMonth < monthKeys[0]
+      ? monthKeys[0]
+      : expectedCloseMonth
     const hasRecurringDate = deal.recurringStartDate || deal.engagementEndDate || deal.closedAt || deal.expectedCloseDate
     const recurringMonth = hasRecurringDate
       ? resolveRecurringStart({ ...deal, stageId: '' }, new Date(`${monthKeys[0]}-01T00:00:00.000Z`)).toISOString().slice(0, 7)

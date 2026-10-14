@@ -27,6 +27,7 @@ import { sql } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { aggregateCashNzd } from '@/lib/overview-aggregates'
 import { readYieldFreshness, type YieldFreshness } from '@/lib/yield-holdings'
+import { fxFreshness, type FxFreshness } from '@/lib/fx-freshness'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -134,6 +135,8 @@ export { formatCompactNzd, cashFlowBasisLine } from '@/lib/cash-flow-basis'
 export interface CashPositionOptions {
   /** Reuse an already-built FX rate map instead of re-reading exchange_rates. */
   rateMap?: RateMap
+  /** Freshness of the same rows used to build the supplied map. */
+  rateFreshness?: FxFreshness
 }
 
 /**
@@ -146,16 +149,19 @@ export interface CashPositionOptions {
 export async function computeCashPosition(
   database: D1,
   options: CashPositionOptions = {},
-): Promise<CashPosition & { yieldFreshness: YieldFreshness }> {
+): Promise<CashPosition & { yieldFreshness: YieldFreshness; fxFreshness: FxFreshness }> {
   let rateMap = options.rateMap
-  if (!rateMap) {
+  let rateFreshness = options.rateFreshness
+  if (!rateMap || !rateFreshness) {
     try {
-      const rates = await database.all<{ currency: string; rateToUsd: number }>(
-        sql`SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates`
+      const rates = await database.all<{ currency: string; rateToUsd: number; updatedAt: string | null }>(
+        sql`SELECT currency, rate_to_usd AS rateToUsd, updated_at AS updatedAt FROM exchange_rates`
       )
-      rateMap = buildRateMap((rates ?? []).map(r => ({ currency: r.currency, rateToUsd: Number(r.rateToUsd) })))
+      rateMap ??= buildRateMap((rates ?? []).map(r => ({ currency: r.currency, rateToUsd: Number(r.rateToUsd) })))
+      rateFreshness = fxFreshness(rates ?? [])
     } catch {
-      rateMap = buildRateMap([])
+      rateMap ??= buildRateMap([])
+      rateFreshness = fxFreshness([])
     }
   }
   const rates = rateMap
@@ -191,7 +197,7 @@ export async function computeCashPosition(
     recurringBurnNzd,
     projectRunRateNzd: projectRow,
     retainerMrrNzd: mrrRow,
-  }), yieldFreshness }
+  }), yieldFreshness, fxFreshness: rateFreshness }
 }
 
 type ToNzd = (amount: number, currency: string | null) => number

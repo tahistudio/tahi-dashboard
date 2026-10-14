@@ -37,6 +37,8 @@ import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { convertToNzd } from '@/lib/currency'
 import type { YieldFreshness } from '@/lib/yield-holdings'
+import type { FxFreshness } from '@/lib/fx-freshness'
+import { FxFreshnessWarning } from '@/components/tahi/fx-freshness-warning'
 
 interface SummaryResponse {
   asOf: string
@@ -45,6 +47,7 @@ interface SummaryResponse {
    *  Watchlist strip when older than 7 days. */
   bankSyncedAt: string | null
   yieldFreshness?: YieldFreshness
+  fxFreshness?: FxFreshness
   primaryCurrency: string
   bankBalances: Array<{ currency: string; available: number; total: number; sources: string[] }>
   reserves: {
@@ -354,6 +357,8 @@ export function FinancialReportsContent() {
           Reload
         </TahiButton>
       </PageHeader>
+
+      <FxFreshnessWarning freshness={data.fxFreshness} convertsNative />
 
       {/* ── Hero band: Where you stand right now ─────────────────────
           Two side-by-side FeatureCards. Left summarises cash and the

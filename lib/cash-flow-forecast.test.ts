@@ -42,11 +42,23 @@ describe('projectPipelineByMonth', () => {
       .toEqual({ '2026-10': 0, '2026-11': 550, '2026-12': 50 })
   })
 
-  it('includes only in-window recurring receipts when close was before the window', () => {
+  it('places overdue upfront receipts in the current month without backfilling recurring arrears', () => {
     expect(projectPipelineByMonth([deal({ expectedCloseDate: '2026-09-01' })], months, rates))
-      .toEqual({ '2026-10': 50, '2026-11': 50, '2026-12': 50 })
+      .toEqual({ '2026-10': 550, '2026-11': 50, '2026-12': 50 })
+  })
+
+  it('preserves delayed recurring starts for overdue closes', () => {
+    expect(projectPipelineByMonth([deal({
+      expectedCloseDate: '2026-09-01', recurringStartDate: '2026-12-01',
+    })], months, rates)).toEqual({ '2026-10': 500, '2026-11': 0, '2026-12': 50 })
+  })
+
+  it('keeps future closes outside the forecast window out of upfront and recurring receipts', () => {
     expect(projectPipelineByMonth([deal({ expectedCloseDate: '2027-01-01' })], months, rates))
       .toEqual({ '2026-10': 0, '2026-11': 0, '2026-12': 0 })
+    expect(projectPipelineByMonth([deal({
+      expectedCloseDate: '2027-01-01', recurringStartDate: '2026-09-01',
+    })], months, rates)).toEqual({ '2026-10': 0, '2026-11': 0, '2026-12': 0 })
   })
 
   it('spreads undated closes evenly, with recurring revenue accumulating as those closes occur', () => {

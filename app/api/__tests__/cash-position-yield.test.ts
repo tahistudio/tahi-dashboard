@@ -61,12 +61,14 @@ describe('cash position and bank balances share yield truth, synthetic SQLite fi
       const position = await computeCashPosition(fixture.database)
       expect(position.totalCashNzd).toBe(800)
       expect(position.yieldFreshness).toMatchObject({ stale: true, ageDays: 31 })
+      expect(position.fxFreshness).toMatchObject({ stale: true, ageDays: 31 })
       const response = await GET(new NextRequest('http://localhost/api/admin/reports/bank-balances'))
       expect(response.status).toBe(200)
-      const body = await response.json() as { totalBalanceNzd: number; accounts: Array<{ source: string }>; yieldFreshness: unknown }
+      const body = await response.json() as { totalBalanceNzd: number; accounts: Array<{ source: string }>; yieldFreshness: unknown; fxFreshness: unknown }
       expect(body.totalBalanceNzd).toBe(position.totalCashNzd)
       expect(body.accounts.map(account => account.source).sort()).toEqual(['airwallex', 'airwallex_yield'])
       expect(body.yieldFreshness).toEqual(position.yieldFreshness)
+      expect(body.fxFreshness).toEqual(position.fxFreshness)
       expect(fixture.queries.some(query => query.includes('from "xero_bank_balances"'))).toBe(false)
     } finally { fixture.close() }
   })

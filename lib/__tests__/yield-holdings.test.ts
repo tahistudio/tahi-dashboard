@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/xero', () => ({ callXeroAPIOrThrow: vi.fn() }))
 import { callXeroAPIOrThrow } from '@/lib/xero'
 import { parseXeroYieldHoldings, readXeroYieldHoldings, yieldFreshness } from '@/lib/yield-holdings'
+import {
+  LIVE_YIELD_AUD_ID, LIVE_YIELD_USD_ID, liveXeroYieldAccounts, liveXeroYieldOrganisation, liveXeroYieldSummary,
+} from './fixtures/xero-yield'
 
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
 
@@ -27,6 +30,17 @@ function summary(rows = [row('AWX_Yield_USD', '31,234.56', 'yield-usd'), row('AW
 }
 
 describe('Xero AWX Yield source, synthetic report fixtures', () => {
+  it('reads the live account suffixes and sixth-column NZD closing balances without another FX conversion', () => {
+    const result = parseXeroYieldHoldings(liveXeroYieldAccounts, liveXeroYieldOrganisation, liveXeroYieldSummary())
+    expect(result).toEqual({
+      ok: true, currencyBasis: 'NZD', holdings: [
+        { currency: 'NZD', amount: 44689.56, sourceAccountId: LIVE_YIELD_USD_ID, sourceAccountCurrency: 'USD' },
+        { currency: 'NZD', amount: 666.77, sourceAccountId: LIVE_YIELD_AUD_ID, sourceAccountCurrency: 'AUD' },
+      ],
+    })
+    if (result.ok) expect(result.holdings.reduce((sum, holding) => sum + holding.amount, 0)).toBeCloseTo(45356.33, 2)
+  })
+
   it('keeps exact closing balances in report base currency and excludes wallet accounts', () => {
     expect(parseXeroYieldHoldings(accounts, organisation, summary())).toEqual({
       ok: true, currencyBasis: 'NZD', holdings: [
@@ -48,6 +62,35 @@ describe('Xero AWX Yield source, synthetic report fixtures', () => {
     }
     expect(parseXeroYieldHoldings({ Accounts: [...accounts.Accounts, accounts.Accounts[0]] }, organisation, summary()).ok).toBe(false)
     expect(parseXeroYieldHoldings({ Accounts: [accounts.Accounts[0]] }, organisation, summary()).ok).toBe(false)
+    expect(parseXeroYieldHoldings({ Accounts: [...accounts.Accounts,
+      { ...accounts.Accounts[0], AccountID: 'another-usd', Name: 'Another provider Yield USD' },
+    ] }, organisation, summary()).ok).toBe(false)
+    // A matching suffix in another currency is not a second candidate.
+    expect(parseXeroYieldHoldings({ Accounts: [...accounts.Accounts,
+      { ...accounts.Accounts[0], AccountID: 'wrong-currency', CurrencyCode: 'NZD' },
+    ] }, organisation, summary()).ok).toBe(true)
+  })
+
+  it('accepts optional pinned AccountIDs while preserving bank status, currency and uniqueness checks', () => {
+    const renamed = { Accounts: accounts.Accounts.map(account => account.CurrencyCode === 'USD'
+      ? { ...account, Name: 'Renamed investment account' }
+      : account) }
+    expect(parseXeroYieldHoldings(renamed, organisation, summary(), { USD: 'yield-usd' }).ok).toBe(true)
+    expect(parseXeroYieldHoldings({ Accounts: [...accounts.Accounts, { ...accounts.Accounts[0], AccountID: 'another-usd' }] },
+      organisation, summary(), { USD: 'yield-usd', AUD: 'yield-aud' }).ok).toBe(true)
+    expect(parseXeroYieldHoldings({ Accounts: [...accounts.Accounts, accounts.Accounts[0]] },
+      organisation, summary(), { USD: 'yield-usd' }).ok).toBe(false)
+    for (const patch of [{ Status: 'ARCHIVED' }, { CurrencyCode: 'NZD' }, { Type: 'CURRENT' }]) {
+      expect(parseXeroYieldHoldings({ Accounts: [{ ...accounts.Accounts[0], ...patch }, accounts.Accounts[1]] },
+        organisation, summary(), { USD: 'yield-usd' }).ok).toBe(false)
+    }
+  })
+
+  it('fails closed on malformed or unresolved pins instead of falling back to automatic matching', () => {
+    for (const override of [null, [], 'yield-usd', { USD: '' }, { USD: ' yield-usd' }, { USD: 1 },
+      { USD: 'missing' }, { USD: 'yield-aud' }, { NZD: 'wallet' }, { USD: 'yield-usd', AUD: 'yield-usd' }]) {
+      expect(parseXeroYieldHoldings(accounts, organisation, summary(), override).ok).toBe(false)
+    }
   })
 
   it('does not fall back to a yield name when its report identity points at a wallet', () => {
@@ -102,6 +145,15 @@ describe('yield freshness', () => {
 
 describe('bounded Xero yield read', () => {
   const now = '2026-10-14T18:00:00.000Z'
+
+  it('refuses invalid settings JSON or pins before reading Xero', async () => {
+    for (const setting of ['not json', 'null', '{"USD":""}', '{"USD":"yield-usd","AUD":"yield-usd"}', null]) {
+      expect(await readXeroYieldHoldings(now, setting)).toMatchObject({
+        ok: false, warning: expect.stringContaining('the yield account ID override is invalid'),
+      })
+    }
+    expect(callXeroAPIOrThrow).not.toHaveBeenCalled()
+  })
 
   it('returns a retention warning on a stalled read and stops later requests after a late response', async () => {
     vi.useFakeTimers()

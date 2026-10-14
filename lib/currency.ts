@@ -134,6 +134,7 @@ export function resolvePinnedCurrency(
 export interface ExchangeRate {
   currency: string
   rateToUsd: number
+  updatedAt?: string | null
 }
 
 export type RateMap = Record<string, number>

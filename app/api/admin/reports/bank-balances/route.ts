@@ -7,6 +7,7 @@ import { desc, gte } from 'drizzle-orm'
 import { buildRateMap, toNzd } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import { readYieldFreshness } from '@/lib/yield-holdings'
+import { fxFreshness } from '@/lib/fx-freshness'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -47,7 +48,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const rateMap = buildRateMap(await drizzle.select().from(schema.exchangeRates))
+  const rateRows = await drizzle.select().from(schema.exchangeRates)
+  const rateMap = buildRateMap(rateRows)
+  const rateFreshness = fxFreshness(rateRows)
 
   const [airwallexRows, yieldFreshness] = await Promise.all([
     drizzle.select().from(schema.airwallexBalances),
@@ -78,6 +81,7 @@ export async function GET(req: NextRequest) {
       runwayMonths: null,
       lastSyncedAt: null,
       yieldFreshness,
+      fxFreshness: rateFreshness,
     })
   }
 
@@ -121,5 +125,6 @@ export async function GET(req: NextRequest) {
     runwayMonths,
     lastSyncedAt,
     yieldFreshness,
+    fxFreshness: rateFreshness,
   })
 }

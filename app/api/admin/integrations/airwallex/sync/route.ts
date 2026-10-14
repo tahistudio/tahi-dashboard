@@ -23,7 +23,7 @@ import { eq, inArray, like, sql } from 'drizzle-orm'
 import { listBalances, listTransactions, AirwallexNotConfiguredError, getAirwallexToken } from '@/lib/airwallex'
 import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { recordYieldHeld, YIELD_HOLDINGS_KEY } from '@/lib/yield-history'
-import { readXeroYieldHoldings, type YieldReadResult } from '@/lib/yield-holdings'
+import { readXeroYieldHoldings, YIELD_ACCOUNT_IDS_KEY, type YieldReadResult } from '@/lib/yield-holdings'
 
 export const dynamic = 'force-dynamic'
 
@@ -187,12 +187,15 @@ export async function POST(req: NextRequest) {
     // BACKFILL and the Xero drift check both exclude 'yield:' rows by key,
     // and the first holding any sync sees is recorded in
     // finance.yieldFirstHeldAt, which nothing clears.
-    const [savedYieldSetting] = await database
-      .select({ value: schema.settings.value, updatedAt: schema.settings.updatedAt })
+    const yieldSettings = await database
+      .select({ key: schema.settings.key, value: schema.settings.value, updatedAt: schema.settings.updatedAt })
       .from(schema.settings)
-      .where(eq(schema.settings.key, YIELD_HOLDINGS_KEY))
-      .limit(1)
-    yieldRefresh = await readXeroYieldHoldings(nowIso)
+      .where(inArray(schema.settings.key, [YIELD_HOLDINGS_KEY, YIELD_ACCOUNT_IDS_KEY]))
+    const savedYieldSetting = yieldSettings.find(setting => setting.key === YIELD_HOLDINGS_KEY)
+    // finance.yieldAccountIds may pin USD and/or AUD IDs when account names change.
+    // A malformed pin retains the last good holdings rather than selecting another account.
+    const pinnedAccounts = yieldSettings.find(setting => setting.key === YIELD_ACCOUNT_IDS_KEY)
+    yieldRefresh = await readXeroYieldHoldings(nowIso, pinnedAccounts?.value)
     const yieldSetting = yieldRefresh.ok
       ? { value: JSON.stringify(yieldRefresh.holdings), updatedAt: nowIso }
       : savedYieldSetting

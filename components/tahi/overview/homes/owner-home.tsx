@@ -28,6 +28,8 @@ import { usePermissions } from '@/components/tahi/permissions-context'
 import { stageColour } from '@/lib/chart-colors'
 import { cashFlowBasisLine } from '@/lib/cash-flow-basis'
 import type { YieldFreshness } from '@/lib/yield-holdings'
+import type { FxFreshness } from '@/lib/fx-freshness'
+import { FxFreshnessWarning } from '@/components/tahi/fx-freshness-warning'
 import {
   buildPipelineStageChart,
   type ClosingSplit,
@@ -104,6 +106,7 @@ interface CashBlock {
   /** Cash free to spend once IRD and the other reserve pots are honoured. */
   disposableNzd?: number
   yieldFreshness?: YieldFreshness
+  fxFreshness?: FxFreshness
 }
 
 interface ArAging {
@@ -474,7 +477,12 @@ function VitalsStrip({
       num: cash ? moneyCompact(cash.totalNzd) : '·',
       muted: !cash,
       bar: cashBar,
-      sub: runway != null ? `${runway.toFixed(1)} months runway` : 'runway not available',
+      sub: (
+        <div style={{ display: 'block', minWidth: 0 }}>
+          {runway != null ? `${runway.toFixed(1)} months runway` : 'runway not available'}
+          {cash && <FxFreshnessWarning freshness={cash.fxFreshness} />}
+        </div>
+      ),
     },
     {
       lbl: 'Owed',
@@ -897,6 +905,7 @@ function CashRunway({
               {cash.yieldFreshness.warning}
             </p>
           )}
+          <FxFreshnessWarning freshness={cash.fxFreshness} />
           <HorizonStrip runway={cash.runwayMonths} />
         </>
       )}
@@ -907,6 +916,7 @@ function CashRunway({
 interface CashFlowData {
   months?: { month: string; net: number }[]
   summary?: { basis?: string; recurringMrrNzd?: number; projectRunRateNzd?: number }
+  fxFreshness?: FxFreshness
 }
 function CashFlowRibbon({ go }: { go: (id: string) => void }) {
   const { moneyCompact } = useOvFormat()
@@ -937,6 +947,7 @@ function CashFlowRibbon({ go }: { go: (id: string) => void }) {
       ) : (
         <>
           {basis && <div className="ov-mini" style={{ marginBottom: 10 }}>{basis}</div>}
+          <FxFreshnessWarning freshness={data.fxFreshness} />
           <Ribbon
             data={months.map(m => m.net)}
             labels={months.map(m => shortMonth(m.month))}

@@ -26,6 +26,7 @@ import { draftStatusList, issuedStatusList, owedStatusList } from '@/lib/invoice
 import { derivePosition } from '@/lib/cash-position'
 import { readYieldFreshness } from '@/lib/yield-holdings'
 import { computeWalletForex } from '@/lib/wallet-forex'
+import { fxFreshness } from '@/lib/fx-freshness'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -134,8 +135,8 @@ export async function GET(req: NextRequest) {
         AND custom_mrr > 0
     `),
     // FX rates
-    database.all<{ currency: string; rateToUsd: number }>(sql`
-      SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates
+    database.all<{ currency: string; rateToUsd: number; updatedAt: string | null }>(sql`
+      SELECT currency, rate_to_usd AS rateToUsd, updated_at AS updatedAt FROM exchange_rates
     `),
     // active projects
     database
@@ -829,6 +830,7 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
+    fxFreshness: fxFreshness(fxRows),
     asOf: nowIso,
     bankSyncedAt,
     yieldFreshness,

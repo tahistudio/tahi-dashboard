@@ -25,7 +25,7 @@ export const cronToTargets: Record<string, string[]> = {
   '0 19 * * *': ['daily-summary', 'ai-briefing', 'overview-brief'],
   '0 20 * * *': ['daily-summary', 'ai-briefing', 'overview-brief'],
   '0 19 * * MON': ['affiliate-reactivation'],
-  '0 18 * * *': ['sync-airwallex', 'snapshot-metrics'],
+  '0 18 * * *': ['refresh-exchange-rates', 'sync-airwallex', 'snapshot-metrics'],
   '0 21 * * MON': ['finance-anomaly-scan'],
   '0 21 1 * *': ['finance-anomaly-scan'],
   '0 22 * * SUN': ['content-auto-backfill'],
@@ -50,6 +50,7 @@ const SPECIAL_TARGET_PATHS: Record<string, string> = {
   // quietly 404 it.
   'suggest-from-transcripts': 'crons/suggest-from-transcripts',
   'sync-airwallex': 'integrations/airwallex/sync',
+  'refresh-exchange-rates': 'exchange-rates',
   'ai-briefing': 'ai/briefing/cron',
   'overview-brief': 'overview/brief/refresh',
 }

@@ -44,6 +44,7 @@ import {
   DISPLAY_CURRENCIES,
 } from '@/lib/currency'
 import { apiPath } from '@/lib/api'
+import { fxFreshness as getFxFreshness, type FxFreshness } from '@/lib/fx-freshness'
 
 /**
  * Re-exported for the client components that already read them from here.
@@ -86,6 +87,7 @@ interface DisplayCurrencyContextValue {
   pinnedCurrency: CurrencyCode | null
   /** Whether exchange rates have been loaded. `false` = using fallback (unconverted). */
   ratesLoaded: boolean
+  fxFreshness: FxFreshness
   /** Raw rates array, in case a consumer needs the canonical data. */
   exchangeRates: ExchangeRate[]
   /** Pre-built rate map for aggregation loops. */
@@ -256,12 +258,14 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
     return formatCurrencyBase(toDisplay(amountNzd), displayCurrency)
   }, [toDisplay, displayCurrency, pinnedCode])
 
+  const fxFreshness = getFxFreshness(exchangeRates)
   const value = useMemo<DisplayCurrencyContextValue>(() => ({
     displayCurrency,
     setDisplayCurrency,
     isPinned: pinnedCode !== null,
     pinnedCurrency: pinnedCode,
     ratesLoaded,
+    fxFreshness,
     exchangeRates,
     rateMap,
     toDisplay,
@@ -270,7 +274,7 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
     formatNativeWithDisplay,
     options: DISPLAY_CURRENCIES,
     allCurrencies: SUPPORTED_CURRENCIES,
-  }), [displayCurrency, setDisplayCurrency, pinnedCode, ratesLoaded, exchangeRates, rateMap, toDisplay, format, formatNative, formatNativeWithDisplay])
+  }), [displayCurrency, setDisplayCurrency, pinnedCode, ratesLoaded, fxFreshness, exchangeRates, rateMap, toDisplay, format, formatNative, formatNativeWithDisplay])
 
   return <DisplayCurrencyContext.Provider value={value}>{children}</DisplayCurrencyContext.Provider>
 }
@@ -292,6 +296,7 @@ export function useDisplayCurrency(): DisplayCurrencyContextValue {
     isPinned: false,
     pinnedCurrency: null,
     ratesLoaded: false,
+    fxFreshness: getFxFreshness([]),
     exchangeRates: [],
     rateMap: { NZD: 1 },
     toDisplay: (n) => n,

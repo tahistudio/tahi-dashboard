@@ -8,6 +8,10 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 const DAY_MS = 86_400_000
 const MAX_AGE_DAYS = 30
 const YIELD_READ_TIMEOUT_MS = 15_000
+export const YIELD_ACCOUNT_IDS_KEY = 'finance.yieldAccountIds'
+
+type YieldCurrency = 'USD' | 'AUD'
+type YieldAccountIds = Partial<Record<YieldCurrency, string>>
 
 export interface YieldHolding {
   currency: string
@@ -34,14 +38,32 @@ function unreadable(reason: string): YieldReadResult {
   return { ok: false, warning: `Xero AWX Yield accounts could not be refreshed: ${reason}. Saved yield holdings were retained.` }
 }
 
+/** Optional pins replace name matching, while account status, type and currency remain mandatory. */
+function accountIdsOverride(value: unknown): YieldAccountIds | null {
+  if (value === undefined) return {}
+  const ids = record(value)
+  if (!ids || Object.keys(ids).some(key => key !== 'USD' && key !== 'AUD')) return null
+  const result: YieldAccountIds = {}
+  for (const currency of ['USD', 'AUD'] as const) {
+    if (!(currency in ids)) continue
+    const id = ids[currency]
+    if (typeof id !== 'string' || !id.trim() || id !== id.trim()) return null
+    result[currency] = id
+  }
+  if (result.USD && result.USD === result.AUD) return null
+  return result
+}
+
 /**
  * BankSummary's closing balances are in the organisation's BASE currency,
  * even for USD/AUD bank accounts. Keep that currency on the saved amount:
  * never relabel a revalued NZD figure as USD or reverse it with today's FX.
- * Only the two documented account identities are admitted. A partial or
+ * Admit the currency-specific yield suffix or an explicitly pinned ID. A partial or
  * ambiguous response must not clear a real holding or refresh its age.
  */
-export function parseXeroYieldHoldings(accountsData: unknown, organisationData: unknown, reportData: unknown): YieldReadResult {
+export function parseXeroYieldHoldings(accountsData: unknown, organisationData: unknown, reportData: unknown, pinnedAccountIds?: unknown): YieldReadResult {
+  const overrides = accountIdsOverride(pinnedAccountIds)
+  if (!overrides) return unreadable('the yield account ID override is invalid')
   const organisations = record(organisationData)?.Organisations
   const baseCurrency = Array.isArray(organisations) && organisations.length === 1
     ? record(organisations[0])?.BaseCurrency
@@ -53,8 +75,12 @@ export function parseXeroYieldHoldings(accountsData: unknown, organisationData: 
   if (!Array.isArray(accounts)) return unreadable('the account list is unavailable')
   const selected: Array<{ id: string; name: string; currency: 'USD' | 'AUD' }> = []
   for (const currency of ['USD', 'AUD'] as const) {
+    const pinnedId = overrides[currency]
     const matches = accounts.map(record).filter(a => a?.Status === 'ACTIVE'
-      && a.Type === 'BANK' && nameKey(a.Name) === `AWX_YIELD_${currency}`)
+      && a.Type === 'BANK' && a.CurrencyCode === currency
+      && (pinnedId !== undefined
+        ? a.AccountID === pinnedId
+        : new RegExp(`(^|_)YIELD_${currency}$`).test(nameKey(a.Name))))
     const account = matches[0]
     if (matches.length !== 1 || !account || typeof account.AccountID !== 'string' || !account.AccountID
       || account.CurrencyCode !== currency || typeof account.Name !== 'string') {
@@ -120,7 +146,14 @@ export function parseXeroYieldHoldings(accountsData: unknown, organisationData: 
 }
 
 /** Read through the existing Xero client. The sync materialises both accounts before saving their timestamp. */
-export async function readXeroYieldHoldings(nowIso: string): Promise<YieldReadResult> {
+export async function readXeroYieldHoldings(nowIso: string, accountIdsSetting?: string | null): Promise<YieldReadResult> {
+  let pinnedAccountIds: unknown
+  try {
+    pinnedAccountIds = accountIdsSetting === undefined ? undefined : JSON.parse(accountIdsSetting ?? 'null') as unknown
+  } catch {
+    return unreadable('the yield account ID override is invalid')
+  }
+  if (!accountIdsOverride(pinnedAccountIds)) return unreadable('the yield account ID override is invalid')
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<never>((_, reject) => {
@@ -144,7 +177,7 @@ export async function readXeroYieldHoldings(nowIso: string): Promise<YieldReadRe
       checkDeadline()
       const report = await callXeroAPIOrThrow<unknown>('GET', `/Reports/BankSummary?fromDate=${nowIso.slice(0, 7)}-01&toDate=${nowIso.slice(0, 10)}`, undefined, options)
       checkDeadline()
-      return parseXeroYieldHoldings(accounts, organisation, report)
+      return parseXeroYieldHoldings(accounts, organisation, report, pinnedAccountIds)
     }
     return await Promise.race([read(), deadline])
   } catch {

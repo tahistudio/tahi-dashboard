@@ -7,6 +7,7 @@ import { sql, eq, and } from 'drizzle-orm'
 import { buildRateMap, toNzd } from '@/lib/currency'
 import { assembleForecastMonths, PIPELINE_CASH_FLOW_BASIS, projectPipelineByMonth } from '@/lib/cash-flow-forecast'
 import { cashFlowBasisLine, computeCashPosition } from '@/lib/cash-position'
+import { fxFreshness } from '@/lib/fx-freshness'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -46,7 +47,8 @@ export async function GET(req: NextRequest) {
   const months = Math.max(1, Math.min(24, parseInt(url.searchParams.get('months') ?? '6', 10)))
 
   const drizzle = (await db()) as D1
-  const rateMap = buildRateMap(await drizzle.select().from(schema.exchangeRates))
+  const rateRows = await drizzle.select().from(schema.exchangeRates)
+  const rateMap = buildRateMap(rateRows)
 
   // Build the list of month keys from now forward: current + N-1 future months
   const now = new Date()
@@ -276,7 +278,7 @@ export async function GET(req: NextRequest) {
   // ── Project run-rate ────────────────────────────────────
   // Trailing five months of non-retainer invoiced revenue, per month, from the
   // same source the finance page and the studio home read.
-  const position = await computeCashPosition(drizzle, { rateMap })
+  const position = await computeCashPosition(drizzle, { rateMap, rateFreshness: fxFreshness(rateRows) })
   const projectRunRateNzd = position.projectRunRateNzd
 
   // ── Assemble monthly forecast ─────────────────────────────
@@ -300,6 +302,7 @@ export async function GET(req: NextRequest) {
     : 0
 
   return NextResponse.json({
+    fxFreshness: position.fxFreshness,
     months: monthlyRows,
     summary: {
       totalRevenue,

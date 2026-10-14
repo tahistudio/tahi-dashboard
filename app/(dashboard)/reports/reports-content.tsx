@@ -21,6 +21,8 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { SectionTabs } from '@/components/tahi/section-tabs'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
+import type { FxFreshness } from '@/lib/fx-freshness'
+import { FxFreshnessWarning } from '@/components/tahi/fx-freshness-warning'
 
 // ── Currency options ─────────────────────────────────────────────────────────
 
@@ -77,24 +79,27 @@ export function ReportsContent() {
   const { displayCurrency } = useDisplayCurrency()
 
   // Exchange rates for currency conversion. The response is an array we reshape
-  // into a {currency: rate} map, so use an inline fetcher; the cache value is
-  // the final map. Falls back to { NZD: 1 } when the request fails.
-  const { data: exchangeRatesData } = useSWR<Record<string, number>>(
+  // into a {currency: rate} map and retain freshness for the same cached rates.
+  // Falls back to { NZD: 1 } when the request fails.
+  const { data: exchangeRatesData } = useSWR<{ rates: Record<string, number>; fxFreshness?: FxFreshness }>(
     '/api/admin/exchange-rates',
     async () => {
       const r = await fetch(apiPath('/api/admin/exchange-rates'))
       if (!r.ok) throw new Error('Failed')
-      const d = await r.json() as { rates: Array<{ currency: string; rateToNzd: number }> }
+      const d = await r.json() as {
+        rates: Array<{ currency: string; rateToNzd: number }>
+        fxFreshness?: FxFreshness
+      }
       const rateMap: Record<string, number> = { NZD: 1 }
       if (Array.isArray(d.rates)) {
         for (const rate of d.rates) {
           if (rate.currency && rate.rateToNzd) rateMap[rate.currency] = rate.rateToNzd
         }
       }
-      return rateMap
+      return { rates: rateMap, fxFreshness: d.fxFreshness }
     },
   )
-  const exchangeRates = exchangeRatesData ?? { NZD: 1 }
+  const exchangeRates = exchangeRatesData?.rates ?? { NZD: 1 }
 
   const { data, isLoading: loading, error: overviewErr, mutate } =
     useSWR<ReportData>('/api/admin/reports/overview')
@@ -433,7 +438,7 @@ export function ReportsContent() {
       <div id="commitments" className="scroll-mt-20"><CommitmentsSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
 
       {/* Cash Flow Forecast (T599-T600): combined revenue + cost forward view */}
-      <div id="cash-flow" className="scroll-mt-20"><CashFlowForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} /></div>
+      <div id="cash-flow" className="scroll-mt-20"><CashFlowForecastSection displayCurrency={displayCurrency} exchangeRates={exchangeRates} localRateFreshness={exchangeRatesData?.fxFreshness} /></div>
 
       {/* Team Utilization (T605) */}
       <div id="utilization" className="scroll-mt-20"><UtilizationSection /></div>
@@ -2422,6 +2427,7 @@ interface CashFlowMonth {
 }
 interface CashFlowData {
   months: CashFlowMonth[]
+  fxFreshness?: FxFreshness
   summary: {
     totalRevenue: number
     totalCost: number
@@ -2434,7 +2440,9 @@ interface CashFlowData {
   }
 }
 
-function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyProps) {
+function CashFlowForecastSection({ displayCurrency, exchangeRates, localRateFreshness }: CurrencyProps & {
+  localRateFreshness?: FxFreshness
+}) {
   const { data, isLoading: loading } = useSWR<CashFlowData>('/api/admin/reports/cash-flow-forecast?months=6')
 
   if (loading) {
@@ -2471,6 +2479,11 @@ function CashFlowForecastSection({ displayCurrency, exchangeRates }: CurrencyPro
           </p>
         </div>
       </div>
+      <FxFreshnessWarning freshness={data.fxFreshness?.stale
+        ? data.fxFreshness
+        : displayCurrency !== 'NZD' && localRateFreshness?.stale
+          ? localRateFreshness
+          : data.fxFreshness} />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MiniMetric label="Projected revenue" value={formatInCur(data.summary.totalRevenue, displayCurrency, exchangeRates)} colour="var(--color-brand)" />
         <MiniMetric label="Project run-rate / mo" value={formatInCur(data.summary.projectRunRateNzd ?? 0, displayCurrency, exchangeRates)} colour="var(--color-brand)" />
