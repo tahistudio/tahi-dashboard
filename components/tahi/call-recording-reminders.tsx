@@ -24,6 +24,7 @@ async function fetchCalls<T>(path: string, signal: AbortSignal): Promise<T[]> {
 /** Only prompts. Capture still requires Record call and browser permissions. */
 export function CallRecordingReminders({ identity }: { identity: CallReminderIdentity | null }) {
   const pathname = usePathname()
+  const recorderPage = pathname.replace(/\/$/, '').endsWith('/calls/record')
   const { isImpersonatingClient } = useImpersonation()
   const { showToast } = useToast()
   const localClaims = useRef(new Set<string>())
@@ -31,7 +32,6 @@ export function CallRecordingReminders({ identity }: { identity: CallReminderIde
   useEffect(() => {
     if (!identity || isImpersonatingClient) return
     const standalone = window.matchMedia('(display-mode: standalone)')
-    const recorderPage = pathname.replace(/\/$/, '').endsWith('/calls/record')
     let cancelled = false
     let checking = false
     let hadError = false
@@ -114,7 +114,7 @@ export function CallRecordingReminders({ identity }: { identity: CallReminderIde
       document.removeEventListener('visibilitychange', refresh)
       standalone.removeEventListener('change', refresh)
     }
-  }, [identity, isImpersonatingClient, pathname, showToast])
+  }, [identity, isImpersonatingClient, recorderPage, showToast])
 
   return null
 }

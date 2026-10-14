@@ -33,7 +33,7 @@ const BUTTON_STYLE = {
 } as const
 
 async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiPath(path), { ...init, signal: AbortSignal.timeout(path.endsWith('/transcribe') ? 150_000 : 30_000) })
+  const response = await fetch(apiPath(path), { ...init, signal: AbortSignal.timeout(path.endsWith('/transcribe') ? 900_000 : 30_000) })
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { error?: string }
     throw new Error(body.error ?? `Request failed (${response.status}). Retry when the connection is restored.`)
@@ -240,14 +240,16 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
     return result
   }
 
-  async function transcribe(id: string): Promise<void> {
+  async function transcribe(id: string, options?: { separateSpeakers: false }): Promise<void> {
     setBusy(true)
     setError(null)
     setDetail(current => current?.recording.id === id ? { ...current, recording: { ...current.recording, state: 'transcribing' } } : current)
     try {
       let result: MeetingRecordingDetail
+      let requestOptions = options
       do {
-        result = await readJson<MeetingRecordingDetail>(`/api/admin/recordings/${id}/transcribe`, json('POST', {}))
+        result = await readJson<MeetingRecordingDetail>(`/api/admin/recordings/${id}/transcribe`, json('POST', requestOptions ?? {}))
+        requestOptions = undefined
         if (mounted.current) setDetail(result)
         if (result.recording.state === 'failed' || !mounted.current) break
         if (result.pending) await new Promise(resolve => setTimeout(resolve, 300))
@@ -280,6 +282,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
       activeRecording.current = created
       setDetail({ recording: created, chunks: [], transcript: { id: null, text: '' } })
       setSystemWarning(null)
+      if (separateSpeakers && !prepared.system) setNotice('Speaker separation was turned off because system audio was not shared. This recording includes your microphone only.')
       const id = created.id
       const session = new BrowserCallRecorder(prepared, {
         onLevels: values => { if (mounted.current) setLevels(values) },
@@ -514,7 +517,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
                 disabled={disabled || !!detail} onChange={event => setSeparateSpeakers(event.target.checked)} aria-describedby="group-speakers-help" />
               <span className="min-w-0 space-y-1">
                 <span className="block text-sm font-medium">Separate speakers (group call)</span>
-                <span id="group-speakers-help" className="block text-sm text-[var(--color-text-muted)]">Labels the people on system audio as Them 1, Them 2 and so on. Estimated USD $0.34 per recorded hour including your microphone, before retries and storage. Off by default.</span>
+                <span id="group-speakers-help" className="block text-sm text-[var(--color-text-muted)]">Labels the people on system audio as Them 1, Them 2 and so on. Estimated US$0.34 per recorded hour including your microphone, before retries and storage. Limited to two hours of system audio; longer recordings use Whisper without speaker separation. Off by default.</span>
               </span>
             </label>
             {systemWarning ? <div role="alert" className="space-y-3 rounded-lg p-4" style={{ background: 'var(--color-bg-secondary)', border: '0.0625rem solid var(--color-border)' }}>
@@ -574,6 +577,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
           <div className="flex flex-wrap gap-2">
             {!detail.recording.deletedAt && detail.recording.state === 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => { if (window.confirm('Finish this interrupted recording using its saved chunks? Audio since the last saved chunk may be missing.')) void recover(detail.recording.id, true) }}>Finish interrupted recording</TahiButton>}
             {!detail.recording.deletedAt && detail.recording.state !== 'ready' && detail.recording.state !== 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} iconLeft={<RefreshCw className="h-4 w-4 shrink-0" />} onClick={() => void recover(detail.recording.id)}>Retry saved audio and failed chunks</TahiButton>}
+            {!detail.recording.deletedAt && detail.recording.separateSpeakers && detail.recording.state !== 'recording' && detail.recording.state !== 'ready' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => void transcribe(detail.recording.id, { separateSpeakers: false })}>Transcribe without speaker separation</TahiButton>}
             {detail.recording.state === 'ready' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} iconLeft={<RefreshCw className="h-4 w-4 shrink-0" />} onClick={() => void transcribe(detail.recording.id)}>Refresh transcript</TahiButton>}
             {detail.recording.state === 'ready' && <Link href="/calls" className="tahi-focus-ring flex max-w-full items-center rounded-md px-3 py-2 text-sm hover:bg-[var(--color-bg-secondary)]" style={{ minHeight: '2.75rem', color: 'var(--color-link)' }}>Open calls and task suggestions</Link>}
             {canDeleteAudio && !detail.recording.deletedAt && <TahiButton variant="ghost" style={BUTTON_STYLE} disabled={disabled} iconLeft={<Trash2 className="h-4 w-4 shrink-0" />} onClick={() => void deleteRecording(detail.recording.id, Boolean(detail.recording.transcriptId))}>Delete recording audio</TahiButton>}

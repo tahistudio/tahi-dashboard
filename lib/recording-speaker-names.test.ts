@@ -31,6 +31,16 @@ describe('recording speaker names', () => {
     ]).system).toBe('Michael Day')
   })
 
+  it('excludes every Tahi email even when the attendee has no team record', () => {
+    expect(recordingSpeakerNames('liam', team, [
+      { name: 'New teammate', email: ' NEW@TAHI.STUDIO ', type: 'contact' },
+      { name: 'Michael Day', email: 'michael@giant.example' },
+    ]).system).toBe('Michael Day')
+    expect(recordingSpeakerNames('liam', team, [
+      { name: 'New teammate', email: 'new@tahi.studio' },
+    ], 'Acme').system).toBe('Them (Acme)')
+  })
+
   it('falls back to the explicit client when remote identity is absent or ambiguous', () => {
     const guests = [{ name: 'Michael Day' }, { name: 'Mark Ramsey' }]
     expect(recordingSpeakerNames('liam', team, guests, 'Acme').system).toBe('Them (Acme)')

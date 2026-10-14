@@ -1537,7 +1537,7 @@ minute; its precise neuron rate supports the model-page figure. The older
 @cf/openai/whisper page lists USD 0.000453 per minute (41.14 neurons) and
 the existing Slack implementation sends byte arrays. Turbo uses base64, a
 transcribe task, English, voice activity filtering and no previous-text
-conditioning. No fallback model is used silently.
+conditioning. Phase 1 uses this model for both tracks.
 
 Sources: [Turbo model](https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/),
 [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/),
@@ -1608,6 +1608,34 @@ in-app toast opens the recorder with title and explicit call identity. It
 never starts recording. No Notification permission request, email or Slack.
 Existing read routes expose creator identity; list_calls MCP forwards its
 time window filters under the existing read classification.
+
+**Phase 1b review repair (2026-10-14):** Persist raw Nova JSON create-only at
+`meeting-recordings/{id}/system/nova-3.json` before parsing or D1 result writes,
+and read it before any later inference. Await the binding without a local
+timeout race; renew a generous 15-minute lease every minute so late responses
+are retained without concurrent billing. Clamp gap words into the preceding
+chunk. After two failed group attempts, or a padded system timeline over two
+hours, disable separateSpeakers and continue through Whisper. The explicit
+admin action uses the same lease and has full-profile MCP parity; designers
+are blocked. Preserve mic results. Stored mono 16 kHz PCM WAV is accepted by
+[Cloudflare's Whisper provider](https://github.com/cloudflare/ai/blob/main/packages/workers-ai-provider/README.md).
+Split three-minute WAV chunks into complete 30-second WAV inputs under 1 MB,
+following the size guidance in the [chunk tutorial](https://developers.cloudflare.com/workers-ai/guides/tutorials/build-a-workers-ai-whisper-with-chunking/),
+and restore each part's timing offset. No new migration or provider secret.
+
+**Nova input-limit research, checked 2026-10-14:** The
+[Nova model page](https://developers.cloudflare.com/workers-ai/models/nova-3/)
+and [Workers AI limits](https://developers.cloudflare.com/workers-ai/platform/limits/)
+publish no Nova-specific maximum audio duration or input bytes. The limits
+page lists 720 ASR requests per minute, which is a rate limit, not proof that
+a two-hour WAV is supported. The two-hour cap is our application bound;
+real provider latency and input acceptance remain unverified. The PWA id
+stays `/overview`, preserving the earlier implicit start-url identity.
+Reminders use the creator only for calls with no attendees; Tahi domain
+addresses never count as external speakers. Once suggestions run, an org-less
+recording cannot move between different lead calls merely because both orgs
+are null. The two PATCH mirror failures were stale query mocks, not a live
+linking regression.
 
 **Phase 1b verification open:** Real Nova inference, representative long-call
 latency/provider limits and Windows Chromium installation/capture must be

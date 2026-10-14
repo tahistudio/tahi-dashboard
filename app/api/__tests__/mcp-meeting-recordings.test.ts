@@ -52,6 +52,15 @@ describe('manual call recording MCP profiles', () => {
     expect(isDesignerRequestAllowed('PATCH', '/api/admin/recordings/rec-1/link')).toBe(false)
     expect(gateToolCall('link_meeting_recording', args, 'full', 'Liam').ok).toBe(true)
   })
+
+  it('keeps transcription and administrator fallback blocked for designers even with confirmation', () => {
+    const args = { id: 'rec-1', separateSpeakers: false, confirmed: true }
+    expect(classifyTool('transcribe_meeting_recording', 'designer')).toBe('blocked')
+    expect(gateToolCall('transcribe_meeting_recording', args, 'designer', 'Staci').ok).toBe(false)
+    expect(toolsForProfile(TOOLS, 'designer').some(tool => tool.name === 'transcribe_meeting_recording')).toBe(false)
+    expect(isDesignerRequestAllowed('POST', '/api/admin/recordings/rec-1/transcribe')).toBe(false)
+    expect(gateToolCall('transcribe_meeting_recording', args, 'full', 'Liam').ok).toBe(true)
+  })
 })
 
 describe('manual call recording MCP dispatch', () => {
@@ -79,6 +88,39 @@ describe('manual call recording MCP dispatch', () => {
     expect(calls[0].url.pathname).toBe('/api/admin/recordings/rec-1')
     expect(calls[0].method).toBe('GET')
     expect([...calls[0].headers.values()]).toContain('test-signed-actor')
+  })
+
+  it.each([
+    { separateSpeakers: undefined, body: {} },
+    { separateSpeakers: false, body: { separateSpeakers: false } },
+  ])('dispatches recording transcription with separateSpeakers=$separateSpeakers', async ({ separateSpeakers, body }) => {
+    const calls = interceptedCalls()
+    await executeTool('transcribe_meeting_recording', { id: 'rec-1', separateSpeakers, title: 'discard this' }, credentials, manyRequests)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url.pathname).toBe('/api/admin/recordings/rec-1/transcribe')
+    expect(calls[0].method).toBe('POST')
+    expect(calls[0].body).toEqual(body)
+    expect([...calls[0].headers.values()]).toContain('test-signed-actor')
+  })
+
+  it.each([true, 'true', null, 1])('refuses unsupported separation option %j before transcription dispatch', async separateSpeakers => {
+    const calls = interceptedCalls()
+    await expect(executeTool('transcribe_meeting_recording', { id: 'rec-1', separateSpeakers }, credentials, manyRequests))
+      .rejects.toThrow('separateSpeakers must be false or omitted')
+    expect(calls).toEqual([])
+  })
+
+  it('declares a false-only fallback boolean and coerces connector input before dispatch', async () => {
+    const calls = interceptedCalls()
+    const schema = definition('transcribe_meeting_recording').inputSchema
+    expect(schema.required).toEqual(['id'])
+    expect(schema.properties?.separateSpeakers).toMatchObject({ type: 'boolean', enum: [false] })
+    const args = coerceArgs(schema, { id: 'rec-1', separateSpeakers: 'false' })
+    await executeTool('transcribe_meeting_recording', args, credentials, manyRequests)
+    expect(calls[0].body).toEqual({ separateSpeakers: false })
+    const invalid = coerceArgs(schema, { id: 'rec-1', separateSpeakers: 'true' })
+    await expect(executeTool('transcribe_meeting_recording', invalid, credentials, manyRequests)).rejects.toThrow('separateSpeakers must be false or omitted')
+    expect(calls).toHaveLength(1)
   })
 
   it('links only the explicitly selected client', async () => {
@@ -112,6 +154,7 @@ describe('manual call recording MCP dispatch', () => {
   it.each(['../invoices/x', 'x?redirect=1', '%2e%2e', 'x/y'])('refuses unsafe recording and link ids %s before dispatch', async id => {
     const calls = interceptedCalls()
     await expect(executeTool('get_meeting_recording', { id }, credentials, manyRequests)).rejects.toThrow('id is not a valid id')
+    await expect(executeTool('transcribe_meeting_recording', { id, separateSpeakers: false }, credentials, manyRequests)).rejects.toThrow('id is not a valid id')
     await expect(executeTool('link_meeting_recording', { id, orgId: 'org-1' }, credentials, manyRequests)).rejects.toThrow('id is not a valid id')
     await expect(executeTool('link_meeting_recording', { id: 'rec-1', orgId: id }, credentials, manyRequests)).rejects.toThrow('orgId is not a valid id')
     await expect(executeTool('link_meeting_recording', { id: 'rec-1', callKind: 'scheduled', callId: id }, credentials, manyRequests)).rejects.toThrow('callId is not a valid id')

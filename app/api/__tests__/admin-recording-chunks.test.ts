@@ -35,7 +35,7 @@ import { POST as createRecording } from '@/app/api/admin/recordings/route'
 import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
 import { hashTranscript } from '@/lib/call-transcripts'
 import { RECORDING_MODEL } from '@/lib/meeting-recordings'
-import { encodeRecordingPcmWav, parseRecordingPcmWav, RECORDING_GROUP_MODEL } from '@/lib/recording-group-audio'
+import { encodeRecordingPcmWav, MAX_RECORDING_GROUP_DURATION_MS, parseRecordingPcmWav, RECORDING_GROUP_MODEL } from '@/lib/recording-group-audio'
 
 interface SqlResult { results: Array<Record<string, unknown>>; success: boolean; meta: { changes: number } }
 interface SqlStatement {
@@ -52,6 +52,7 @@ let objects: Map<string, { audio: ArrayBuffer; metadata: Record<string, string> 
 let puts: ReturnType<typeof vi.fn>
 let failTranscript: boolean
 let failLinkBatch: boolean
+let failGroupBatch: boolean
 
 function adapter(sqliteDb: DatabaseSync) {
   const prepare = (query: string): SqlStatement => {
@@ -60,6 +61,9 @@ function adapter(sqliteDb: DatabaseSync) {
         if (failTranscript && /^INSERT INTO call_transcripts/.test(query)) { failTranscript = false; throw new Error('Injected D1 failure') }
         if (failLinkBatch && /^update "meeting_recordings"/i.test(query) && query.includes('"call_kind"')) {
           failLinkBatch = false; throw new Error('Injected recorder link failure')
+        }
+        if (failGroupBatch && /^update "meeting_recording_chunks"/i.test(query) && query.includes('json_each')) {
+          failGroupBatch = false; throw new Error('Injected group result D1 failure')
         }
         const statement = sqliteDb.prepare(query)
         if (/^\s*select\b|\breturning\b/i.test(query)) {
@@ -123,9 +127,11 @@ beforeEach(() => {
   objects = new Map()
   failTranscript = false
   failLinkBatch = false
-  puts = vi.fn(async (key: string, audio: ArrayBuffer, options: { onlyIf?: R2Conditional; customMetadata: Record<string, string> }) => {
+  failGroupBatch = false
+  puts = vi.fn(async (key: string, value: ArrayBuffer | string, options: { onlyIf?: R2Conditional; customMetadata?: Record<string, string> }) => {
     if (options.onlyIf?.etagDoesNotMatch === '*' && objects.has(key)) return null
-    objects.set(key, { audio, metadata: options.customMetadata })
+    const audio = typeof value === 'string' ? new TextEncoder().encode(value).buffer : value
+    objects.set(key, { audio, metadata: options.customMetadata ?? {} })
     return { key }
   })
   h.bucket = {
@@ -137,7 +143,7 @@ beforeEach(() => {
   h.ai.run.mockReset().mockResolvedValue({ text: 'Hello', segments: [{ start: 0, end: 1, text: 'Hello' }] })
 })
 
-afterEach(() => { sqlite.close(); vi.restoreAllMocks() })
+afterEach(() => { sqlite.close(); vi.restoreAllMocks(); vi.useRealTimers() })
 
 describe('recording speaker separation option', () => {
   it('defaults to off and stores an explicit opt-in without a schema change', async () => {
@@ -421,20 +427,20 @@ describe('whole-system group recording transcription', () => {
     return { id: recording.id, params: { params: Promise.resolve({ id: recording.id }) } }
   }
 
-  async function stoppedGroup() {
+  async function stoppedGroup(gapMs = 0, systemChunkSeconds = 30) {
     const group = await groupRecording()
     const mic = await reserve(req('chunks', metadata), group.params)
     expect(mic.status).toBe(200)
     const micBody = await mic.json() as { uploadUrl: string }
     expect((await upload(new NextRequest(`http://localhost${micBody.uploadUrl}`, { method: 'PUT', body: Uint8Array.from([1, 2, 3]) }), group.params)).status).toBe(200)
-    const audio = encodeRecordingPcmWav(new Float32Array(30 * 16_000).fill(0.1))
+    const audio = encodeRecordingPcmWav(new Float32Array(systemChunkSeconds * 16_000).fill(0.1))
     for (const sequence of [0, 1]) {
-      const reserved = await reserve(req('chunks', { track: 'system', sequence, startMs: sequence * 30_000, durationMs: 30_000, mimeType: 'audio/wav', size: audio.byteLength }), group.params)
+      const reserved = await reserve(req('chunks', { track: 'system', sequence, startMs: sequence * (systemChunkSeconds * 1000 + gapMs), durationMs: systemChunkSeconds * 1000, mimeType: 'audio/wav', size: audio.byteLength }), group.params)
       expect(reserved.status).toBe(200)
       const body = await reserved.json() as { uploadUrl: string }
       expect((await upload(new NextRequest(`http://localhost${body.uploadUrl}`, { method: 'PUT', body: audio }), group.params)).status).toBe(200)
     }
-    expect((await stop(req('stop', { expectedChunks: { mic: 1, system: 2 }, durationMs: 60_000 }), group.params)).status).toBe(200)
+    expect((await stop(req('stop', { expectedChunks: { mic: 1, system: 2 }, durationMs: systemChunkSeconds * 2000 + gapMs }), group.params)).status).toBe(200)
     return group
   }
 
@@ -485,6 +491,133 @@ describe('whole-system group recording transcription', () => {
     expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
     expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
     expect(sqlite.prepare('SELECT sequence,text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ? ORDER BY sequence').all(group.id, 'system')).toEqual(stored)
+    expect(JSON.parse(new TextDecoder().decode(objects.get(`meeting-recordings/${group.id}/system/nova-3.json`)!.audio))).toEqual(novaOutput())
+    expect(puts).toHaveBeenCalledWith(`meeting-recordings/${group.id}/system/nova-3.json`, JSON.stringify(novaOutput()), expect.objectContaining({ onlyIf: { etagDoesNotMatch: '*' } }))
+  })
+
+  it('clamps a Nova word inside a 50 ms inter-chunk gap without failing the group', async () => {
+    const group = await stoppedGroup(50)
+    h.ai.run.mockImplementation(async (model: string) => model === RECORDING_MODEL
+      ? { text: 'Mic', segments: [{ start: 0, end: 1, text: 'Mic' }] }
+      : { results: { channels: [{ alternatives: [{ transcript: 'Gap Next', words: [
+        { start: 30.025, end: 30.04, word: 'Gap', speaker: 0 },
+        { start: 30.1, end: 31, word: 'Next', speaker: 1 },
+      ] }] }] } })
+    await transcribe(req('transcribe'), group.params)
+    const detail = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(detail.recording.state).toBe('ready')
+    expect(detail.chunks.filter(chunk => chunk.track === 'system').map(chunk => chunk.segments)).toEqual([
+      [{ start: 30, end: 30, text: 'Gap', speaker: 0 }],
+      [{ start: expect.closeTo(0.05), end: expect.closeTo(0.95), text: 'Next', speaker: 1 }],
+    ])
+  })
+
+  function whisperFallback() {
+    h.ai.run.mockImplementation(async (model: string, input: { audio: string }) => {
+      expect(model).toBe(RECORDING_MODEL)
+      if (input.audio === 'AQID') return { text: 'Mic', segments: [{ start: 0, end: 1, text: 'Mic' }] }
+      const audio = Uint8Array.from(atob(input.audio), char => char.charCodeAt(0)).buffer
+      expect(audio.byteLength).toBeLessThan(1024 * 1024)
+      expect(parseRecordingPcmWav(audio).sampleCount).toBe(30 * 16_000)
+      return { text: 'Remote speech', segments: [{ start: 1, end: 2, text: 'Remote speech' }] }
+    })
+  }
+
+  it('falls back after two failed group attempts and preserves mic text while Whisper processes system chunks', async () => {
+    const group = await stoppedGroup()
+    whisperFallback()
+    await transcribe(req('transcribe'), group.params)
+    const mic = sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')
+    h.ai.run.mockRejectedValueOnce(new Error('Nova unavailable')).mockRejectedValueOnce(new Error('Nova unavailable again'))
+    expect((await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail).recording.state).toBe('failed')
+    const fallback = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(fallback).toMatchObject({ pending: true, recording: { separateSpeakers: false, state: 'transcribing' } })
+    expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(0)
+    await transcribe(req('transcribe'), group.params)
+    const finished = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(finished.recording.state).toBe('ready')
+    expect(finished.transcript.text).toContain('Mic')
+    expect(finished.transcript.text).toContain('Remote speech')
+    expect(sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')).toEqual(mic)
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL, RECORDING_GROUP_MODEL, RECORDING_MODEL, RECORDING_MODEL])
+  })
+
+  it('manually disables separation and decodes maximum three-minute system WAV chunks through Whisper', async () => {
+    const group = await stoppedGroup(0, 180)
+    whisperFallback()
+    await transcribe(req('transcribe'), group.params)
+    const mic = sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')
+    expect((await transcribe(req('transcribe', { separateSpeakers: true }), group.params)).status).toBe(400)
+    const fallback = await (await transcribe(req('transcribe', { separateSpeakers: false }), group.params)).json() as MeetingRecordingDetail
+    expect(fallback.recording.separateSpeakers).toBe(false)
+    expect(fallback.chunks.find(chunk => chunk.track === 'system' && chunk.sequence === 0)?.segments.map(segment => segment.start)).toEqual([1, 31, 61, 91, 121, 151])
+    const finished = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(finished.recording.state).toBe('ready')
+    expect(h.ai.run.mock.calls.every(call => call[0] === RECORDING_MODEL)).toBe(true)
+    expect(h.ai.run).toHaveBeenCalledTimes(13)
+    expect(sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')).toEqual(mic)
+    expect((await transcribe(req('transcribe', { separateSpeakers: false }), group.params)).status).toBe(409)
+  })
+
+  it('automatically uses Whisper for system timelines longer than two hours without a Nova call', async () => {
+    const group = await stoppedGroup(MAX_RECORDING_GROUP_DURATION_MS - 30_000)
+    whisperFallback()
+    const first = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(first.recording.separateSpeakers).toBe(false)
+    await transcribe(req('transcribe'), group.params)
+    expect((await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail).recording.state).toBe('ready')
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_MODEL, RECORDING_MODEL])
+  })
+
+  it('reuses create-only raw Nova JSON after parsing fails instead of billing another inference', async () => {
+    const group = await stoppedGroup()
+    whisperFallback()
+    await transcribe(req('transcribe'), group.params)
+    const invalid = { results: { channels: [{ alternatives: [{ transcript: 'Missing labels', words: [] }] }] } }
+    h.ai.run.mockResolvedValueOnce(invalid)
+    expect((await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail).recording.state).toBe('failed')
+    const resultKey = `meeting-recordings/${group.id}/system/nova-3.json`
+    expect(JSON.parse(new TextDecoder().decode(objects.get(resultKey)!.audio))).toEqual(invalid)
+    const retry = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(retry.recording.separateSpeakers).toBe(false)
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
+    expect(puts.mock.calls.filter(call => call[0] === resultKey)).toHaveLength(1)
+    await transcribe(req('transcribe'), group.params)
+    expect((await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail).recording.state).toBe('ready')
+  })
+
+  it('reuses raw Nova JSON after a transactional D1 group-result failure without another AI call', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    await transcribe(req('transcribe'), group.params)
+    failGroupBatch = true
+    const failed = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(failed.recording.state).toBe('failed')
+    expect(failed.chunks.filter(chunk => chunk.track === 'system').every(chunk => chunk.state === 'failed')).toBe(true)
+    expect(objects.has(`meeting-recordings/${group.id}/system/nova-3.json`)).toBe(true)
+    const retry = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(retry.recording.state).toBe('ready')
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
+  })
+
+  it('renews the inference lease and retains a result arriving after the old timeout without concurrent billing', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    await transcribe(req('transcribe'), group.params)
+    vi.useFakeTimers()
+    let resolveNova: (value: unknown) => void = () => { throw new Error('Nova has not started') }
+    let markStarted: () => void = () => {}
+    const started = new Promise<void>(resolve => { markStarted = resolve })
+    h.ai.run.mockImplementationOnce(() => new Promise(resolve => { resolveNova = resolve; markStarted() }))
+    const pending = transcribe(req('transcribe'), group.params)
+    await started
+    await vi.advanceTimersByTimeAsync(16 * 60_000)
+    expect((await transcribe(req('transcribe'), group.params)).status).toBe(409)
+    resolveNova(novaOutput())
+    const finished = await (await pending).json() as MeetingRecordingDetail
+    expect(finished.recording.state).toBe('ready')
+    expect(objects.has(`meeting-recordings/${group.id}/system/nova-3.json`)).toBe(true)
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
   })
 
   it('retains successful mic text after Nova fails and retries only the whole system track', async () => {
@@ -520,6 +653,26 @@ describe('whole-system group recording transcription', () => {
     expect((await retry.json() as MeetingRecordingDetail).recording.state).toBe('ready')
     expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL])
     expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
+  })
+
+  it('explicit fallback replaces ready Nova system results after finalization fails while retaining mic', async () => {
+    const group = await stoppedGroup()
+    successfulModels()
+    await transcribe(req('transcribe'), group.params)
+    failTranscript = true
+    const failed = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(failed.recording.state).toBe('failed')
+    expect(failed.chunks.every(chunk => chunk.state === 'ready')).toBe(true)
+    const mic = sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')
+    whisperFallback()
+    const fallback = await (await transcribe(req('transcribe', { separateSpeakers: false }), group.params)).json() as MeetingRecordingDetail
+    expect(fallback).toMatchObject({ pending: true, recording: { separateSpeakers: false } })
+    const finished = await (await transcribe(req('transcribe'), group.params)).json() as MeetingRecordingDetail
+    expect(finished.recording.state).toBe('ready')
+    expect(finished.transcript.text).toContain('Remote speech')
+    expect(finished.transcript.text).not.toMatch(/Them [12]:/)
+    expect(sqlite.prepare('SELECT text,segments,attempts FROM meeting_recording_chunks WHERE recording_id = ? AND track = ?').get(group.id, 'mic')).toEqual(mic)
+    expect(h.ai.run.mock.calls.map(call => call[0])).toEqual([RECORDING_MODEL, RECORDING_GROUP_MODEL, RECORDING_MODEL, RECORDING_MODEL])
   })
 
   it('accepts a full three-minute PCM reservation above the compressed limit and rejects raw group WebM', async () => {

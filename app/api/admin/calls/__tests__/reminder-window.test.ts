@@ -45,14 +45,16 @@ function call(id: string, instant: string, orgId = 'org-acme') {
 const windowQuery = 'status=scheduled&since=2026-10-14T21%3A00%3A00Z&until=2026-10-14T21%3A02%3A00Z'
 
 describe('scheduled call reminder window', () => {
-  it('filters before the cap and compares calendar offsets as real instants', async () => {
+  it('filters calendar offsets as real instants before the cap and orders the stored column', async () => {
     for (let index = 0; index < 120; index += 1) call(`old-${index}`, '2026-10-10T21:00:00Z')
     call('later', '2026-10-14T21:01:30Z')
     call('first', '2026-10-15T10:01:00+13:00')
     call('outside', '2026-10-14T21:03:00Z')
     const response = await GET(new NextRequest(`http://localhost/api/admin/calls?${windowQuery}&limit=1`))
     expect(response.status).toBe(200)
-    expect((await response.json() as CallList).calls).toMatchObject([{ id: 'first', createdById: 'user-staci', orgName: 'Acme' }])
+    expect((await response.json() as CallList).calls).toMatchObject([{ id: 'later', createdById: 'user-staci', orgName: 'Acme' }])
+    const all = await GET(new NextRequest(`http://localhost/api/admin/calls?${windowQuery}&limit=2`))
+    expect((await all.json() as CallList).calls.map(row => row.id)).toEqual(['later', 'first'])
   })
 
   it('keeps existing client scope while querying the window', async () => {

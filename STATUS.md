@@ -26,6 +26,15 @@ and signed-in 375/768/dark checks remain open. Source QA/UIUX reviews pass;
 headless browser launch is blocked by sandbox spawn EPERM. Gate results and
 handoff notes are recorded in the run log.
 
+The phase 1b review repairs are uncommitted at base 3570d4e5. Raw Nova JSON
+is retained in R2 before parsing and reused on retry; a renewed lease keeps
+late inference from billing concurrently. Two failed group attempts or a
+system timeline over two hours switch to Whisper, with an explicit fallback
+action and completed mic results preserved. Gap, speaker, reminder, PWA and
+pre-client relink findings are fixed. The two PATCH mirror failures were stale
+mocks. Requested source gates pass, 10 targeted Vitest files / 245 tests.
+No phase 1b deployment or new live claim was made in this repair session.
+
 ## Next-20 items 2 to 7 hardening, 2026-10-13
 
 Suggestion decisions keep the stored client immutable, permit same-client

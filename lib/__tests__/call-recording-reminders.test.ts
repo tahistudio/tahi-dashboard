@@ -32,10 +32,12 @@ describe('recording call reminders', () => {
     expect(isMyReminderCall({ ...call, attendees: 'invalid' }, identity)).toBe(false)
   })
 
-  it('includes the creator without attendees but respects an explicit decline', () => {
+  it('uses the creator only without attendees and respects an explicit decline', () => {
     expect(isMyReminderCall({ ...call, attendees: [], createdById: identity.userId }, identity)).toBe(true)
     expect(isMyReminderCall({ ...call, attendees: [], createdById: identity.teamMemberId }, identity)).toBe(true)
     expect(isMyReminderCall({ ...call, attendees: [], createdById: 'user-liam' }, identity)).toBe(false)
+    expect(isMyReminderCall({ ...call, createdById: identity.userId, attendees: [{ email: 'liam@tahi.studio' }] }, identity)).toBe(false)
+    expect(isMyReminderCall({ ...call, createdById: identity.teamMemberId, attendees: [{ email: 'alex@acme.example' }] }, identity)).toBe(false)
     expect(isMyReminderCall({ ...call, createdById: identity.userId, attendees: [{ email: identity.email, responseStatus: 'declined' }] }, identity)).toBe(false)
   })
 
@@ -101,7 +103,7 @@ describe('Windows Chromium PWA manifest', () => {
       icons: { src: string; sizes: string; type: string }[]
       shortcuts: { name: string; url: string }[]
     }
-    expect(manifest).toMatchObject({ id: '/', name: 'Tahi Dashboard', short_name: 'Tahi', start_url: '/overview', scope: '/', display: 'standalone' })
+    expect(manifest).toMatchObject({ id: '/overview', name: 'Tahi Dashboard', short_name: 'Tahi', start_url: '/overview', scope: '/', display: 'standalone' })
     expect(manifest.shortcuts).toContainEqual(expect.objectContaining({ name: 'Record call', url: '/calls/record' }))
     for (const size of [192, 512]) {
       const icon = manifest.icons.find(candidate => candidate.sizes === `${size}x${size}`)

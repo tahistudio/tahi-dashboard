@@ -36,6 +36,7 @@ export function recordingSpeakerNames(
       const email = cleaned(attendee.email).toLowerCase()
       const name = cleaned(attendee.name)
       const onTeam = attendee.type === 'team_member' || attendee.type === 'team'
+        || email.endsWith('@tahi.studio')
         || team.some(member => (id && (member.id === id || member.clerkUserId === id))
           || (email && member.email.trim().toLowerCase() === email)
           || (!id && !email && name && member.name.trim().toLowerCase() === name.toLowerCase()))

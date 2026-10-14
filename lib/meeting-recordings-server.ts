@@ -12,7 +12,7 @@ import { attributedUserId } from '@/lib/mcp-actor'
 import { logAudit } from '@/lib/audit'
 import { resolvePermissions } from '@/lib/permissions'
 import { readRecordingOptions, writeRecordingOptions } from '@/lib/recording-options'
-import { transcribeRecordingGroup, type RecordingGroupAiBinding } from '@/lib/recording-group-audio'
+import { MAX_RECORDING_GROUP_DURATION_MS, RECORDING_GROUP_LEASE_MS, RECORDING_PCM_HEADER_BYTES, RECORDING_PCM_SAMPLE_RATE, transcribeRecordingGroup, type RecordingGroupAiBinding } from '@/lib/recording-group-audio'
 import { hashTranscript, parseCallKind, resolveCallOrgId } from '@/lib/call-transcripts'
 import { recordingSpeakerNames, type RecordingSpeakerNames } from '@/lib/recording-speaker-names'
 import {
@@ -141,25 +141,36 @@ async function storage(): Promise<R2Bucket> {
 }
 
 /** A database compare-and-swap settles concurrent retries before any R2/AI write. */
-export async function withRecordingLease<T>(context: RecordingContext, work: (row: RecordingRow, token: string) => Promise<T>, allowDeleted = false): Promise<T> {
+export async function withRecordingLease<T>(context: RecordingContext, work: (row: RecordingRow, token: string) => Promise<T>, allowDeleted = false, leaseMs = RECORDING_LEASE_MS): Promise<T> {
   const id = context.recording?.id
   if (!id) throw new RecordingError('Recording not found.', 404)
   const now = new Date().toISOString()
   const token = crypto.randomUUID()
   const claimed = await context.database.update(recordings).set({
-    leaseToken: token, leaseUntil: new Date(Date.now() + RECORDING_LEASE_MS).toISOString(),
+    leaseToken: token, leaseUntil: new Date(Date.now() + leaseMs).toISOString(),
   }).where(and(eq(recordings.id, id), allowDeleted ? undefined : isNull(recordings.deletedAt),
     or(isNull(recordings.leaseToken), lt(recordings.leaseUntil, now)))).returning()
   if (!claimed.length) {
     if ((await readRecording(context.database, id)).deletedAt) throw new RecordingError('Recording audio has been deleted.', 410)
     throw new RecordingError('Another recording action is finishing. Retry shortly.', 409, 'busy')
   }
+  let renewal = Promise.resolve()
+  let renewalError: unknown
+  const heartbeat = leaseMs > RECORDING_LEASE_MS ? setInterval(() => {
+    renewal = renewal.then(async () => {
+      await updateLeased(context, token, { leaseUntil: new Date(Date.now() + leaseMs).toISOString() })
+    }).catch(error => { renewalError = error })
+  }, 60_000) : undefined
   try {
     const denied = await requireAccessToOrgOrPreClient(context.database, context.auth.userId, claimed[0].orgId)
     if (denied) throw new RecordingError('Forbidden', denied.status)
-    return await work(claimed[0], token)
+    const result = await work(claimed[0], token)
+    if (renewalError) throw renewalError
+    return result
   }
   finally {
+    if (heartbeat !== undefined) clearInterval(heartbeat)
+    await renewal
     await context.database.update(recordings).set({ leaseToken: null, leaseUntil: null })
       .where(and(eq(recordings.id, id), eq(recordings.leaseToken, token)))
   }
@@ -429,19 +440,34 @@ async function finalizeRecording(context: RecordingContext, row: RecordingRow, l
 
 async function transcribeSystemGroup(context: RecordingContext, row: RecordingRow, lease: string, found: ChunkRow[]): Promise<void> {
   const system = found.filter(chunk => chunk.track === 'system').sort((a, b) => a.sequence - b.sequence)
-  const ai = await loadRecordingAi()
-  if (!ai) throw new RecordingError('Speaker separation is unavailable. Your saved audio is retained; retry when Workers AI is available.', 503)
-  const bucket = await storage()
   if (!system.length) throw new RecordingError('No system audio is available for speaker separation.', 409)
   await context.database.update(chunks).set({ state: 'transcribing', attempts: sql`${chunks.attempts} + 1`, error: null })
     .where(and(eq(chunks.recordingId, row.id), eq(chunks.track, 'system'),
       sql`EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease})`))
-  const result = await transcribeRecordingGroup(ai as unknown as RecordingGroupAiBinding, system, async chunk => {
+  const ai = await loadRecordingAi()
+  const bucket = await storage()
+  const resultKey = `meeting-recordings/${row.id}/system/nova-3.json`
+  const readResult = async () => {
+    const object = await bucket.get(resultKey)
+    return object ? { value: JSON.parse(new TextDecoder().decode(await object.arrayBuffer())) as unknown } : null
+  }
+  const result = await transcribeRecordingGroup(ai as unknown as RecordingGroupAiBinding | null, system, async chunk => {
     const object = await bucket.get(chunk.storageKey)
     if (!object || object.size !== chunk.size || object.size > MAX_RECORDING_CHUNK_BYTES) {
       throw new RecordingError('Saved system audio is unavailable. Retry its upload.', 503)
     }
     return object.arrayBuffer()
+  }, {
+    read: readResult,
+    async create(value) {
+      const saved = await bucket.put(resultKey, JSON.stringify(value), {
+        onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: 'application/json' },
+      })
+      if (saved) return value
+      const existing = await readResult()
+      if (!existing) throw new RecordingError('Speaker results could not be retained. Retry the saved recording.', 503)
+      return existing.value
+    },
   })
   const segmentsByChunk = system.map(() => [] as typeof result.segments)
   // Assign each word once, by its start time, retaining one inference's speaker ids.
@@ -449,9 +475,9 @@ async function transcribeSystemGroup(context: RecordingContext, row: RecordingRo
     let index = system.findLastIndex(chunk => chunk.startMs <= segment.start * 1000)
     if (index < 0) index = 0
     const chunk = system[index]
-    const start = Math.max(0, segment.start - chunk.startMs / 1000)
+    // Nova can place a word in the silence padding between two saved chunks.
+    const start = Math.min(chunk.durationMs / 1000, Math.max(0, segment.start - chunk.startMs / 1000))
     const end = Math.max(start, Math.min(segment.end - chunk.startMs / 1000, chunk.durationMs / 1000))
-    if (start > chunk.durationMs / 1000) throw new RecordingError('Speaker separation returned speech outside a saved audio chunk. Retry the recording.', 503)
     segmentsByChunk[index].push({ ...segment, start, end })
   }
   await updateLeased(context, lease, { error: null })
@@ -474,25 +500,51 @@ async function transcribeSystemGroup(context: RecordingContext, row: RecordingRo
   await context.database.batch([firstResult, ...otherResults])
 }
 
+async function useWhisperForSystem(context: RecordingContext, row: RecordingRow, lease: string, resetReady = false): Promise<void> {
+  const options = readRecordingOptions(row.tracks)
+  // Explicit fallback replaces system results even if only finalization failed.
+  // Completed microphone results are never changed.
+  const updatedAt = new Date().toISOString()
+  const [changed] = await context.database.batch([
+    context.database.update(recordings).set({ tracks: writeRecordingOptions(options.tracks, false), state: 'transcribing', error: null, updatedAt })
+      .where(and(eq(recordings.id, row.id), eq(recordings.leaseToken, lease))).returning({ id: recordings.id }),
+    context.database.update(chunks).set({ state: 'uploaded', error: null, ...(resetReady ? { text: null, segments: null } : {}), updatedAt })
+      .where(and(eq(chunks.recordingId, row.id), eq(chunks.track, 'system'), resetReady ? undefined : sql`${chunks.state} != 'ready'`,
+        sql`EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease})`)),
+  ])
+  if (!changed.length) throw new RecordingError('The operation expired. Retry the saved recording.', 409, 'busy')
+}
+
 /** Mic and standard mode process one chunk; group mode streams the system track once. */
-export async function transcribeNextChunk(context: RecordingContext): Promise<MeetingRecordingDetail> {
+export async function transcribeNextChunk(context: RecordingContext, withoutSpeakerSeparation = false): Promise<MeetingRecordingDetail> {
   await withRecordingLease(context, async (row, lease) => {
+    if (withoutSpeakerSeparation && row.state === 'ready') throw new RecordingError('This recording is already transcribed.', 409)
     if (row.state === 'ready') {
       await finalizeRecording(context, row, lease, await readChunks(context.database, row.id))
       return
     }
     if (row.deletedAt) throw new RecordingError('Recording audio has been deleted.', 410)
     if (!row.stoppedAt || !row.expectedChunks) throw new RecordingError('Stop the recording before transcribing.', 409)
-    const found = await readChunks(context.database, row.id)
+    let found = await readChunks(context.database, row.id)
     const expected = jsonValue<{ mic: number; system: number }>(row.expectedChunks, { mic: 0, system: 0 })
     if (!allExpected(found, expected, true)) {
       await updateLeased(context, lease, { state: 'uploading', error: 'Some audio chunks are missing. Retry their uploads before transcribing.' })
       return
     }
+    const options = readRecordingOptions(row.tracks)
+    const system = found.filter(item => item.track === 'system')
+    const groupTooLong = system.some(item => item.startMs + Math.max(item.durationMs,
+      (item.size - RECORDING_PCM_HEADER_BYTES) * 1000 / (RECORDING_PCM_SAMPLE_RATE * 2)) > MAX_RECORDING_GROUP_DURATION_MS)
+    const exhausted = system.some(item => item.state !== 'ready' && item.attempts >= 2)
+    const fallback = options.separateSpeakers && (withoutSpeakerSeparation || groupTooLong || exhausted)
+    if (fallback) {
+      await useWhisperForSystem(context, row, lease, withoutSpeakerSeparation)
+      found = await readChunks(context.database, row.id)
+    }
     const chunk = found.find(item => item.state !== 'ready')
     if (!chunk) { await finalizeRecording(context, row, lease, found); return }
     await updateLeased(context, lease, { state: 'transcribing', error: null })
-    const group = readRecordingOptions(row.tracks).separateSpeakers && chunk.track === 'system'
+    const group = options.separateSpeakers && !fallback && chunk.track === 'system'
     if (!group) await context.database.update(chunks).set({ state: 'transcribing', attempts: chunk.attempts + 1, error: null }).where(chunkFence(chunk.id, row.id, lease))
     try {
       if (group) await transcribeSystemGroup(context, row, lease, found)
@@ -500,7 +552,7 @@ export async function transcribeNextChunk(context: RecordingContext): Promise<Me
         const bucket = await storage()
         const object = await bucket.get(chunk.storageKey)
         if (!object || object.size > MAX_RECORDING_CHUNK_BYTES || object.size !== chunk.size) throw new RecordingError('Saved audio is unavailable. Retry the upload.', 503)
-        const result = await transcribeRecordingAudio(await object.arrayBuffer(), chunk.durationMs, await loadRecordingAi())
+        const result = await transcribeRecordingAudio(await object.arrayBuffer(), chunk.durationMs, await loadRecordingAi(), chunk.mimeType)
         await updateLeased(context, lease, { error: null })
         await context.database.update(chunks).set({ state: 'ready', text: result.text, segments: JSON.stringify(result.segments), error: null, updatedAt: new Date().toISOString() }).where(chunkFence(chunk.id, row.id, lease))
       }
@@ -508,8 +560,12 @@ export async function transcribeNextChunk(context: RecordingContext): Promise<Me
       const message = error instanceof RecordingError || group && error instanceof Error ? error.message : 'Could not transcribe this audio chunk. Retry the saved audio.'
       // Do not publish a partial transcript, or the suggestions sweep could read it.
       await updateLeased(context, lease, { state: 'failed', error: message })
-      if (group) await context.database.update(chunks).set({ state: 'failed', error: message, updatedAt: new Date().toISOString() })
-        .where(and(eq(chunks.recordingId, row.id), eq(chunks.track, 'system'), sql`EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease})`))
+      if (group) {
+        await context.database.update(chunks).set({ state: 'failed', error: message, updatedAt: new Date().toISOString() })
+          .where(and(eq(chunks.recordingId, row.id), eq(chunks.track, 'system'), sql`EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease})`))
+        const attempts = await readChunks(context.database, row.id)
+        if (attempts.some(item => item.track === 'system' && item.attempts >= 2)) await useWhisperForSystem(context, row, lease)
+      }
       else await context.database.update(chunks).set({ state: 'failed', error: message, updatedAt: new Date().toISOString() }).where(chunkFence(chunk.id, row.id, lease))
     }
     const after = await readChunks(context.database, row.id)
@@ -519,7 +575,7 @@ export async function transcribeNextChunk(context: RecordingContext): Promise<Me
       try { await finalizeRecording(context, row, lease, after) }
       catch { await updateLeased(context, lease, { state: 'failed', error: 'Transcript could not be saved. Retry to save the transcribed chunks.' }) }
     }
-  }, true)
+  }, true, RECORDING_GROUP_LEASE_MS)
   const detail = await scopedRecordingDetail(context, context.recording!.id)
   return { ...detail, pending: detail.recording.state === 'transcribing' }
 }
@@ -533,12 +589,14 @@ export async function linkRecording(context: RecordingContext, value: unknown): 
     if (row.orgId && target.orgId !== row.orgId) {
       throw new RecordingError('This transcript is already assigned to a client. You can attach it to a call for that client.', 409)
     }
-    if (target.orgId !== row.orgId) {
+    const changesPreClientCall = row.orgId === null && target.orgId === null && row.callId !== null
+      && (target.callKind !== row.callKind || target.callId !== row.callId)
+    if (target.orgId !== row.orgId || changesPreClientCall) {
       const [transcript] = await context.database.select({ suggestedAt: schema.callTranscripts.suggestedAt }).from(schema.callTranscripts)
         .where(eq(schema.callTranscripts.id, row.transcriptId)).limit(1)
       const suggestions = await context.database.select({ id: schema.taskSuggestions.id }).from(schema.taskSuggestions)
         .where(eq(schema.taskSuggestions.transcriptId, row.transcriptId)).limit(1)
-      if (transcript?.suggestedAt || suggestions.length) throw new RecordingError('This transcript has already entered the suggestions flow. Its client cannot be changed.', 409)
+      if (transcript?.suggestedAt || suggestions.length) throw new RecordingError('This transcript has already entered the suggestions flow. Its client or pre-client call cannot be changed.', 409)
     }
     const writeGuard = sql`EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease})`
     const [previous] = await context.database.select({ text: schema.callTranscripts.text }).from(schema.callTranscripts)

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createRecordingGroupAudio, encodeRecordingPcmWav, parseRecordingGroupResult, parseRecordingPcmWav,
-  RECORDING_GROUP_MODEL, transcribeRecordingGroup, type RecordingGroupChunk,
+  MAX_RECORDING_GROUP_DURATION_MS, RECORDING_GROUP_MODEL, splitRecordingPcmWav, transcribeRecordingGroup, type RecordingGroupChunk,
 } from '@/lib/recording-group-audio'
 
 function chunk(sequence: number, startMs = sequence * 1000, samples = new Float32Array(16_000).fill(0.5)) {
@@ -141,13 +141,45 @@ describe('Cloudflare group speaker results', () => {
     expect(result.segments[0]).toEqual({ start: 1.2, end: 1.5, text: 'Hello', speaker: 3 })
   })
 
-  it('times out predictably and refuses a timeout outside the request lease', async () => {
+  it('retains a late inference before parsing and reuses it after a parse failure', async () => {
     vi.useFakeTimers()
     const file = chunk(0)
-    const pending = transcribeRecordingGroup({ run: () => new Promise(() => {}) }, [file.metadata], async () => file.audio, 100)
-    const rejected = expect(pending).rejects.toThrow('timed out')
-    await vi.advanceTimersByTimeAsync(100)
+    let cached: { value: unknown } | null = null
+    const raw = response([{ start: 0, end: 1, word: 'Hello' }])
+    const create = vi.fn(async (value: unknown) => { cached = { value }; return value })
+    const store = { read: async () => cached, create }
+    const run = vi.fn(() => new Promise(resolve => { setTimeout(() => resolve(raw), 180_000) }))
+    const pending = transcribeRecordingGroup({ run }, [file.metadata], async () => file.audio, store)
+    const rejected = expect(pending).rejects.toThrow('missing speaker labels')
+    await vi.advanceTimersByTimeAsync(180_000)
     await rejected
-    await expect(transcribeRecordingGroup({ run: async () => ({}) }, [file.metadata], async () => file.audio, 120_001)).rejects.toThrow('timeout is invalid')
+    expect(create).toHaveBeenCalledWith(raw)
+    await expect(transcribeRecordingGroup({ run }, [file.metadata], async () => file.audio, store)).rejects.toThrow('missing speaker labels')
+    expect(run).toHaveBeenCalledOnce()
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('limits the padded system timeline to two hours, including gaps', () => {
+    const files = Array.from({ length: 40 }, (_, sequence) => ({
+      sequence, startMs: sequence * 180_000, durationMs: 180_000, mimeType: 'audio/wav', size: 44 + 180 * 32_000,
+    }))
+    const audio = createRecordingGroupAudio(files, async () => new ArrayBuffer(0))
+    expect(audio.durationSeconds).toBe(MAX_RECORDING_GROUP_DURATION_MS / 1000)
+    void audio.body.cancel()
+    expect(() => createRecordingGroupAudio([...files, { ...files[0], sequence: 40, startMs: MAX_RECORDING_GROUP_DURATION_MS }], async () => new ArrayBuffer(0))).toThrow('two hours')
+  })
+
+  it('splits the maximum stored PCM chunk into complete sub-1 MB WAV inputs without changing samples', () => {
+    const source = encodeRecordingPcmWav(new Float32Array(180 * 16_000).fill(0.5))
+    const parts = splitRecordingPcmWav(source)
+    expect(parts).toHaveLength(6)
+    expect(parts.map(part => part.startMs)).toEqual([0, 30_000, 60_000, 90_000, 120_000, 150_000])
+    for (const part of parts) {
+      expect(part.audio.byteLength).toBeLessThan(1024 * 1024)
+      expect(part.durationMs).toBe(30_000)
+      const pcm = parseRecordingPcmWav(part.audio)
+      expect(pcm.sampleCount).toBe(30 * 16_000)
+      expect(new DataView(pcm.data.buffer, pcm.data.byteOffset).getInt16(0, true)).toBe(16384)
+    }
   })
 })

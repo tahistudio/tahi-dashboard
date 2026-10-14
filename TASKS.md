@@ -1339,6 +1339,11 @@ scheduled; each needs a scope before building.
   same-speaker paragraphs, creator/attendee/client names, named transcript
   relink/refresh, opt-in Nova 3 group system audio (Whisper mic), PWA icons and
   Record call shortcut, and scoped in-app two-minute call reminders/prefill.
+  Review repairs are uncommitted at base 3570d4e5: raw Nova R2 reuse, renewed
+  inference lease, 50 ms gap handling, automatic/manual Whisper fallback and
+  two-hour group cap, plus speaker/reminder/PWA/relink corrections. The two
+  PATCH mirror failures were stale mocks. Requested gates pass, 10 targeted
+  Vitest files / 245 tests. Details are in the 2026-10-14 review-repair log.
   No new migration. Main session commits and deploys. Real Nova accuracy and
   long-call latency, Windows install/background capture, and signed-in 375/768
   and dark proof remain outstanding. Phase 1 excludes calendar detection,

@@ -1271,6 +1271,10 @@ export const TOOLS: ToolDef[] = [
   tool('get_meeting_recording', 'Read a manual call recording, its chunk processing states, group speaker option and its saved named transcript. Microphone uses the creator name or Me; system uses the sole external attendee or client, or Them 1, Them 2 when group separation was explicitly enabled in the browser. Returns { recording, chunks, transcript }.', {
     id: prop('string', 'Meeting recording id'),
   }, ['id']),
+  tool('transcribe_meeting_recording', 'Advance transcription of saved recording audio by one chunk or a grouped system attempt. Repeat while pending is true; a failed recording requires a retry. Omit separateSpeakers for normal processing. Only on an administrator\'s explicit request, pass separateSpeakers=false to transcribe without speaker separation using per-chunk Whisper. Saved microphone text is retained. This does not record new audio or apply suggestions. Returns { recording, chunks, transcript, pending }.', {
+    id: prop('string', 'Meeting recording id'),
+    separateSpeakers: { type: 'boolean', enum: [false], description: 'Optional explicit administrator fallback to Whisper without speaker separation. Only false is accepted; omit for normal processing.' },
+  }, ['id']),
   tool('link_meeting_recording', 'Link a manual call recording to the client or call explicitly selected by the person. Pass either orgId, or callKind plus callId, never both. Never infer a client from transcript content. Validates call ownership and client access. Linking makes its saved transcript eligible for the existing suggestions approval flow; it never applies a task or request.', {
     id: prop('string', 'Meeting recording id'),
     orgId: prop('string', 'Explicitly selected client id; omit when linking to a call'),
@@ -2841,6 +2845,15 @@ export async function executeTool(
       const id = need('id')
       assertSafeIdArgs({ id })
       return json(await apiGet(`/api/admin/recordings/${id}`, token))
+    }
+    case 'transcribe_meeting_recording': {
+      const id = need('id')
+      assertSafeIdArgs({ id })
+      if (args.separateSpeakers !== undefined && args.separateSpeakers !== false) {
+        throw new Error('separateSpeakers must be false or omitted')
+      }
+      return json(await apiWrite(`/api/admin/recordings/${id}/transcribe`, token, 'POST',
+        args.separateSpeakers === false ? { separateSpeakers: false } : {}))
     }
     case 'link_meeting_recording': {
       const id = need('id')

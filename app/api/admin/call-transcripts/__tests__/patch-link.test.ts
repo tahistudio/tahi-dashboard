@@ -245,16 +245,21 @@ describe('PATCH /api/admin/call-transcripts/[id], attaching', () => {
       [recording],
       [recording],
       [{ orgId: 'org-a' }],
-      [],
-      [],
-      [linkedRecording],
-      [],
       [{ text: recorderTranscript.text }],
+      [],
+      [],
+      [{ attendees: '[]' }],
+      [{ name: 'Acme' }],
+      [],
       updatedCalls,
+      [],
       [{ id: 'rec-1' }],
       [],
       [linkedRecording],
       [],
+      [],
+      [{ attendees: '[]' }],
+      [{ name: 'Acme' }],
       [{ text: recorderTranscript.text }],
     ])
     vi.mocked(db).mockResolvedValue(handle as never)
@@ -265,5 +270,33 @@ describe('PATCH /api/admin/call-transcripts/[id], attaching', () => {
 
     const mirror = queries.find(q => q[0].method === 'update' && q[0].args[0] === schema.discoveryCalls)
     expect(mirror?.find(c => c.method === 'returning')?.args[0]).toEqual({ id: schema.discoveryCalls.id })
+  })
+
+  it.each([
+    { suggestedAt: '2026-10-14T00:01:00Z', suggestions: [], description: 'the sweep has read it' },
+    { suggestedAt: null, suggestions: [{ id: 'suggestion-1' }], description: 'suggestions exist' },
+  ])('refuses moving a lead transcript to a different org-less discovery call after $description', async ({ suggestedAt, suggestions }) => {
+    const existingRecording = { ...recording, orgId: null, callKind: 'discovery', callId: 'disc-old' }
+    const linkedTranscript = { ...recorderTranscript, callKind: 'discovery', callId: 'disc-old' }
+    const { handle, queries } = makeDb([
+      [linkedTranscript],
+      [existingRecording],
+      [{ orgId: null }], // Scope of the old call.
+      [existingRecording],
+      [existingRecording], // Lease claim.
+      [{ orgId: null }], // Scope of the new call.
+      [{ suggestedAt }],
+      suggestions,
+      [], // Release the lease after refusing the move.
+    ])
+    vi.mocked(db).mockResolvedValue(handle as never)
+
+    const res = await PATCH(req({ callKind: 'discovery', callId: 'disc-new' }), params('ct-1'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining('suggestions flow') })
+    const updates = queries.filter(q => q[0].method === 'update')
+    expect(updates).toHaveLength(2)
+    expect(updates.every(q => q[0].args[0] === schema.meetingRecordings)).toBe(true)
+    expect(updates.every(q => !Object.hasOwn(q.find(c => c.method === 'set')?.args[0] as object, 'callId'))).toBe(true)
   })
 })

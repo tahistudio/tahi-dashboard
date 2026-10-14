@@ -1,5 +1,6 @@
 import type { MeetingRecordingChunk, RecordingSegment, ReserveRecordingChunk } from './meeting-recordings-types'
 import type { RecordingSpeakerNames } from './recording-speaker-names'
+import { splitRecordingPcmWav } from './recording-group-audio'
 
 export const RECORDING_MODEL = '@cf/openai/whisper-large-v3-turbo' as const
 export const MAX_RECORDING_CHUNK_BYTES = 6 * 1024 * 1024
@@ -120,9 +121,19 @@ export async function loadRecordingAi(): Promise<RecordingAiBinding | null> {
   } catch { return null }
 }
 
-export async function transcribeRecordingAudio(audio: ArrayBuffer, durationMs: number, ai: RecordingAiBinding | null): Promise<{ text: string; segments: RecordingSegment[] }> {
+export async function transcribeRecordingAudio(audio: ArrayBuffer, durationMs: number, ai: RecordingAiBinding | null, mimeType?: string): Promise<{ text: string; segments: RecordingSegment[] }> {
   if (!ai) throw new RecordingError('Transcription is unavailable. The audio is saved; retry when Workers AI is available.', 503)
   if (!audio.byteLength || audio.byteLength > MAX_RECORDING_CHUNK_BYTES) throw new RecordingError('Audio chunk size is invalid.')
+  if (mimeType === 'audio/wav') {
+    const results = []
+    for (const part of splitRecordingPcmWav(audio)) {
+      const result = await transcribeRecordingAudio(part.audio, part.durationMs, ai)
+      results.push({ text: result.text, segments: result.segments.length ? result.segments.map(segment => ({
+        ...segment, start: segment.start + part.startMs / 1000, end: segment.end + part.startMs / 1000,
+      })) : result.text ? [{ start: part.startMs / 1000, end: (part.startMs + part.durationMs) / 1000, text: result.text }] : [] })
+    }
+    return { text: results.map(result => result.text).filter(Boolean).join(' '), segments: parseSegments(results.flatMap(result => result.segments), durationMs) }
+  }
   const bytes = new Uint8Array(audio)
   let binary = ''
   for (let offset = 0; offset < bytes.length; offset += 8192) {

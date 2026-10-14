@@ -1100,3 +1100,53 @@ signed-in 375/768 light/dark flows, raw-audio conversion/recovery, and real Nova
 speaker accuracy/representative long-call latency/provider limits. Browser
 timer throttling while minimized/asleep can delay an open-app reminder.
 REC.0 stays [ ]; no phase 1b live claim or completion flip.
+
+## 2026-10-14, REC.0 phase 1b review repairs, uncommitted
+
+Started with clean git status on feat/rec0-phase1b, HEAD 3570d4e5. Liam asked
+for only the listed review findings and two full-suite failures to be fixed,
+with no commit, push, deployment, migration, production data or secret change.
+
+The two PATCH call-transcript mirror tests were stale positional mocks:
+linkRecording now loads the previous transcript text before speaker lookups,
+but the old result queue returned an empty row there, causing Transcript not
+found (404). Updated previous-text/team/attendee/client query fixtures; both
+mirror outcomes pass without changing PATCH's implementation. Recorder relink
+now checks suggestions when two org-less calls have different identities,
+covering suggestedAt and existing task_suggestions separately.
+
+Nova gap words clamp into the preceding chunk (50 ms gap regression). Raw
+Nova JSON is create-only in R2 at meeting-recordings/{id}/system/nova-3.json
+before parsing or D1 result writes, and read before later inference. Parse
+and transactional D1 failures reuse it without another Nova call. Removed
+the local timeout race; transcription holds a 15-minute lease renewed every
+minute. A delayed-result test advances 16 minutes, refuses a concurrent
+retry and retains the original response. Two failed group attempts switch
+the options to separateSpeakers=false and continue system chunks through
+Whisper. Manual fallback has the same guard/lease and full-profile worker
+MCP parity, with designers explicitly blocked. Fallback updates are atomic;
+completed mic rows survive, including manual fallback after Nova succeeded
+but finalization failed. Three-minute system WAV chunks become six complete
+30-second inputs under 1 MB with restored timing offsets. Tests decode all
+inputs and verify the final transcript and mic text/segments/attempts.
+
+Group mode caps the padded system timeline at two hours and automatically
+uses Whisper above that. Decision #071 records checked primary sources:
+Cloudflare documents no Nova-specific audio byte/duration maximum, only
+ASR rate limits; the application cap does not prove provider acceptance.
+Real inference remains unverified. UI help has the cap and US$0.34, and
+mic-only capture explains why separation was dropped. Tahi domain emails
+count as team, reminder creator fallback applies only without attendees,
+the reminder effect depends on recorder-page boolean, scheduled call order
+uses the indexed raw column while keeping julianday filters, and manifest
+id is /overview to preserve install identity.
+
+Requested fail-closed gate passed: npm run type-check exit 0; CI=1 npm run
+lint exit 0 (existing warnings, no touched-dashboard warnings); worker tsc
+--noEmit exit 0; 10 targeted Vitest files / 245 tests passed, exit 0. Used
+the ignored native-config sandbox runner because standard esbuild startup
+hits spawn EPERM. Logs: .wrangler/rec0-review-type-check.log,
+.wrangler/rec0-review-lint.log, .wrangler/rec0-review-worker-tsc.log and
+.wrangler/rec0-review-vitest.log. Independent QA source review and UIUX
+spacing review pass. No build, browser/live or provider test was claimed.
+All repair changes stay uncommitted; REC.0 stays open.

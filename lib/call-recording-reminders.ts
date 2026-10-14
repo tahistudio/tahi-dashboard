@@ -51,11 +51,7 @@ function isMyAttendee(attendee: ReminderAttendee, identity: CallReminderIdentity
 /** Client scope is enforced by the existing call routes; this selects my calls. */
 export function isMyReminderCall(call: ReminderCall, identity: CallReminderIdentity): boolean {
   const attendees = attendeesOf(call.attendees)
-  const mine = attendees.find(attendee => isMyAttendee(attendee, identity))
-  if (mine) return true
-  // An explicit decline overrides ownership of a call the member created.
-  if (attendees.some(attendee => attendee.responseStatus === 'declined'
-    && isMyAttendee({ ...attendee, responseStatus: undefined }, identity))) return false
+  if (attendees.length) return attendees.some(attendee => isMyAttendee(attendee, identity))
   return call.createdById === identity.userId || call.createdById === identity.teamMemberId
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "Tahi Dashboard",
-  "id": "/",
+  "id": "/overview",
   "short_name": "Tahi",
   "description": "Tahi Studio client portal and operations dashboard.",
   "start_url": "/overview",

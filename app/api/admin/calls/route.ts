@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     .from(schema.scheduledCalls)
     .leftJoin(schema.organisations, eq(schema.scheduledCalls.orgId, schema.organisations.id))
     .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(asc(sql`julianday(${schema.scheduledCalls.scheduledAt})`))
+    .orderBy(asc(schema.scheduledCalls.scheduledAt))
     .limit(limit)
 
   return NextResponse.json({ calls })

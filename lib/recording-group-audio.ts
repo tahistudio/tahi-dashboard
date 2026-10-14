@@ -3,6 +3,8 @@ import type { RecordingSegment } from '@/lib/meeting-recordings-types'
 export const RECORDING_GROUP_MODEL = '@cf/deepgram/nova-3'
 export const RECORDING_PCM_SAMPLE_RATE = 16_000
 export const RECORDING_PCM_HEADER_BYTES = 44
+export const MAX_RECORDING_GROUP_DURATION_MS = 2 * 60 * 60 * 1000
+export const RECORDING_GROUP_LEASE_MS = 15 * 60 * 1000
 const PCM_BYTES_PER_SAMPLE = 2
 const MAX_CHUNK_DURATION_MS = 180_000
 const MAX_RECORDING_DURATION_MS = 12 * 60 * 60 * 1000
@@ -28,6 +30,11 @@ export interface RecordingGroupAiBinding {
     language: 'en'
     punctuate: true
   }): Promise<unknown>
+}
+
+export interface RecordingGroupResultStore {
+  read(): Promise<{ value: unknown } | null>
+  create(value: unknown): Promise<unknown>
 }
 
 function writeAscii(view: DataView, offset: number, text: string): void {
@@ -87,6 +94,21 @@ export function parseRecordingPcmWav(audio: ArrayBuffer): { data: Uint8Array; sa
   return { data: new Uint8Array(audio, RECORDING_PCM_HEADER_BYTES), sampleCount: dataSize / PCM_BYTES_PER_SAMPLE }
 }
 
+/** Keep fallback inputs independently decodable and below the tutorial's 1 MB chunk size. */
+export function splitRecordingPcmWav(audio: ArrayBuffer): Array<{ audio: ArrayBuffer; startMs: number; durationMs: number }> {
+  const pcm = parseRecordingPcmWav(audio)
+  const samplesPerPart = 30 * RECORDING_PCM_SAMPLE_RATE
+  const parts = []
+  for (let start = 0; start < pcm.sampleCount; start += samplesPerPart) {
+    const count = Math.min(samplesPerPart, pcm.sampleCount - start)
+    const bytes = new Uint8Array(RECORDING_PCM_HEADER_BYTES + count * PCM_BYTES_PER_SAMPLE)
+    bytes.set(wavHeader(count))
+    bytes.set(pcm.data.subarray(start * PCM_BYTES_PER_SAMPLE, (start + count) * PCM_BYTES_PER_SAMPLE), RECORDING_PCM_HEADER_BYTES)
+    parts.push({ audio: bytes.buffer, startMs: start * 1000 / RECORDING_PCM_SAMPLE_RATE, durationMs: count * 1000 / RECORDING_PCM_SAMPLE_RATE })
+  }
+  return parts
+}
+
 interface TimelineChunk<T extends RecordingGroupChunk> {
   chunk: T
   startSample: number
@@ -114,6 +136,9 @@ function groupTimeline<T extends RecordingGroupChunk>(chunks: readonly T[]): { c
       throw new Error('System audio timing is invalid for speaker separation.')
     }
     endSample = Math.max(endSample, startSample + sampleCount)
+    if (endSample * 1000 / RECORDING_PCM_SAMPLE_RATE > MAX_RECORDING_GROUP_DURATION_MS) {
+      throw new Error('Speaker separation is limited to two hours of system audio. Transcribe without speaker separation.')
+    }
     return { chunk, startSample, sampleCount }
   })
   return { chunks: timeline, sampleCount: endSample }
@@ -194,22 +219,22 @@ export function parseRecordingGroupResult(value: unknown, durationSeconds: numbe
 
 /** One inference keeps remote speaker identities stable across chunk edges. */
 export async function transcribeRecordingGroup<T extends RecordingGroupChunk>(
-  ai: RecordingGroupAiBinding,
+  ai: RecordingGroupAiBinding | null,
   chunks: readonly T[],
   loadAudio: (chunk: T) => Promise<ArrayBuffer>,
-  timeoutMs = 120_000,
+  store?: RecordingGroupResultStore,
 ): Promise<{ text: string; segments: RecordingDiarizedSegment[] }> {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) throw new Error('Speaker separation timeout is invalid.')
   const audio = createRecordingGroupAudio(chunks, loadAudio)
-  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const result = await Promise.race([
-      ai.run(RECORDING_GROUP_MODEL, { audio: { body: audio.body, contentType: 'audio/wav' }, diarize: true, language: 'en', punctuate: true }),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Speaker separation timed out. Retry the recording.')), timeoutMs) }),
-    ])
+    const cached = await store?.read()
+    if (cached) return parseRecordingGroupResult(cached.value, audio.durationSeconds)
+    if (!ai) throw new Error('Speaker separation is unavailable. Your saved audio is retained; retry when Workers AI is available.')
+    // Await the binding itself: a local timeout must not abandon a billable late result.
+    const raw = await ai.run(RECORDING_GROUP_MODEL, { audio: { body: audio.body, contentType: 'audio/wav' }, diarize: true, language: 'en', punctuate: true })
+    // Store before parsing or any result writes so every retry reuses this inference.
+    const result = store ? await store.create(raw) : raw
     return parseRecordingGroupResult(result, audio.durationSeconds)
   } finally {
-    if (timer !== undefined) clearTimeout(timer)
     void audio.body.cancel().catch(() => {})
   }
 }
