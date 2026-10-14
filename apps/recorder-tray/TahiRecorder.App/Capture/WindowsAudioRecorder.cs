@@ -180,7 +180,9 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         }
         catch (Exception exception) when (exception is COMException or InvalidOperationException
             or ArgumentException or NotSupportedException or TimeoutException or DllNotFoundException
-            or EntryPointNotFoundException)
+            or EntryPointNotFoundException
+            // Process loopback activation can surface any HRESULT; fall back rather than stop.
+            || (channel.Source?.ProcessLoopbackId is not null && exception is not OutOfMemoryException))
         {
             CloseChannel(channel);
             if (channel.Source?.ProcessLoopbackId is { } processId)

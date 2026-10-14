@@ -276,7 +276,7 @@ Release solution build passed for all three projects with zero warnings/errors;
 all 207 xUnit tests passed, zero failed/skipped, in one test assembly. Logs are
 `.build-logs/round4-build.log`, `round4-tests.log` and `round4-tests.trx`.
 No folder publish or recorder launch was performed in these follow-ups.
-The uncommitted live-call device repair builds all three solution projects in
+The live-call device repair (committed as 611b3515) builds all three solution projects in
 Release with zero warnings/errors and passes all 256 xUnit tests, zero
 failed/skipped. The 49 new cases cover endpoint selection and fallbacks,
 explicit overrides, source switches, per-track peaks and silence boundaries,
