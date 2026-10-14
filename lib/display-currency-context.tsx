@@ -258,7 +258,7 @@ export function DisplayCurrencyProvider({ children, initial, pinned }: ProviderP
     return formatCurrencyBase(toDisplay(amountNzd), displayCurrency)
   }, [toDisplay, displayCurrency, pinnedCode])
 
-  const fxFreshness = getFxFreshness(exchangeRates)
+  const fxFreshness = useMemo(() => getFxFreshness(exchangeRates), [exchangeRates])
   const value = useMemo<DisplayCurrencyContextValue>(() => ({
     displayCurrency,
     setDisplayCurrency,

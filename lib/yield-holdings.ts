@@ -78,9 +78,9 @@ export function parseXeroYieldHoldings(accountsData: unknown, organisationData: 
     const pinnedId = overrides[currency]
     const matches = accounts.map(record).filter(a => a?.Status === 'ACTIVE'
       && a.Type === 'BANK' && a.CurrencyCode === currency
-      && (pinnedId !== undefined
-        ? a.AccountID === pinnedId
-        : new RegExp(`(^|_)YIELD_${currency}$`).test(nameKey(a.Name))))
+      && (pinnedId === undefined || a.AccountID === pinnedId)
+      // A pin narrows the choice but never admits a non-yield account.
+      && new RegExp(`(^|_)YIELD_${currency}$`).test(nameKey(a.Name)))
     const account = matches[0]
     if (matches.length !== 1 || !account || typeof account.AccountID !== 'string' || !account.AccountID
       || account.CurrencyCode !== currency || typeof account.Name !== 'string') {

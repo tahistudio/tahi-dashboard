@@ -71,11 +71,11 @@ describe('Xero AWX Yield source, synthetic report fixtures', () => {
     ] }, organisation, summary()).ok).toBe(true)
   })
 
-  it('accepts optional pinned AccountIDs while preserving bank status, currency and uniqueness checks', () => {
+  it('accepts pinned AccountIDs only for yield-named accounts, preserving bank status, currency and uniqueness checks', () => {
     const renamed = { Accounts: accounts.Accounts.map(account => account.CurrencyCode === 'USD'
       ? { ...account, Name: 'Renamed investment account' }
       : account) }
-    expect(parseXeroYieldHoldings(renamed, organisation, summary(), { USD: 'yield-usd' }).ok).toBe(true)
+    expect(parseXeroYieldHoldings(renamed, organisation, summary(), { USD: 'yield-usd' }).ok).toBe(false)
     expect(parseXeroYieldHoldings({ Accounts: [...accounts.Accounts, { ...accounts.Accounts[0], AccountID: 'another-usd' }] },
       organisation, summary(), { USD: 'yield-usd', AUD: 'yield-aud' }).ok).toBe(true)
     expect(parseXeroYieldHoldings({ Accounts: [...accounts.Accounts, accounts.Accounts[0]] },
