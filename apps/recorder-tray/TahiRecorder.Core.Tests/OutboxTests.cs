@@ -163,6 +163,7 @@ public sealed class OutboxTests : IDisposable
                 await pump.PumpOnceAsync();
                 var item = await store.ReadAsync(id);
                 Assert.Equal(attempt, item.Failures);
+                Assert.Equal(attempt, item.ConsecutiveIoFailures);
                 Assert.False(item.Chunks.Single().Confirmed);
                 if (attempt < 10)
                 {
@@ -190,6 +191,124 @@ public sealed class OutboxTests : IDisposable
         Assert.Equal(1, api.Stops);
         Assert.Equal(0, api.Uploads);
         Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task OfflineRetriesDoNotConsumeChunkIoFailureBudget()
+    {
+        var (store, id) = await QueuedAsync();
+        api.ReserveError = new HttpRequestException();
+        for (var attempt = 1; attempt <= 12; attempt++)
+        {
+            await new OutboxPump(Store, api, clock).PumpOnceAsync();
+            var offline = await store.ReadAsync(id);
+            Assert.Null(offline.TerminalState);
+            Assert.Equal(attempt, offline.Failures);
+            Assert.Equal(0, offline.ConsecutiveIoFailures);
+            clock.Advance(offline.NextAttemptUtc - clock.GetUtcNow());
+        }
+
+        api.ReserveError = null;
+        var path = Path.Combine(directory, id.ToString("D"), "mic-0000.wav");
+        using (var lockedAudio = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await new OutboxPump(Store, api, clock).PumpOnceAsync();
+            var delayed = await store.ReadAsync(id);
+            Assert.Null(delayed.TerminalState);
+            Assert.Equal(13, delayed.Failures);
+            Assert.Equal(1, delayed.ConsecutiveIoFailures);
+            Assert.False(delayed.Chunks.Single().Confirmed);
+            clock.Advance(delayed.NextAttemptUtc - clock.GetUtcNow());
+        }
+
+        await new OutboxPump(Store, api, clock).PumpOnceAsync();
+        Assert.True((await store.ReadAsync(id)).Chunks.Single().Confirmed);
+        Assert.Equal(0, api.Stops);
+    }
+
+    [Theory]
+    [InlineData("network")]
+    [InlineData("api")]
+    [InlineData("timeout")]
+    [InlineData("json")]
+    public async Task NonIoFailureResetsConsecutiveIoBudgetAcrossRestart(string failure)
+    {
+        var (store, id) = await QueuedAsync();
+        var path = Path.Combine(directory, id.ToString("D"), "mic-0000.wav");
+        using var lockedAudio = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        for (var attempt = 1; attempt <= 9; attempt++)
+        {
+            await new OutboxPump(Store, api, clock).PumpOnceAsync();
+            var delayed = await store.ReadAsync(id);
+            Assert.Null(delayed.TerminalState);
+            Assert.Equal(attempt, delayed.ConsecutiveIoFailures);
+            clock.Advance(delayed.NextAttemptUtc - clock.GetUtcNow());
+        }
+
+        api.ReserveError = failure switch
+        {
+            "network" => new HttpRequestException(),
+            "api" => new RecorderApiException(503, "membership_unavailable"),
+            "timeout" => new OperationCanceledException(),
+            _ => new JsonException()
+        };
+        await new OutboxPump(Store, api, clock).PumpOnceAsync();
+        var interrupted = await store.ReadAsync(id);
+        Assert.Null(interrupted.TerminalState);
+        Assert.Equal(10, interrupted.Failures);
+        Assert.Equal(0, interrupted.ConsecutiveIoFailures);
+        clock.Advance(interrupted.NextAttemptUtc - clock.GetUtcNow());
+        api.ReserveError = null;
+
+        for (var attempt = 1; attempt <= 10; attempt++)
+        {
+            await new OutboxPump(Store, api, clock).PumpOnceAsync();
+            var delayed = await store.ReadAsync(id);
+            Assert.Equal(attempt, delayed.ConsecutiveIoFailures);
+            Assert.Equal(attempt < 10 ? null : "blocked", delayed.TerminalState);
+            clock.Advance(delayed.NextAttemptUtc - clock.GetUtcNow());
+        }
+        Assert.Equal(1, api.Stops);
+        Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task SuccessfulPumpResetsConsecutiveIoBudgetBeforeNextChunk()
+    {
+        var (store, id) = await QueuedAsync();
+        var path = Path.Combine(directory, id.ToString("D"), "mic-0000.wav");
+        using (var lockedAudio = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            for (var attempt = 1; attempt <= 9; attempt++)
+            {
+                await new OutboxPump(Store, api, clock).PumpOnceAsync();
+                var delayed = await store.ReadAsync(id);
+                Assert.Equal(attempt, delayed.ConsecutiveIoFailures);
+                clock.Advance(delayed.NextAttemptUtc - clock.GetUtcNow());
+            }
+        }
+
+        await new OutboxPump(Store, api, clock).PumpOnceAsync();
+        var uploaded = await store.ReadAsync(id);
+        Assert.True(uploaded.Chunks.Single().Confirmed);
+        Assert.Equal(0, uploaded.Failures);
+        Assert.Equal(0, uploaded.ConsecutiveIoFailures);
+        await store.AddChunkAsync(id, "mic", 1, 100, 100, CanonicalWav.Write([], 100));
+        clock.Advance(uploaded.NextAttemptUtc - clock.GetUtcNow());
+
+        var nextPath = Path.Combine(directory, id.ToString("D"), "mic-0001.wav");
+        using var nextLockedAudio = new FileStream(nextPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        for (var attempt = 1; attempt <= 9; attempt++)
+        {
+            await new OutboxPump(Store, api, clock).PumpOnceAsync();
+            var delayed = await store.ReadAsync(id);
+            Assert.Null(delayed.TerminalState);
+            Assert.Equal(attempt, delayed.ConsecutiveIoFailures);
+            clock.Advance(delayed.NextAttemptUtc - clock.GetUtcNow());
+        }
+        Assert.Equal(0, api.Stops);
+        Assert.Equal(1, api.Uploads);
+        Assert.True(File.Exists(nextPath));
     }
 
     [Fact]

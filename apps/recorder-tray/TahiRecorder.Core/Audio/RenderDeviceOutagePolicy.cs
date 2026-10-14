@@ -5,6 +5,8 @@ public sealed class RenderDeviceOutagePolicy
 {
     private int _unavailable;
 
+    public void Reset() => Interlocked.Exchange(ref _unavailable, 0);
+
     public bool ObserveAvailability(bool isAvailable)
     {
         if (isAvailable)

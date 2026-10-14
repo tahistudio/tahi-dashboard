@@ -41,7 +41,9 @@ public sealed record AutomationSnapshot(
     IReadOnlyList<SuppressedCall> SuppressedCalls,
     string? ManuallyStoppedSessionKey = null,
     bool CalendarRestartQualified = false,
-    DateTimeOffset? AutoStartNotBefore = null);
+    DateTimeOffset? AutoStartNotBefore = null,
+    DateTimeOffset? StoppedRecordingStartedAt = null,
+    UpcomingCall? CalendarRestartTarget = null);
 
 /// <summary>
 /// Decisions use capture-session ownership, never microphone loudness or playback.
@@ -61,9 +63,11 @@ public sealed class RecorderAutomation
     private DateTimeOffset? _inactiveSince;
     private DateTimeOffset? _pausedUntil;
     private DateTimeOffset? _manuallyStoppedAt;
+    private DateTimeOffset? _stoppedRecordingStartedAt;
     private string? _manuallyStoppedSessionKey;
     private bool _suppressCurrentSession;
     private bool _calendarRestartQualified;
+    private UpcomingCall? _calendarRestartTarget;
     private DateTimeOffset? _autoStartNotBefore;
     private bool _meetingSessionSeen;
     private string? _recordingSessionKey;
@@ -74,9 +78,11 @@ public sealed class RecorderAutomation
     {
         _pausedUntil = snapshot?.PausedUntil;
         _manuallyStoppedAt = snapshot?.ManuallyStoppedAt;
+        _stoppedRecordingStartedAt = snapshot?.StoppedRecordingStartedAt;
         _manuallyStoppedSessionKey = snapshot?.ManuallyStoppedSessionKey;
         _suppressCurrentSession = snapshot?.SuppressCurrentSession ?? false;
-        _calendarRestartQualified = snapshot?.CalendarRestartQualified ?? false;
+        _calendarRestartTarget = snapshot?.CalendarRestartTarget;
+        _calendarRestartQualified = snapshot?.CalendarRestartQualified == true && _calendarRestartTarget is not null;
         _autoStartNotBefore = snapshot?.AutoStartNotBefore;
         _suppressedCalls = snapshot?.SuppressedCalls.ToList() ?? [];
     }
@@ -94,8 +100,10 @@ public sealed class RecorderAutomation
         CaptureFailureAction captureFailure = CaptureFailureAction.None)
     {
         ArgumentNullException.ThrowIfNull(calls);
-        ObserveActivity(now, active, captureSessionKey ?? platform);
         var nowMs = now.ToUnixTimeMilliseconds();
+        if (_calendarRestartTarget is { } target && target.EndMs + 600_000 < nowMs)
+            ClearCalendarRestart();
+        ObserveActivity(now, active, captureSessionKey ?? platform, calls);
         // Expired calendar ids no longer influence matching, while the session
         // suppression still prevents a long manually stopped call restarting.
         _suppressedCalls.RemoveAll(call => call.EndMs + 600_000 < nowMs);
@@ -112,7 +120,9 @@ public sealed class RecorderAutomation
             {
                 _suppressCurrentSession = true;
                 _manuallyStoppedAt = now;
+                _stoppedRecordingStartedAt = current.StartedAt;
                 _manuallyStoppedSessionKey = null;
+                ClearCalendarRestart();
                 return Stop(RecordingStopReason.MaximumDuration);
             }
 
@@ -157,12 +167,12 @@ public sealed class RecorderAutomation
             // A short observed closure qualifies only a later calendar window.
             // Unscheduled calls still need the full inactive stop delay.
             if (!_calendarRestartQualified || matchResult.Call is not { } later ||
-                _manuallyStoppedAt is not { } stopped ||
-                later.StartMs - 120_000 <= stopped.ToUnixTimeMilliseconds() || IsSuppressed(later))
+                _calendarRestartTarget is not { } restartTarget ||
+                !CallMatcher.SameCall(later, restartTarget) || !IsLaterRestartCall(later))
                 return [];
             _suppressCurrentSession = false;
             _manuallyStoppedSessionKey = null;
-            _calendarRestartQualified = false;
+            ClearCalendarRestart();
         }
 
         if (matchResult.HasOpenWindow)
@@ -214,8 +224,9 @@ public sealed class RecorderAutomation
             && (call.StartMs == representedStart || call.StartMs <= nowMs && call.EndMs >= nowMs)))
             _suppressedCalls.Add(new SuppressedCall(call.Id, call.Kind, call.EndMs));
         _suppressCurrentSession = true;
-        _calendarRestartQualified = false;
+        ClearCalendarRestart();
         _manuallyStoppedAt = now;
+        _stoppedRecordingStartedAt = Current.StartedAt;
         _manuallyStoppedSessionKey = _recordingSessionKey;
         return Stop(reason);
     }
@@ -254,14 +265,20 @@ public sealed class RecorderAutomation
 
     public AutomationSnapshot ExportState() => new(
         _pausedUntil, _manuallyStoppedAt, _suppressCurrentSession, _suppressedCalls.ToArray(),
-        _manuallyStoppedSessionKey, _calendarRestartQualified, _autoStartNotBefore);
+        _manuallyStoppedSessionKey, _calendarRestartQualified, _autoStartNotBefore,
+        _stoppedRecordingStartedAt, _calendarRestartTarget);
 
-    private void ObserveActivity(DateTimeOffset now, bool active, string sessionKey)
+    private void ObserveActivity(DateTimeOffset now, bool active, string sessionKey, IReadOnlyList<UpcomingCall> calls)
     {
-        if (_suppressCurrentSession && _manuallyStoppedAt is { } stopped && _inactiveSince is { } closed)
+        if (Current is null && _suppressCurrentSession && !_calendarRestartQualified && _inactiveSince is { } closed &&
+            now - closed >= OverrunInactiveDelay)
         {
-            var inactiveAfterStop = closed > stopped ? closed : stopped;
-            if (now - inactiveAfterStop >= OverrunInactiveDelay) _calendarRestartQualified = true;
+            // A short closure belongs to the next eligible call, including an
+            // early rejoin before its window opens. It cannot authorise later windows.
+            _calendarRestartTarget = calls.Where(call => IsLaterRestartCall(call) &&
+                    call.EndMs + 600_000 >= now.ToUnixTimeMilliseconds())
+                .OrderBy(call => call.StartMs).FirstOrDefault();
+            _calendarRestartQualified = _calendarRestartTarget is not null;
         }
         if (active)
         {
@@ -269,7 +286,7 @@ public sealed class RecorderAutomation
             {
                 _suppressCurrentSession = false;
                 _manuallyStoppedSessionKey = null;
-                _calendarRestartQualified = false;
+                ClearCalendarRestart();
             }
             if (_observedSessionKey != sessionKey) _activeSince = now;
             _observedSessionKey = sessionKey;
@@ -285,9 +302,20 @@ public sealed class RecorderAutomation
             {
                 _suppressCurrentSession = false;
                 _manuallyStoppedSessionKey = null;
-                _calendarRestartQualified = false;
+                ClearCalendarRestart();
             }
         }
+    }
+
+    private bool IsLaterRestartCall(UpcomingCall call) =>
+        _manuallyStoppedAt is { } stopped && _stoppedRecordingStartedAt is { } started &&
+        call.StartMs > stopped.ToUnixTimeMilliseconds() &&
+        call.StartMs - 120_000 > started.ToUnixTimeMilliseconds() && !IsSuppressed(call);
+
+    private void ClearCalendarRestart()
+    {
+        _calendarRestartQualified = false;
+        _calendarRestartTarget = null;
     }
 
     private List<UpcomingCall> FindNextCalls(long nowMs, RecordingPlan current, IReadOnlyList<UpcomingCall> calls)
@@ -315,6 +343,7 @@ public sealed class RecorderAutomation
         DateTimeOffset now, UpcomingCall? call, string platform, bool automatic, string? title = null,
         IReadOnlyList<UpcomingCall>? calendarCandidates = null)
     {
+        ClearCalendarRestart();
         _currentCalendarContext = call;
         _currentCalendarCandidates = calendarCandidates ?? (call is null ? [] : [call]);
         _meetingSessionSeen = automatic;

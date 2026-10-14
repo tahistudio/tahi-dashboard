@@ -1495,3 +1495,60 @@ confirmed the three-project build and all 181 tests. No code changed after the
 successful gate. No folder publish, installation, recorder launch or real-call
 proof is claimed for this follow-up. Native hardware checks remain pending;
 REC.0 remains open.
+
+## 2026-10-14, REC.0 Windows tray round 4, follow-up to 6964660b
+
+First command confirmed clean git status on feat/rec0-tray-app at 6964660b.
+Round 3 is committed at that HEAD. Liam requested only the listed re-review
+repairs, a whole Release solution build and all tests, with no commit. README,
+STATUS, TASKS and Decision #072 now identify round 3's commit and round 4's
+uncommitted follow-up. No dashboard, commit, push, deploy, pairing, secret or
+production-data operation was performed. REC.0 remains open for installed
+Windows integration and real-call proof.
+
+P1-A: StopWithSuppression saves the stopped recording's StartedAt in the
+automation snapshot. A later calendar call must start after Stop, have a window
+opening strictly after that recording began, and pass IsSuppressed, following
+five seconds of observed inactivity. Count a closure already observed before
+Stop. Keep continuously active sessions suppressed. Qualification is bound to
+one eligible calendar call, persisted with its window, and clears after that
+window closes or whenever a new recording starts. A later call cannot spend
+another call's qualification. Legacy snapshots without a target fail closed.
+
+Added all nine combinations of Stop at 10:28:30, 10:29:30 and 10:29:59 with
+20, 45 and 59 seconds of inactivity, including a JSON snapshot restore. B at
+10:30 records after rejoin. For rejoins before 10:30, observe B at 10:30:01:
+the existing matcher deliberately treats both inclusive intervals as ambiguous
+at their exact common boundary. The already-inactive case leaves at 10:29:00,
+stops at 10:29:10 and rejoins at 10:29:40. Own-window protection now tests a
+recording starting exactly at and inside the window with no suppressed ids to
+hide an incorrect time predicate. Tests also pin five seconds, continuous late
+stops, target identity, expiry at window close plus one millisecond, restored
+qualification and new-recording consumption. All twelve initial late-stop and
+qualification regressions failed before the automation repair; all 74 automation
+cases passed after it.
+
+P2-B: persisted ConsecutiveIoFailures is separate from the general backoff
+counter. Success or any non-IO error resets it; only consecutive IO failures
+consume the ten-attempt cap. Tests cover twelve offline retries then a first
+IO failure, each non-IO retry class interrupting nine IO failures, fresh pumps
+reading the persisted counter, the tenth consecutive IO block and success before
+a subsequent locked chunk.
+
+P3: Program's existing StartupRecovery helper preserves a message already
+containing the folder path, case-insensitively, instead of appending generic
+recovery again. Bare errors retain path and recovery guidance. StartCore resets
+the render-outage policy so a subsequent recording reports its own outage even
+when the render device never reconnected. Both have regression coverage.
+
+Final Release gate passed, exit 0 for build and tests:
+    dotnet build TahiRecorder.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false
+    Build succeeded. 0 Warning(s), 0 Error(s). Time Elapsed 00:00:00.63.
+    dotnet test TahiRecorder.sln -c Release --no-build --no-restore -m:1 --logger "trx;LogFileName=round4-tests.trx" --results-directory .build-logs
+    Passed! Failed: 0, Passed: 207, Skipped: 0, Total: 207, Duration: 2 s.
+All three solution projects built; one xUnit test assembly ran. Existing restored
+.packages were used without downloads. Raw logs and TRX:
+apps/recorder-tray/.build-logs/round4-build.log, round4-tests.log and
+round4-tests.trx. Independent source QA and source UX review passed with no
+findings. No code changed after the successful gate. No folder publish,
+installation, recorder launch or real-call proof is claimed for this follow-up.

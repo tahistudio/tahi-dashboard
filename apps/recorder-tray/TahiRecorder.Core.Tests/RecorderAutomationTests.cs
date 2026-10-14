@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TahiRecorder.Core.Api;
 using TahiRecorder.Core.Automation;
 
@@ -605,17 +606,160 @@ public sealed class RecorderAutomationTests
         else Assert.Empty(actions);
     }
 
-    [Fact]
-    public void ShortClosureDoesNotReleaseCalendarWindowAlreadyOpenAtManualStop()
+    [Theory]
+    [InlineData(60)]
+    [InlineData(30)]
+    public void ShortClosureDoesNotReleaseCalendarWindowAlreadyOpenAtManualStop(int recordingSecondsBeforeStop)
     {
         var call = Call("already-open", Noon.AddMinutes(1), TimeSpan.FromMinutes(30));
         var recorder = new RecorderAutomation();
-        recorder.ManualStart(Noon.AddMinutes(-1));
+        // The recording begins at or inside this call's own window, before the
+        // calendar feed knows about it. Suppressed ids cannot hide a bad time check.
+        recorder.ManualStart(Noon.AddSeconds(-recordingSecondsBeforeStop));
         recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [], "zoom:101");
         recorder.ManualStop(Noon);
+        Assert.Empty(recorder.ExportState().SuppressedCalls);
         recorder.Tick(Noon.AddSeconds(1), false, "unknown", [call]);
         Assert.Empty(recorder.Tick(Noon.AddSeconds(21), true, "zoom", [call], "zoom:101"));
         Assert.Empty(recorder.Tick(Noon.AddMinutes(1), true, "zoom", [call], "zoom:101"));
+    }
+
+    [Theory]
+    [InlineData(90, 20)]
+    [InlineData(90, 45)]
+    [InlineData(90, 59)]
+    [InlineData(30, 20)]
+    [InlineData(30, 45)]
+    [InlineData(30, 59)]
+    [InlineData(1, 20)]
+    [InlineData(1, 45)]
+    [InlineData(1, 59)]
+    public void LateStopThenBriefInactivityRecordsBackToBackCallAfterSnapshotRestore(
+        int secondsBeforeNextCall, int inactiveSeconds)
+    {
+        var tenThirty = new DateTimeOffset(2026, 10, 14, 10, 30, 0, TimeSpan.Zero);
+        var first = Call("A", tenThirty.AddMinutes(-30), TimeSpan.FromMinutes(30));
+        var second = Call("B", tenThirty, TimeSpan.FromMinutes(30));
+        UpcomingCall[] calls = [first, second];
+        var stoppedAt = tenThirty.AddSeconds(-secondsBeforeNextCall);
+        var recorder = new RecorderAutomation();
+        var original = Assert.Single(recorder.Tick(tenThirty.AddMinutes(-30), true,
+            "zoom", calls, "zoom:101")).Plan;
+        recorder.Tick(stoppedAt.AddSeconds(-1), true, "zoom", calls, "zoom:101");
+        recorder.ManualStop(stoppedAt);
+        var json = JsonSerializer.Serialize(recorder.ExportState());
+        recorder = new RecorderAutomation(JsonSerializer.Deserialize<AutomationSnapshot>(json));
+        Assert.Equal(original.StartedAt, recorder.ExportState().StoppedRecordingStartedAt);
+        recorder.Tick(stoppedAt, false, "unknown", calls);
+        var rejoinedAt = stoppedAt.AddSeconds(inactiveSeconds);
+        var actions = recorder.Tick(rejoinedAt, true, "zoom", calls, "zoom:101");
+        if (rejoinedAt < tenThirty)
+        {
+            Assert.Empty(actions);
+            // At the exact boundary both inclusive call intervals contain now.
+            // The next host observation uniquely matches B.
+            actions = recorder.Tick(tenThirty.AddSeconds(1), true, "zoom", calls, "zoom:101");
+        }
+        var start = Assert.Single(actions);
+        Assert.Equal(RecordingActionKind.Start, start.Kind);
+        Assert.Equal(second, start.Plan.Call);
+        Assert.NotEqual(original.ClientRef, start.Plan.ClientRef);
+    }
+
+    [Fact]
+    public void StopWhileAlreadyInactiveStillRecordsBackToBackCall()
+    {
+        var tenThirty = new DateTimeOffset(2026, 10, 14, 10, 30, 0, TimeSpan.Zero);
+        var first = Call("A", tenThirty.AddMinutes(-30), TimeSpan.FromMinutes(30));
+        var second = Call("B", tenThirty, TimeSpan.FromMinutes(30));
+        UpcomingCall[] calls = [first, second];
+        var recorder = new RecorderAutomation();
+        recorder.Tick(tenThirty.AddMinutes(-30), true, "zoom", calls, "zoom:101");
+        recorder.Tick(tenThirty.AddMinutes(-1), false, "unknown", calls);
+        recorder.ManualStop(tenThirty.AddSeconds(-50));
+        Assert.Empty(recorder.Tick(tenThirty.AddSeconds(-20), true, "zoom", calls, "zoom:101"));
+        Assert.Equal(second, Assert.Single(recorder.Tick(tenThirty.AddSeconds(1), true, "zoom", calls, "zoom:101")).Plan.Call);
+    }
+
+    [Fact]
+    public void ExpiredCalendarRestartQualificationCannotReleaseLaterWindowOnContinuousSession()
+    {
+        var recorder = new RecorderAutomation();
+        var target = Call("target", Noon.AddMinutes(5), TimeSpan.FromMinutes(1));
+        var later = Call("later", Noon.AddMinutes(20), TimeSpan.FromMinutes(30));
+        UpcomingCall[] calls = [target, later];
+        recorder.ManualStart(Noon.AddMinutes(-5));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", calls, "zoom:101");
+        recorder.ManualStop(Noon);
+        recorder.Tick(Noon.AddSeconds(1), false, "unknown", calls);
+        Assert.Empty(recorder.Tick(Noon.AddSeconds(6), true, "zoom", calls, "zoom:101"));
+        Assert.True(recorder.ExportState().CalendarRestartQualified);
+        var qualifiedJson = JsonSerializer.Serialize(recorder.ExportState());
+        recorder = new RecorderAutomation(JsonSerializer.Deserialize<AutomationSnapshot>(qualifiedJson));
+        Assert.Equal(target, recorder.ExportState().CalendarRestartTarget);
+        // No calendar match is available until after the qualified window closes.
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(16), true, "zoom", [], "zoom:101"));
+        Assert.True(recorder.ExportState().CalendarRestartQualified);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(16).AddMilliseconds(1), true, "zoom", [], "zoom:101"));
+        Assert.False(recorder.ExportState().CalendarRestartQualified);
+        Assert.Null(recorder.ExportState().CalendarRestartTarget);
+        var json = JsonSerializer.Serialize(recorder.ExportState());
+        recorder = new RecorderAutomation(JsonSerializer.Deserialize<AutomationSnapshot>(json));
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(20), true, "zoom", calls, "zoom:101"));
+        Assert.True(recorder.ExportState().SuppressCurrentSession);
+    }
+
+    [Fact]
+    public void NewManualRecordingConsumesCalendarRestartQualification()
+    {
+        var recorder = new RecorderAutomation();
+        var call = Call("target", Noon.AddMinutes(5), TimeSpan.FromMinutes(30));
+        recorder.ManualStart(Noon.AddMinutes(-5));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [call], "zoom:101");
+        recorder.ManualStop(Noon);
+        recorder.Tick(Noon.AddSeconds(1), false, "unknown", [call]);
+        recorder.Tick(Noon.AddSeconds(6), true, "zoom", [call], "zoom:101");
+        Assert.True(recorder.ExportState().CalendarRestartQualified);
+        recorder.ManualStart(Noon.AddSeconds(7));
+        Assert.False(recorder.ExportState().CalendarRestartQualified);
+        Assert.Null(recorder.ExportState().CalendarRestartTarget);
+        recorder.StopForLifecycle();
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(5), true, "zoom", [call], "zoom:101"));
+    }
+
+    [Theory]
+    [InlineData(90)]
+    [InlineData(30)]
+    [InlineData(1)]
+    public void LateStopWithoutObservedInactivityNeverRecordsBackToBackCall(int secondsBeforeNextCall)
+    {
+        var tenThirty = new DateTimeOffset(2026, 10, 14, 10, 30, 0, TimeSpan.Zero);
+        var first = Call("A", tenThirty.AddMinutes(-30), TimeSpan.FromMinutes(30));
+        var second = Call("B", tenThirty, TimeSpan.FromMinutes(30));
+        UpcomingCall[] calls = [first, second];
+        var recorder = new RecorderAutomation();
+        recorder.Tick(tenThirty.AddMinutes(-30), true, "zoom", calls, "zoom:101");
+        recorder.ManualStop(tenThirty.AddSeconds(-secondsBeforeNextCall));
+        Assert.Empty(recorder.Tick(tenThirty, true, "zoom", calls, "zoom:101"));
+        Assert.Empty(recorder.Tick(tenThirty.AddMinutes(20), true, "zoom", calls, "zoom:202"));
+        Assert.True(recorder.ExportState().SuppressCurrentSession);
+        Assert.False(recorder.ExportState().CalendarRestartQualified);
+    }
+
+    [Fact]
+    public void CalendarRestartQualificationCannotBeUsedByAnotherCallBeforeTargetExpires()
+    {
+        var recorder = new RecorderAutomation();
+        var target = Call("target", Noon.AddMinutes(5), TimeSpan.FromMinutes(30));
+        var later = Call("later", Noon.AddMinutes(10), TimeSpan.FromMinutes(30));
+        recorder.ManualStart(Noon.AddMinutes(-5));
+        recorder.Tick(Noon.AddSeconds(-1), true, "zoom", [target, later], "zoom:101");
+        recorder.ManualStop(Noon);
+        recorder.Tick(Noon.AddSeconds(1), false, "unknown", [target, later]);
+        recorder.Tick(Noon.AddSeconds(6), true, "zoom", [target, later], "zoom:101");
+        Assert.Equal(target, recorder.ExportState().CalendarRestartTarget);
+        Assert.Empty(recorder.Tick(Noon.AddMinutes(10), true, "zoom", [later], "zoom:101"));
+        Assert.True(recorder.ExportState().SuppressCurrentSession);
     }
 
     [Theory]

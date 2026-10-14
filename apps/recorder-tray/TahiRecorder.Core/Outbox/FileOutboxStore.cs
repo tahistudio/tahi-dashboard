@@ -19,6 +19,7 @@ public sealed class OutboxRecording
     public string? TerminalState { get; set; }
     public string? LastError { get; set; }
     public int Failures { get; set; }
+    public int ConsecutiveIoFailures { get; set; }
     public int TranscriptionPolls { get; set; }
     public bool ServerFailed { get; set; }
     public int ServerFailureRetries { get; set; }

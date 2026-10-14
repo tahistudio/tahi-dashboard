@@ -78,6 +78,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         _channels["system"] = new CaptureChannel("system");
         LastDurationMs = 0;
         LastStopCompleted = false;
+        _renderOutage.Reset();
         Interlocked.Exchange(ref _persistenceFailure, 0);
         Interlocked.Exchange(ref _audioGapStopDurationMs, -1);
         _clock.Restart();

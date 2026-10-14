@@ -1710,8 +1710,8 @@ Transient upload reads/JSON back off, transcription progress clears server
 failure retries, and terminal retention deletes the capture journal last.
 Verification is recorded in the running log; hardware/real-call proof remains.
 
-Client round 3 follow-up, 2026-10-14: fixes to 5e77adc5 remain uncommitted per
-Liam's brief. Gap state clears after stop duration is saved, and automatic
+Client round 3, 2026-10-14: fixes to 5e77adc5 are committed as 6964660b.
+Gap state clears after stop duration is saved, and automatic
 restart waits forty-five seconds while manual Start remains available. Manual
 Stop suppression clears after five seconds of observed inactivity for a later
 calendar window opening after Stop; unscheduled calls still require sixty
@@ -1725,3 +1725,18 @@ render-device outages log once per outage, and startup access errors always
 include the folder path and recovery steps. Core owns the capture and retry decisions with
 behavior tests. This repairs the approved client behavior without a new product
 decision. Verification is recorded in the running log; REC.0 remains open.
+
+Client round 4 follow-up, 2026-10-14: fixes to 6964660b remain uncommitted per
+Liam's brief. Persist the stopped recording's start time with manual suppression.
+A calendar call starting after Stop can clear session suppression after five
+seconds of observed inactivity only if its window opened after the stopped
+recording began and the call is not suppressed. This permits a back-to-back call
+after a late Stop while protecting a recording started inside that call's window.
+Keep continuous sessions suppressed. Expire restart qualification when its target
+call's window closes or a new recording starts. Cap chunk read IO failures with a
+separate consecutive counter, reset on success or any non-IO error, so offline
+time cannot cause an early block. Avoid duplicating startup recovery guidance
+when its path is already present, and reset the render-outage report for each
+recording. These are repairs to the approved client behavior. Full Release
+solution build and test verification belong in the running log; installed
+Windows checks and real-call proof remain required before REC.0 closes.

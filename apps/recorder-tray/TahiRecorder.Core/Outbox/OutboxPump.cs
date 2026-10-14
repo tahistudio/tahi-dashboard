@@ -86,6 +86,7 @@ public sealed class OutboxPump
                             || recording.NotBeforeUtc > clock.GetUtcNow()) return false;
                         var result = await AdvanceAsync(recording, cancellationToken);
                         recording.Failures = 0;
+                        recording.ConsecutiveIoFailures = 0;
                         recording.LastError = null;
                         if (recording.TerminalState is null)
                         {
@@ -144,10 +145,11 @@ public sealed class OutboxPump
         var apiError = error as RecorderApiException;
         if (apiError?.IsAuthenticationFailure == true) AuthenticationRequired = true;
         recording.Failures++;
+        recording.ConsecutiveIoFailures = error is IOException ? recording.ConsecutiveIoFailures + 1 : 0;
         // Persist only fixed messages. Exception bodies can contain upload grants.
         recording.LastError = "Upload delayed. Audio is saved for retry.";
         var retryableIo = error is IOException and not (FileNotFoundException or DirectoryNotFoundException)
-            && recording.Failures < MaxIoFailures;
+            && recording.ConsecutiveIoFailures < MaxIoFailures;
         var retryable = apiError?.IsRetryable == true || apiError?.IsAuthenticationFailure == true
             || error is HttpRequestException or OperationCanceledException or JsonException
             || retryableIo;

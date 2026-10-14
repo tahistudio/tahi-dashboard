@@ -31,6 +31,19 @@ public sealed class RenderDeviceOutagePolicyTests
     }
 
     [Fact]
+    public void NewRecordingReportsItsOwnOutageEvenIfTheDeviceNeverReconnected()
+    {
+        var policy = new RenderDeviceOutagePolicy();
+        Assert.True(policy.ObserveAvailability(isAvailable: false));
+        Assert.False(policy.ObserveAvailability(isAvailable: false));
+
+        policy.Reset();
+
+        Assert.True(policy.ObserveAvailability(isAvailable: false));
+        Assert.False(policy.ObserveAvailability(isAvailable: false));
+    }
+
+    [Fact]
     public void ConcurrentRetriesStillEmitOnlyOneNotification()
     {
         var policy = new RenderDeviceOutagePolicy();

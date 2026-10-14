@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client round 2 committed at 5e77adc5, round 3 follow-up in the worktree).
+Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client round 3 committed at 6964660b, round 4 follow-up in the worktree).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -1345,14 +1345,20 @@ scheduled; each needs a scope before building.
   The committed baseline builds with zero warnings and tests pass with restored
   packages. The first Windows review repairs are committed at 938bd68e; round 2
   silence, suppression, blocked capture, retries, ACL and folder publishing fixes
-  are committed at 5e77adc5. Round 3 follows the failed Opus re-review and remains
-  uncommitted per Liam's brief: gap auto-start hold-off, later-calendar suppression,
+  are committed at 5e77adc5. Round 3 is committed at 6964660b after the failed
+  Opus re-review: gap auto-start hold-off, later-calendar suppression,
   process-key stability, bounded chunk IO failures, faulted-job cleanup, terminal
-  recovery, render-outage logging and startup access guidance. Verification is in
-  the running log and review report. Round 2 Release build: zero warnings/errors;
+  recovery, render-outage logging and startup access guidance. Round 4 is the
+  uncommitted follow-up for late-stop back-to-back capture, expiring calendar
+  restart qualification, consecutive IO failure accounting, nonduplicated startup
+  recovery guidance and resetting the render-outage report for each recording.
+  Verification is in the running log and review report. Round 2 Release build: zero warnings/errors;
   all 152 tests pass, zero failed/skipped. Folder publish passes with native
   libraries alongside the executable. Round 3 Release build: zero warnings/errors;
-  all 181 tests pass, zero failed/skipped. No publish in this follow-up.
+  all 181 tests pass, zero failed/skipped. Round 4 Release solution build passes
+  for all three projects with zero warnings/errors; all 207 xUnit tests pass,
+  zero failed/skipped, in one test assembly. Logs and TRX are under
+  apps/recorder-tray/.build-logs/round4-*. No publish in this follow-up.
   Installed Windows checks and real calls remain required
   before closing REC.0. No commit, push, deploy, live pairing or production
   write in this review run.

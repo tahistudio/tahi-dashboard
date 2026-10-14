@@ -4,9 +4,9 @@ REC.0 phase 2 client, from the approved revision 1 spec and Decision #072.
 The server is live at `https://portal.tahi.studio` per Liam's 2026-10-14 brief.
 The exact API contract is [the server handoff](../../docs/recorder-tray-server-handoff.md).
 The initial Windows client is committed as `8665e762`, with first review fixes
-committed as `938bd68e` and round 2 fixes as `5e77adc5`. Round 3 is the follow-up
-in this worktree and remains uncommitted per Liam's brief. No production
-operation was performed.
+committed as `938bd68e`, round 2 fixes as `5e77adc5` and round 3 fixes as
+`6964660b`. Round 4 is the uncommitted follow-up in this worktree per Liam's
+brief. No production operation was performed.
 
 ## Project layout
 
@@ -106,8 +106,11 @@ meeting session ends it. Suspend, session ending and Quit flush capture without
 manual suppression. Active calls may overrun scheduled end. Manual Stop
 suppresses a continuously active session regardless of elapsed time.
 Manual-stop suppression clears after sixty seconds of observed inactivity for
-unscheduled calls. A later calendar window that opens after Stop clears it after
-five seconds of observed inactivity, allowing the next call in the same app.
+unscheduled calls. A later calendar call that starts after Stop can clear it
+after five seconds of observed inactivity if its window opened after the stopped
+recording began and the call is not suppressed. This permits a back-to-back call
+after a late Stop in the same app. That restart qualification expires when the
+target call's window closes or a new recording starts.
 Process ID changes alone never clear suppression.
 Until then, manual-stop suppression and the one-hour pause persist across restart.
 
@@ -181,7 +184,8 @@ is blocked with a fixed message, stops local capture and makes a best-effort
 server stop, resolving an uncertain create by its idempotent clientRef first. Other
 recordings continue. Missing chunk files block that recording and make a
 best-effort server stop. Other chunk read IO failures back off for at most ten
-attempts before blocking. Malformed server JSON retains audio with retry backoff.
+consecutive IO failures before blocking. Success or any non-IO error resets that
+counter, so offline time cannot exhaust it. Malformed server JSON retains audio with retry backoff.
 Server failed-state retry counts reset when transcription makes progress.
 Restart recovers and seals interrupted captures, then
 resumes upload. Damaged spool/manifest data shows needs attention without
@@ -227,10 +231,16 @@ Round 2 verification: Release solution build succeeded with zero warnings and
 errors; all 152 tests passed, zero failed/skipped. Folder publishing succeeded,
 with native runtime libraries beside the executable. Logs are in
 `.build-logs/round2-build.log`, `round2-tests.log` and `round2-publish.log`.
-Round 3 follow-up verification: Release solution build succeeded with zero
+Round 3 verification (`6964660b`): Release solution build succeeded with zero
 warnings and errors; all 181 tests passed, zero failed/skipped. Logs are in
 `.build-logs/round3-build.log`, `round3-tests.log` and `round3-tests.trx`.
-No folder publish or recorder launch was performed in this follow-up.
+Round 4 covers late-stop back-to-back capture, expiring calendar restart
+qualification, consecutive IO failure accounting, nonduplicated startup recovery
+guidance and a fresh system-audio outage report for each recording. Round 4
+Release solution build passed for all three projects with zero warnings/errors;
+all 207 xUnit tests passed, zero failed/skipped, in one test assembly. Logs are
+`.build-logs/round4-build.log`, `round4-tests.log` and `round4-tests.trx`.
+No folder publish or recorder launch was performed in these follow-ups.
 Before distribution, verify
 pairing/single instance/Windows startup/toast buttons; real
 calendar and unknown Zoom/Meet/Teams calls; muted mic and both-sided transcript;

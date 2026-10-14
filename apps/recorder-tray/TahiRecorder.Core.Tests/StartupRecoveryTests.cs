@@ -18,4 +18,17 @@ public sealed class StartupRecoveryTests
         Assert.Contains("fix the folder permissions", message);
         Assert.Contains("delete it so the recorder can recreate it", message);
     }
+
+    [Theory]
+    [InlineData("C:/LocalData/TahiRecorder")]
+    [InlineData("c:/localdata/tahirecorder")]
+    public void PathSpecificStartupErrorsKeepTheirOwnRecoveryInstructions(string reportedPath)
+    {
+        var error = new UnauthorizedAccessException(
+            $"Recorder folder '{reportedPath}' has unsafe permissions. Close Tahi Recorder and fix its owner.");
+
+        var message = StartupRecovery.DataFolderError("C:/LocalData/TahiRecorder", error);
+
+        Assert.Equal(error.Message, message);
+    }
 }
