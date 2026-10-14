@@ -22,8 +22,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
-import { computeBrief, writeBriefCache, readBriefCache, BRIEF_CACHE_KEY, type D1 } from '@/lib/overview-brief'
-import { resolveBriefCacheKey } from '@/lib/brief-cache-key'
+import { computeBrief, writeBriefCache, readBriefCache, resolveBriefContext, type D1 } from '@/lib/overview-brief'
 
 export const dynamic = 'force-dynamic'
 
@@ -90,13 +89,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await computeBrief(database, computeAuth)
+    const context = await resolveBriefContext(database, computeAuth)
+    const result = await computeBrief(database, computeAuth, context)
     const generatedAt = new Date().toISOString()
     // Cache under the scope that produced it. The cron's unrestricted owner
     // identity resolves to the plain key; a scoped admin hitting Refresh gets
     // their own row rather than overwriting the owner's brief with a
     // narrowed one.
-    const cacheKey = await resolveBriefCacheKey(database, computeAuth, BRIEF_CACHE_KEY)
+    const { cacheKey } = context
     await writeBriefCache(database, result, generatedAt, cacheKey)
     const summary = {
       ok: true,
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
       counts: { urgent: result.urgent.length, week: result.week.length, slept: result.slept.length },
     }
     await logCronRun(database, 'overview-brief', 'success', Date.now() - t0, summary, null)
-    return NextResponse.json({ ok: true, generatedAt })
+    return NextResponse.json({ ok: true, ...result, generatedAt })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await logCronRun(database, 'overview-brief', 'error', Date.now() - t0, null, message)

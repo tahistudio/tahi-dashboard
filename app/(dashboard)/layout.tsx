@@ -28,10 +28,13 @@ import { resolvePinnedCurrency, type PinnedCurrencyEvidence } from '@/lib/curren
 import { PermissionsProvider, type PermissionsValue } from '@/components/tahi/permissions-context'
 import { PrivateModeProvider } from '@/components/tahi/private-mode-context'
 import { SwrProvider } from '@/components/tahi/swr-provider'
+import { DailyBriefProvider } from '@/components/tahi/daily-brief-provider'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, inArray, sql } from 'drizzle-orm'
-import { resolvePermissions, featureMap, applyModuleGates, MODULE_SETTING_KEYS } from '@/lib/permissions'
+import { resolvePermissions, featureMap, applyModuleGates, can, MODULE_SETTING_KEYS } from '@/lib/permissions'
+import { resolveAccessScoping } from '@/lib/access-scoping'
+import { BRIEF_FEATURES, briefViewerKey } from '@/lib/brief-cache-key'
 import { linkTeamMemberOnSignIn } from '@/lib/team-link-server'
 import { linkContactOnSignIn } from '@/lib/contact-link-server'
 import { resolveAndStampOrgOnboarding } from '@/lib/org-onboarding-server'
@@ -139,6 +142,7 @@ export default async function DashboardLayout({
   // null for team sessions and for anyone we could not resolve, which the nav
   // treats as "unknown, show it" (see filterNav's clientPortalRole).
   let clientPortalRole: 'admin' | 'member' | null = null
+  let dailyBriefViewerKey: string | null = null
   try {
     const drizzle = (await db()) as unknown as D1
     const access = await resolvePermissions(drizzle, { userId, orgId })
@@ -165,6 +169,15 @@ export default async function DashboardLayout({
       isSuperAdmin: access.isSuperAdmin,
       canManagePermissions: access.canManagePermissions,
       features: applyModuleGates(featureMap(access), moduleSettings, access.isSuperAdmin),
+    }
+
+    if (isAdmin && !isPreviewingClient) {
+      const allowedOrgs = await resolveAccessScoping(drizzle, userId)
+      dailyBriefViewerKey = briefViewerKey(
+        { userId, orgId },
+        allowedOrgs,
+        BRIEF_FEATURES.filter(feature => can(access, feature)),
+      )
     }
   } catch {
     // fail-open
@@ -334,6 +347,10 @@ export default async function DashboardLayout({
     <ToastProvider>
     <DisplayCurrencyProvider pinned={pinnedCurrency}>
       <PermissionsProvider value={perms}>
+      <DailyBriefProvider
+        key={`${userId}:${orgId}:${isPreviewingClient}`}
+        viewerKey={dailyBriefViewerKey}
+      >
       <PrivateModeProvider>
       <SidebarProvider>
         {/* Sidebar collapsed-state persistence script lives in the
@@ -383,6 +400,7 @@ export default async function DashboardLayout({
         </div>
       </SidebarProvider>
       </PrivateModeProvider>
+      </DailyBriefProvider>
       </PermissionsProvider>
     </DisplayCurrencyProvider>
     </ToastProvider>

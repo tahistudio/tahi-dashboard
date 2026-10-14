@@ -145,36 +145,18 @@ export function computeRunwayMonths(totalBalanceNzd: number, avgMonthlyBurnNzd: 
 }
 
 /**
- * Total cleared cash in NZD, Airwallex-first.
- *
- * Airwallex is the source of truth for every currency it reports: its
- * `availableBalance` is the real spendable cash in the account. Xero's
- * BankSummary is used only for currencies Airwallex does not cover, so the
- * same cash is never counted twice.
- *
- * Preferring Airwallex is not just about dedup: Xero's BankSummary overstates
- * foreign-currency accounts because it books invoiced-but-not-yet-settled
- * amounts (money still owed to us) as if the cash had landed. Airwallex
- * reflects what is actually in the bank. Mirrors the aggregation in
- * financial-reports/summary so the overview Cash card and the finance page
- * agree.
+ * Total cleared cash in NZD from Airwallex wallet and materialised yield rows.
+ * Xero's wallet ledger is never cash, even for a missing Airwallex currency.
+ * The sync materialises only the documented AWX Yield account balances here.
  */
 export function aggregateCashNzd(
   airwallex: Array<{ currency: string | null; availableBalance: number }>,
-  xero: Array<{ currency: string | null; balance: number }>,
   toNzd: (amount: number, currency: string) => number,
 ): number {
-  const airwallexCurrencies = new Set<string>()
   let totalNzd = 0
   for (const b of airwallex) {
     const cur = b.currency ?? 'NZD'
-    airwallexCurrencies.add(cur)
     totalNzd += toNzd(b.availableBalance, cur)
-  }
-  for (const b of xero) {
-    const cur = b.currency ?? 'NZD'
-    if (airwallexCurrencies.has(cur)) continue
-    totalNzd += toNzd(b.balance, cur)
   }
   return totalNzd
 }

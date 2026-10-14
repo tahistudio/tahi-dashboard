@@ -22,13 +22,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { useResource } from '@/lib/use-resource'
-import { apiPath } from '@/lib/api'
+import { useDailyBrief } from '@/components/tahi/daily-brief-provider'
+import type { BriefRow } from '@/lib/overview-brief'
 import { usePermissions } from '@/components/tahi/permissions-context'
 import { stageColour } from '@/lib/chart-colors'
-import { cashFlowBasisLine } from '@/lib/cash-position'
+import { cashFlowBasisLine } from '@/lib/cash-flow-basis'
+import type { YieldFreshness } from '@/lib/yield-holdings'
 import {
   buildPipelineStageChart,
-  splitClosingDeals,
+  type ClosingSplit,
   type PipelineChartStage,
   type PipelineStageChart,
 } from '@/lib/pipeline-stage-chart'
@@ -101,6 +103,7 @@ interface CashBlock {
   monthlySurplusNzd?: number
   /** Cash free to spend once IRD and the other reserve pots are honoured. */
   disposableNzd?: number
+  yieldFreshness?: YieldFreshness
 }
 
 interface ArAging {
@@ -127,18 +130,6 @@ interface WireRow {
   type: string
   text: string
   at: string
-}
-
-interface BriefRow {
-  tone: 'risk' | 'warn' | 'ok' | ''
-  verb: string | null
-  to: string
-  text: string
-}
-interface BriefData {
-  urgent: BriefRow[]
-  week: BriefRow[]
-  slept: BriefRow[]
 }
 
 interface OffTrack {
@@ -331,12 +322,9 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
   const kpis = ov?.kpis
   const mrr = kpis?.mrr
   const series = ov?.monthlyRevenue ?? []
-  // mrrDeltaPct compares invoiced revenue month-over-month; when the current
-  // month has no invoiced revenue yet (common early in the month, or on a fresh
-  // workspace) that reads as a misleading -100%, so only surface the delta when
-  // there is real current-month revenue to compare against.
-  const currentMonthTotal = series[series.length - 1]?.total ?? 0
-  const delta = currentMonthTotal > 0 ? ov?.mrrDeltaPct : null
+  // The API compares live recurring revenue with stored MRR. Paid invoices
+  // do not determine whether that comparison exists, including early in a month.
+  const delta = ov?.mrrDeltaPct ?? null
   const heroFigure =
     series.length >= 2 ? (
       <Spark
@@ -611,9 +599,8 @@ function NeedsYouBlock({
 }
 
 function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
-  const { data, mutate } = useResource<BriefData & { generatedAt?: string }>('/api/admin/overview/brief')
+  const { data, summary, isLoading, isRefreshing: refreshing, canRefresh, error, refresh } = useDailyBrief()
   const [mounted, setMounted] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [open, setOpen] = useState<Record<string, boolean>>({ urgent: true, week: false, slept: false })
   useEffect(() => setMounted(true), [])
 
@@ -621,20 +608,11 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
   const week = data?.week ?? []
   const slept = data?.slept ?? []
 
-  // The brief is computed once per morning and cached; POST /refresh?force=1
-  // regenerates on demand, then we revalidate to pull the fresh cache.
+  // The provider publishes one refresh to the home, nav and mobile sheet.
   const onRefresh = useCallback(async () => {
-    if (ro || refreshing) return
-    setRefreshing(true)
-    try {
-      await fetch(apiPath('/api/admin/overview/brief/refresh?force=1'), { method: 'POST' })
-      await mutate()
-    } catch {
-      /* network error - leave the existing brief in place */
-    } finally {
-      setRefreshing(false)
-    }
-  }, [ro, refreshing, mutate])
+    if (ro || refreshing || !canRefresh) return
+    await refresh()
+  }, [ro, refreshing, canRefresh, refresh])
 
   // "Updated 3h ago" style relative label off the cached generatedAt stamp.
   // Guarded on `mounted` so Date.now() never runs during SSR hydration.
@@ -657,10 +635,6 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
     ? new Date().toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit', hour12: true })
     : ''
 
-  const lede =
-    urgent.length + week.length === 0
-      ? 'All clear. Nothing is waiting on you right now.'
-      : `${urgent.length} ${urgent.length === 1 ? 'thing needs' : 'things need'} you today, ${week.length} this week.`
 
   return (
     <div className="ov-brief" data-section="Daily brief">
@@ -681,7 +655,7 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
             type="button"
             className="bs-act"
             onClick={onRefresh}
-            disabled={refreshing}
+            disabled={refreshing || !canRefresh}
             aria-label="Refresh daily brief"
             title="Refresh daily brief"
           >
@@ -689,14 +663,18 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
           </button>
         )}
       </div>
-      <p className="ov-brief-lede">{lede}</p>
-      <div className="ov-brief-accs">
+      {isLoading && !data && <p className="ov-brief-lede" role="status">Loading daily brief...</p>}
+      {error && <p className="ov-brief-lede" role="alert">{error}{data ? ' Showing the previous brief.' : ''}</p>}
+      {data && <p className="ov-brief-lede">{summary}</p>}
+      {data && <div className="ov-brief-accs">
         {sections.map(s => {
           const isOpen = !!open[s.key]
           return (
             <div className={'ov-acc' + (isOpen ? ' open' : '')} key={s.key}>
               <button
                 className="ov-acc-h"
+                type="button"
+                style={{ minHeight: '2.75rem' }}
                 onClick={() => setOpen(o => ({ ...o, [s.key]: !o[s.key] }))}
                 aria-expanded={isOpen}
               >
@@ -731,7 +709,7 @@ function DailyBrief({ go, ro }: { go: (id: string) => void; ro: boolean }) {
             </div>
           )
         })}
-      </div>
+      </div>}
     </div>
   )
 }
@@ -889,7 +867,7 @@ function CashRunway({
       {loading ? (
         <Shim h={90} />
       ) : !cash ? (
-        <EmptyLine>Connect Xero to see runway.</EmptyLine>
+        <EmptyLine>Sync Airwallex to see cash and runway.</EmptyLine>
       ) : (
         <>
           <div className="ov-statrow" style={{ marginBottom: 14 }}>
@@ -914,6 +892,11 @@ function CashRunway({
               <div className="st-lbl">if revenue stopped</div>
             </div>
           </div>
+          {cash.yieldFreshness?.warning && (
+            <p role="status" className="ov-mini" style={{ color: 'var(--badge-warning-text)', margin: '0.75rem 0', overflowWrap: 'anywhere' }}>
+              {cash.yieldFreshness.warning}
+            </p>
+          )}
           <HorizonStrip runway={cash.runwayMonths} />
         </>
       )}
@@ -1013,19 +996,12 @@ function Receivables({ arAging, loading }: { arAging: ArAging | null; loading: b
 
 /* ============================================================ Ahead zone */
 
-/** A deal row, narrowed to the expected close date the card counts. Everything
- *  else on the card comes off the forecast. */
-interface DealRow {
-  id: string
-  stageIsClosedWon: number | null
-  stageIsClosedLost: number | null
-  expectedCloseDate: string | null
-}
 interface PipelineForecast {
   /** The forecast's own per-stage breakdown, already weighted by stage
    *  probability. The headline, the bars and the open-deal count are all read
    *  off this one payload, so the card cannot contradict itself. */
   byStage?: PipelineChartStage[]
+  closingSplit?: ClosingSplit
 }
 
 /** The stage chart under the Pipeline ahead stats: one row per open stage
@@ -1085,23 +1061,20 @@ function PipelineStages({
 
 function PipelineAhead({ go }: { go: (id: string) => void }) {
   const { moneyCompact } = useOvFormat()
-  const { data: dealsData } = useResource<{ items: DealRow[] }>('/api/admin/deals?limit=100')
   const { data: forecast } = useResource<PipelineForecast>('/api/admin/reports/pipeline-forecast')
-  const loading = !dealsData || !forecast
+  const loading = !forecast
 
   // Headline, bars and open-deal count all come off the forecast's own
   // per-stage rows, so the money above the bars is the sum of the bars by
   // construction, and matches weightedUpfrontNzd exactly as the forecast API
   // and the deals page report it (monthly value is shown separately below,
-  // never rolled into this number). GET /api/admin/deals is access scoped,
-  // hides archived deals and pages at 100 rows, so it cannot answer for the
-  // whole pipeline. It is read here only for expected close dates, which the
-  // forecast does not carry.
+  // never rolled into this number). Closing counts use the same complete,
+  // scoped forecast, so a paginated deal list cannot truncate them.
   const chart = useMemo(() => buildPipelineStageChart(forecast?.byStage), [forecast])
   const weightedUpfront = chart.totalWeightedUpfrontNzd
   const weightedMonthly = chart.totalWeightedMonthlyNzd
 
-  const closingSplit = useMemo(() => splitClosingDeals(dealsData?.items), [dealsData])
+  const closingSplit = forecast?.closingSplit
 
   return (
     <Card section="Pipeline ahead" span={7}>
@@ -1134,11 +1107,11 @@ function PipelineAhead({ go }: { go: (id: string) => void }) {
               <div className="st-lbl">open deals</div>
             </div>
             <div className="ov-stat">
-              <div className="st-num">{closingSplit.closingThisMonth}</div>
+              <div className="st-num">{closingSplit?.closingThisMonth ?? '·'}</div>
               <div className="st-lbl">
                 closing this month
-                {closingSplit.pastCloseDate > 0 && (
-                  <span style={{ display: 'block', marginTop: 2, color: '#C0392E' }}>
+                {closingSplit != null && closingSplit.pastCloseDate > 0 && (
+                  <span style={{ display: 'block', marginTop: '0.125rem', color: 'var(--color-danger-ink)' }}>
                     {closingSplit.pastCloseDate} past its close date
                   </span>
                 )}

@@ -2,7 +2,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { eq, ne, count, and, inArray, gte, lt, isNotNull, sql, desc } from 'drizzle-orm'
+import { eq, ne, count, and, inArray, gte, sql } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { resolvePermissions, can } from '@/lib/permissions'
 import { draftStatusList, owedStatusList } from '@/lib/invoice-status'
@@ -14,8 +14,10 @@ import {
   type ArAging,
 } from '@/lib/overview-aggregates'
 import { computeCashPosition } from '@/lib/cash-position'
+import type { YieldFreshness } from '@/lib/yield-holdings'
 import { elapsedSeconds } from '@/lib/timer-helpers'
 import { loadTaskSuggestionsOverview } from '@/lib/task-suggestions-overview'
+import { readMrrDelta } from '@/lib/mrr-delta'
 
 export const dynamic = 'force-dynamic'
 
@@ -195,7 +197,9 @@ export async function GET(req: NextRequest) {
   let mrr = 0
   try {
     const mrrRows = await drizzle.all<{ custom_mrr: number; preferred_currency: string }>(
-      sql`SELECT custom_mrr, preferred_currency FROM organisations WHERE status = 'active' AND custom_mrr > 0`
+      sql`SELECT custom_mrr,
+          COALESCE(NULLIF(custom_mrr_currency, 'NZD'), preferred_currency, 'NZD') AS preferred_currency
+          FROM organisations WHERE status = 'active' AND custom_mrr > 0`
     )
     for (const row of mrrRows ?? []) {
       mrr += toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap)
@@ -210,31 +214,7 @@ export async function GET(req: NextRequest) {
   // recurring-revenue comparison rather than the old proxy that divided this
   // month's paid invoices by last month's. Null until a prior month's snapshot
   // exists (honest: no fabricated trend).
-  let mrrDeltaPct: number | null = null
-  // The monthKey (YYYY-MM) of the prior snapshot the delta is computed
-  // against, e.g. "2026-07". Lets the card label the comparison ("vs Jul")
-  // instead of an unlabelled percentage, and flag it when the basis is more
-  // than one month back (a skipped snapshot, not last month).
-  let mrrDeltaBasisMonth: string | null = null
-  try {
-    const currentMonthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-    const priorRows = await drizzle
-      .select({ mrrNzd: schema.financialSnapshots.mrrNzd, monthKey: schema.financialSnapshots.monthKey })
-      .from(schema.financialSnapshots)
-      .where(and(
-        lt(schema.financialSnapshots.monthKey, currentMonthKey),
-        isNotNull(schema.financialSnapshots.mrrNzd),
-      ))
-      .orderBy(desc(schema.financialSnapshots.monthKey))
-      .limit(1)
-    const priorMrr = priorRows[0]?.mrrNzd ?? null
-    if (priorMrr != null && priorMrr > 0) {
-      mrrDeltaPct = Math.round(((mrr - priorMrr) / priorMrr) * 1000) / 10
-      mrrDeltaBasisMonth = priorRows[0]?.monthKey ?? null
-    }
-  } catch {
-    // financial_snapshots not migrated yet; leave delta null.
-  }
+  const { mrrDeltaPct, mrrDeltaBasisMonth } = await readMrrDelta(drizzle, mrr, now)
 
   // ── Studio Ledger additions (Slice 0) ───────────────────────────────────
   // Every aggregate below is wrapped in its own try/catch so a missing Xero
@@ -252,6 +232,7 @@ export async function GET(req: NextRequest) {
     burnNzd: number
     monthlySurplusNzd: number
     disposableNzd: number
+    yieldFreshness: YieldFreshness
   } | null = null
   if (canSeeMrr) {
     try {
@@ -267,6 +248,7 @@ export async function GET(req: NextRequest) {
         burnNzd: Math.round(position.recurringBurnNzd),
         monthlySurplusNzd: Math.round(position.monthlySurplusNzd),
         disposableNzd: Math.round(position.disposableNzd),
+        yieldFreshness: position.yieldFreshness,
       }
     } catch {
       // Bank balances table missing, so degrade to null.

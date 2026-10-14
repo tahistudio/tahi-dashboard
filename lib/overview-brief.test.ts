@@ -4,6 +4,7 @@ import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 import { NextRequest } from 'next/server'
 import { schema } from '@/db/d1'
 import { GET } from '@/app/api/admin/overview/brief/route'
+import { POST } from '@/app/api/admin/overview/brief/refresh/route'
 import {
   BRIEF_CACHE_KEY,
   computeBrief,
@@ -12,6 +13,7 @@ import {
   sweepStaleBriefCache,
   writeBriefCache,
   type BriefResult,
+  type BriefSnapshot,
   type D1,
 } from '@/lib/overview-brief'
 import { BRIEF_FEATURES, briefCacheKeyForFingerprint, briefScopeFingerprint } from '@/lib/brief-cache-key'
@@ -19,6 +21,7 @@ import { resolvePermissions, type ResolvedAccess } from '@/lib/permissions'
 import { resolveAccessScoping } from '@/lib/access-scoping'
 import { db } from '@/lib/db'
 import { getRequestAuth } from '@/lib/server-auth'
+import { hasCronSecretAuth, logCronRun } from '@/lib/cron-runs'
 
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
 vi.mock('@/lib/server-auth', () => ({
@@ -26,6 +29,7 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: (orgId: string | null) => orgId === 'tahi-org',
 }))
 vi.mock('@/lib/access-scoping', () => ({ resolveAccessScoping: vi.fn() }))
+vi.mock('@/lib/cron-runs', () => ({ hasCronSecretAuth: vi.fn(), logCronRun: vi.fn() }))
 vi.mock('@/lib/permissions', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/permissions')>(),
   resolvePermissions: vi.fn(),
@@ -113,6 +117,7 @@ beforeEach(() => {
   vi.mocked(getRequestAuth).mockResolvedValue(AUTH)
   vi.mocked(resolvePermissions).mockResolvedValue(access(BRIEF_FEATURES))
   vi.mocked(resolveAccessScoping).mockResolvedValue(null)
+  vi.mocked(hasCronSecretAuth).mockReturnValue(false)
 })
 
 afterEach(() => { vi.useRealTimers() })
@@ -199,20 +204,31 @@ describe('computeBrief permission and organisation scope', () => {
     await computeBrief(handle, AUTH, { access: access([feature]), allowedOrgs: ['org-a'] })
 
     expect(queries.filter(query => query.table !== schema.exchangeRates).map(query => query.table)).toEqual(Array(count).fill(table))
-    if (['invoices', 'contracts', 'requests'].includes(feature)) {
-      for (const query of queries.filter(query => query.table === table)) {
-        const predicate = dialect.sqlToQuery(query.condition!)
-        expect(predicate.sql).toContain('"org_id" in (?)')
-        expect(predicate.params).toContain('org-a')
-      }
+    for (const query of queries.filter(query => query.table === table)) {
+      const predicate = dialect.sqlToQuery(query.condition!)
+      expect(predicate.sql).toContain('"org_id" in (?)')
+      expect(predicate.params).toContain('org-a')
     }
   })
 
   it('denies client data for an empty organisation scope even when the features are granted', async () => {
     const { handle, queries } = makeDb()
-    await computeBrief(handle, AUTH, { access: access(['invoices', 'contracts', 'requests']), allowedOrgs: [] })
+    expect(await computeBrief(handle, AUTH, { access: access(BRIEF_FEATURES), allowedOrgs: [] })).toEqual(EMPTY)
 
     expect(queries.map(query => query.table)).toEqual([schema.exchangeRates])
+  })
+
+  it('filters calls and overnight client replies to the same allowed organisations', async () => {
+    const { handle, queries } = makeDb()
+    await computeBrief(handle, AUTH, { access: access(['calls', 'messages']), allowedOrgs: ['org-a', 'org-b'] })
+
+    for (const table of [schema.discoveryCalls, schema.messages]) {
+      const query = queries.find(query => query.table === table)
+      expect(query).toBeDefined()
+      const predicate = dialect.sqlToQuery(query!.condition!)
+      expect(predicate.sql).toContain('"org_id" in (?, ?)')
+      expect(predicate.params.slice(-2)).toEqual(['org-a', 'org-b'])
+    }
   })
 
   it('resolves the refresh caller when prepared permissions are omitted and tolerates an unavailable source', async () => {
@@ -285,5 +301,81 @@ describe('GET overview brief after the helper move', () => {
     expect(db).not.toHaveBeenCalled()
     expect(resolvePermissions).not.toHaveBeenCalled()
     expect(resolveAccessScoping).not.toHaveBeenCalled()
+  })
+})
+
+describe('shared daily brief refresh', () => {
+  const request = () => new NextRequest('https://portal.tahi.studio/api/admin/overview/brief/refresh?force=1', { method: 'POST' })
+
+  it('returns the exact owner snapshot written to the cache for both surfaces', async () => {
+    const { handle, cache } = makeDb()
+    vi.mocked(db).mockResolvedValue(handle)
+
+    const response = await POST(request())
+    const result = await response.json() as BriefSnapshot & { ok: boolean }
+
+    expect(response.status).toBe(200)
+    expect(result).toEqual({ ok: true, ...EMPTY, generatedAt: NOW.toISOString() })
+    expect(JSON.parse(cache.get(BRIEF_CACHE_KEY)!.value)).toEqual({ ...EMPTY, generatedAt: result.generatedAt })
+    expect(resolvePermissions).toHaveBeenCalledExactlyOnceWith(handle, AUTH)
+    expect(resolveAccessScoping).toHaveBeenCalledExactlyOnceWith(handle, AUTH.userId)
+  })
+
+  it('recomputes and caches under one scoped permission resolution without altering the owner snapshot', async () => {
+    const ownerRow = cacheRow(BRIEF_CACHE_KEY, OWNER_BRIEF)
+    const { handle, cache, queries, writes } = makeDb(new Map(), new Map([[BRIEF_CACHE_KEY, ownerRow]]))
+    vi.mocked(db).mockResolvedValue(handle)
+    // A second resolution would grant wider access and expose an unsafe key.
+    vi.mocked(resolvePermissions).mockResolvedValueOnce(access(['requests'])).mockResolvedValue(access(BRIEF_FEATURES))
+    vi.mocked(resolveAccessScoping).mockResolvedValueOnce(['org-a']).mockResolvedValue(null)
+
+    const response = await POST(request())
+
+    expect(await response.json()).toEqual({ ok: true, ...EMPTY, generatedAt: NOW.toISOString() })
+    expect(cache.get(BRIEF_CACHE_KEY)).toEqual(ownerRow)
+    expect(writes.map(write => write.row.key)).toEqual([
+      briefCacheKeyForFingerprint(BRIEF_CACHE_KEY, briefScopeFingerprint(['org-a'], ['requests'])),
+    ])
+    expect(queries.filter(query => query.table !== schema.exchangeRates).map(query => query.table)).toEqual([schema.requests, schema.requests])
+    expect(resolvePermissions).toHaveBeenCalledTimes(1)
+    expect(resolveAccessScoping).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the unrestricted cron identity and returns its computed snapshot', async () => {
+    const { handle, writes } = makeDb()
+    vi.mocked(db).mockResolvedValue(handle)
+    vi.mocked(hasCronSecretAuth).mockReturnValue(true)
+    vi.stubEnv('NEXT_PUBLIC_TAHI_ORG_ID', 'tahi-org')
+    try {
+      const response = await POST(request())
+
+      expect(await response.json()).toEqual({ ok: true, ...EMPTY, generatedAt: NOW.toISOString() })
+      expect(getRequestAuth).not.toHaveBeenCalled()
+      expect(resolvePermissions).toHaveBeenCalledExactlyOnceWith(handle, { userId: 'api-service', orgId: 'tahi-org' })
+      expect(writes.map(write => write.row.key)).toEqual([BRIEF_CACHE_KEY])
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('refuses a client refresh before resolving permissions or touching the database', async () => {
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'client-1', orgId: 'client-org', sessionId: 'client-session' })
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(403)
+    expect(db).not.toHaveBeenCalled()
+    expect(resolvePermissions).not.toHaveBeenCalled()
+  })
+
+  it('reports refresh failures instead of returning an invented empty success', async () => {
+    vi.mocked(db).mockResolvedValue(makeDb().handle)
+    vi.mocked(resolvePermissions).mockRejectedValueOnce(new Error('Permissions unavailable'))
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: 'Permissions unavailable' })
+    expect(logCronRun).toHaveBeenCalledWith(expect.anything(), 'overview-brief', 'error', 0, null, 'Permissions unavailable')
   })
 })

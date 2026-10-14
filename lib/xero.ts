@@ -25,6 +25,30 @@ interface XeroIntegration {
   config: string | null
 }
 
+export interface XeroRequestOptions {
+  signal?: AbortSignal
+}
+
+/** Also bound token/database waits and response bodies when a caller aborts. */
+async function withSignal<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new DOMException('Xero request aborted', 'AbortError'))
+    if (signal.aborted) {
+      onAbort()
+      // The already-started operation may reject after the caller has left.
+      void work.catch(() => undefined)
+      return
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('Xero request aborted', 'AbortError')
+}
+
 /**
  * Get the Xero integration record with current tokens
  */
@@ -52,7 +76,9 @@ export function isTokenExpired(tokenExpiresAt: string | null): boolean {
  * This works for Custom Connection apps (no user consent flow needed).
  * Falls back to refresh_token grant if a refresh token exists.
  */
-export async function fetchXeroToken(): Promise<boolean> {
+export async function fetchXeroToken(options: XeroRequestOptions = {}): Promise<boolean> {
+  const { signal } = options
+  throwIfAborted(signal)
   const clientId = process.env.XERO_CLIENT_ID
   const clientSecret = process.env.XERO_CLIENT_SECRET
 
@@ -63,7 +89,7 @@ export async function fetchXeroToken(): Promise<boolean> {
 
   // Try client_credentials first (Custom Connection)
   try {
-    const tokenRes = await fetch('https://identity.xero.com/connect/token', {
+    const tokenRes = await withSignal(fetch('https://identity.xero.com/connect/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -72,18 +98,20 @@ export async function fetchXeroToken(): Promise<boolean> {
       body: new URLSearchParams({
         grant_type: 'client_credentials',
       }),
-    })
+      signal,
+    }), signal)
 
     if (tokenRes.ok) {
-      const tokenData = (await tokenRes.json()) as XeroTokenResponse
-      await storeXeroToken(tokenData)
+      const tokenData = (await withSignal(tokenRes.json(), signal)) as XeroTokenResponse
+      await withSignal(storeXeroToken(tokenData, undefined, signal), signal)
       return true
     }
 
     // If client_credentials fails, try refresh_token as fallback
-    const integration = await getXeroIntegration()
+    const integration = await withSignal(getXeroIntegration(), signal)
+    throwIfAborted(signal)
     if (integration?.refreshToken) {
-      const refreshRes = await fetch('https://identity.xero.com/connect/token', {
+      const refreshRes = await withSignal(fetch('https://identity.xero.com/connect/token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -93,11 +121,12 @@ export async function fetchXeroToken(): Promise<boolean> {
           grant_type: 'refresh_token',
           refresh_token: integration.refreshToken,
         }),
-      })
+        signal,
+      }), signal)
 
       if (refreshRes.ok) {
-        const tokenData = (await refreshRes.json()) as XeroTokenResponse
-        await storeXeroToken(tokenData, integration.refreshToken)
+        const tokenData = (await withSignal(refreshRes.json(), signal)) as XeroTokenResponse
+        await withSignal(storeXeroToken(tokenData, integration.refreshToken, signal), signal)
         return true
       }
     }
@@ -105,24 +134,27 @@ export async function fetchXeroToken(): Promise<boolean> {
     console.error('Xero token fetch failed:', tokenRes.status, tokenRes.statusText)
     return false
   } catch (err) {
+    if (signal?.aborted) throw err
     console.error('Failed to fetch Xero token:', err)
     return false
   }
 }
 
-async function storeXeroToken(tokenData: XeroTokenResponse, existingRefreshToken?: string): Promise<void> {
-  const database = await db()
+async function storeXeroToken(tokenData: XeroTokenResponse, existingRefreshToken?: string, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal)
+  const database = await withSignal(db(), signal)
   const now = new Date().toISOString()
   const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
 
   const drizzle = database as ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
   // Check if integration record exists
-  const existing = await drizzle
+  const existing = await withSignal(drizzle
     .select({ id: schema.integrations.id })
     .from(schema.integrations)
     .where(eq(schema.integrations.service, 'xero'))
-    .limit(1)
+    .limit(1), signal)
+  throwIfAborted(signal)
 
   if (existing.length > 0) {
     await drizzle
@@ -155,8 +187,11 @@ export const refreshXeroToken = fetchXeroToken
 /**
  * Get a valid Xero access token, auto-fetching if expired
  */
-export async function getValidXeroToken(): Promise<string | null> {
-  const integration = await getXeroIntegration()
+export async function getValidXeroToken(options: XeroRequestOptions = {}): Promise<string | null> {
+  const { signal } = options
+  throwIfAborted(signal)
+  const integration = await withSignal(getXeroIntegration(), signal)
+  throwIfAborted(signal)
 
   // If we have a valid cached token, use it
   if (integration?.accessToken && !isTokenExpired(integration.tokenExpiresAt)) {
@@ -164,12 +199,13 @@ export async function getValidXeroToken(): Promise<string | null> {
   }
 
   // Token missing or expired - fetch a new one
-  const fetched = await fetchXeroToken()
+  const fetched = await fetchXeroToken(options)
   if (!fetched) {
     return null
   }
 
-  const updated = await getXeroIntegration()
+  const updated = await withSignal(getXeroIntegration(), signal)
+  throwIfAborted(signal)
   return updated?.accessToken ?? null
 }
 
@@ -196,14 +232,18 @@ export async function callXeroAPIOrThrow<T>(
   method: string,
   endpoint: string,
   body?: Record<string, unknown>,
+  requestOptions: XeroRequestOptions = {},
 ): Promise<T> {
-  const token = await getValidXeroToken()
+  const { signal } = requestOptions
+  const token = await getValidXeroToken(requestOptions)
+  throwIfAborted(signal)
   if (!token) {
     throw new Error('Unable to obtain valid Xero token (check XERO_CLIENT_ID/SECRET and tenant connection)')
   }
 
   const options: RequestInit = {
     method,
+    signal,
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -216,11 +256,11 @@ export async function callXeroAPIOrThrow<T>(
     options.body = JSON.stringify(body)
   }
 
-  const res = await fetch(`https://api.xero.com/api.xro/2.0${endpoint}`, options)
+  const res = await withSignal(fetch(`https://api.xero.com/api.xro/2.0${endpoint}`, options), signal)
 
   if (!res.ok) {
     let errText = ''
-    try { errText = await res.text() } catch { /* ignore */ }
+    try { errText = await withSignal(res.text(), signal) } catch { throwIfAborted(signal) }
     throw new XeroAPIError(
       `Xero API ${method} ${endpoint} failed: ${res.status} ${res.statusText}${errText ? ' - ' + errText.slice(0, 500) : ''}`,
       res.status,
@@ -230,7 +270,7 @@ export async function callXeroAPIOrThrow<T>(
     )
   }
 
-  return (await res.json()) as T
+  return (await withSignal(res.json(), signal)) as T
 }
 
 /**

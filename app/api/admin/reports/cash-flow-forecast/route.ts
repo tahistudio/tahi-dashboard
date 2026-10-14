@@ -5,7 +5,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { sql, eq, and } from 'drizzle-orm'
 import { buildRateMap, toNzd } from '@/lib/currency'
-import { assembleForecastMonths } from '@/lib/cash-flow-forecast'
+import { assembleForecastMonths, PIPELINE_CASH_FLOW_BASIS, projectPipelineByMonth } from '@/lib/cash-flow-forecast'
 import { cashFlowBasisLine, computeCashPosition } from '@/lib/cash-position'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -21,9 +21,8 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  *     the window. About two thirds of what Tahi invoices is project work that
  *     never shows up as MRR; leaving it out is what made every forecast month
  *     negative for a studio that was in surplus.
- *   + revenuePipeline: weighted pipeline value where the expected close date
- *     falls in that month (value x probability per deal, smeared across the
- *     window for deals with no close date)
+ *   + revenuePipeline: weighted upfront at expected close plus monthly revenue
+ *     from recurring start. Undated closes are spread across the window.
  *
  * Cost projection per month =
  *   recurring client_costs entries (category monthly)
@@ -66,21 +65,21 @@ export async function GET(req: NextRequest) {
   // the old query without them if columns don't exist yet.
   type MrrRow = {
     custom_mrr: number
-    preferred_currency: string | null
+    mrr_currency: string | null
     retainer_start_date: string | null
     retainer_end_date: string | null
   }
   let mrrRows: MrrRow[] | null = null
   try {
     mrrRows = await drizzle.all<MrrRow>(
-      sql`SELECT custom_mrr, preferred_currency, retainer_start_date, retainer_end_date
+      sql`SELECT custom_mrr, COALESCE(NULLIF(custom_mrr_currency, 'NZD'), preferred_currency, 'NZD') AS mrr_currency, retainer_start_date, retainer_end_date
           FROM organisations
           WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0`
     )
   } catch {
     // retainer date columns don't exist yet (pre-0016)
     mrrRows = await drizzle.all<MrrRow>(
-      sql`SELECT custom_mrr, preferred_currency, NULL as retainer_start_date, NULL as retainer_end_date
+      sql`SELECT custom_mrr, COALESCE(NULLIF(custom_mrr_currency, 'NZD'), preferred_currency, 'NZD') AS mrr_currency, NULL as retainer_start_date, NULL as retainer_end_date
           FROM organisations
           WHERE status = 'active' AND custom_mrr IS NOT NULL AND custom_mrr > 0`
     )
@@ -90,7 +89,7 @@ export async function GET(req: NextRequest) {
   const mrrByMonth: Record<string, number> = {}
   for (const m of monthKeys) mrrByMonth[m] = 0
   for (const row of mrrRows ?? []) {
-    const nzd = toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap)
+    const nzd = toNzd(row.custom_mrr, row.mrr_currency ?? 'NZD', rateMap)
     for (const m of monthKeys) {
       // Skip months before this client started
       if (row.retainer_start_date && row.retainer_start_date.slice(0, 7) > m) continue
@@ -104,15 +103,22 @@ export async function GET(req: NextRequest) {
 
   // ── Revenue: weighted pipeline (one-off deals that might close) ────────────
   // Deals table uses stageId -> pipelineStages for stage info (including
-  // probability and isClosedWon/Lost flags). Exclude closed deals.
+  // probability and isClosedWon/Lost flags). Exclude closed and archived deals.
   const deals = await drizzle
     .select({
       id: schema.deals.id,
       valueNzd: schema.deals.valueNzd,
       value: schema.deals.value,
+      upfrontValue: schema.deals.upfrontValue,
+      upfrontValueNzd: schema.deals.upfrontValueNzd,
+      monthlyValue: schema.deals.monthlyValue,
+      monthlyValueNzd: schema.deals.monthlyValueNzd,
       currency: schema.deals.currency,
       probability: schema.pipelineStages.probability,
       expectedCloseDate: schema.deals.expectedCloseDate,
+      recurringStartDate: schema.deals.recurringStartDate,
+      engagementEndDate: schema.deals.engagementEndDate,
+      closedAt: schema.deals.closedAt,
       isClosedWon: schema.pipelineStages.isClosedWon,
       isClosedLost: schema.pipelineStages.isClosedLost,
     })
@@ -121,30 +127,10 @@ export async function GET(req: NextRequest) {
     .where(and(
       eq(schema.pipelineStages.isClosedWon, 0),
       eq(schema.pipelineStages.isClosedLost, 0),
+      sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`,
     ))
 
-  const pipelineByMonth: Record<string, number> = {}
-  for (const d of deals) {
-    const native = d.valueNzd ?? d.value ?? 0
-    const amountNzd = d.valueNzd
-      ? d.valueNzd
-      : toNzd(native, d.currency ?? 'NZD', rateMap)
-    const prob = (d.probability ?? 50) / 100
-    const weighted = amountNzd * prob
-
-    if (d.expectedCloseDate) {
-      const closeMonth = d.expectedCloseDate.slice(0, 7)
-      if (monthKeys.includes(closeMonth)) {
-        pipelineByMonth[closeMonth] = (pipelineByMonth[closeMonth] ?? 0) + weighted
-      }
-    } else {
-      // No close date: smear weighted value across the forecast window
-      const perMonth = weighted / monthKeys.length
-      for (const m of monthKeys) {
-        pipelineByMonth[m] = (pipelineByMonth[m] ?? 0) + perMonth
-      }
-    }
-  }
+  const pipelineByMonth = projectPipelineByMonth(deals, monthKeys, rateMap)
 
   // ── Costs: commitments (primary) + Xero recurring (fallback) + client_costs ──
   //
@@ -326,6 +312,7 @@ export async function GET(req: NextRequest) {
       commitmentCount: activeCommitments.length,
       commitmentSource: activeCommitments.length > 0 ? 'commitments' : 'xero_recurring',
       projectRunRateNzd,
+      pipelineBasis: PIPELINE_CASH_FLOW_BASIS,
       // One line naming every component of the projection, so the ribbon on the
       // studio home and the forecast on the finance page describe it the same.
       basis: cashFlowBasisLine({

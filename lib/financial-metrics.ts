@@ -32,7 +32,7 @@ import {
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 export interface FinancialMetrics {
-  /** Real bank cash, NZD, Airwallex-first. Null if balances unreadable. */
+  /** Real bank cash, NZD, Airwallex wallet plus yield. Null if unreadable. */
   cashNzd: number | null
   /** Outstanding invoices (sent + overdue), NZD. */
   owedNzd: number | null
@@ -74,21 +74,14 @@ export async function computeCurrentMetrics(drizzle: D1, now: Date = new Date())
   const rates = await drizzle.select().from(schema.exchangeRates)
   const rateMap = buildRateMap(rates)
 
-  // ── Cash (Airwallex-first) + runway. Mirrors overview cash block. ──
+  // Cash from Airwallex wallet plus yield, on the overview's basis.
   let cashNzd: number | null = null
   let burnNzd: number | null = null
   let runwayMonths: number | null = null
   try {
-    let airwallexBalances: Array<{ currency: string | null; availableBalance: number }> = []
-    try {
-      airwallexBalances = await drizzle.select().from(schema.airwallexBalances)
-    } catch {
-      // Airwallex table missing; fall back to Xero-only via empty array.
-    }
-    const xeroBalances = await drizzle.select().from(schema.xeroBankBalances)
-    cashNzd = aggregateCashNzd(
+    const airwallexBalances = await drizzle.select().from(schema.airwallexBalances)
+    cashNzd = airwallexBalances.length === 0 ? null : aggregateCashNzd(
       airwallexBalances,
-      xeroBalances,
       (amount, currency) => toNzd(amount, currency, rateMap),
     )
     try {
@@ -96,7 +89,7 @@ export async function computeCurrentMetrics(drizzle: D1, now: Date = new Date())
     } catch {
       burnNzd = null
     }
-    runwayMonths = burnNzd != null ? computeRunwayMonths(cashNzd, burnNzd) : null
+    runwayMonths = cashNzd != null && burnNzd != null ? computeRunwayMonths(cashNzd, burnNzd) : null
   } catch {
     cashNzd = null
     burnNzd = null
@@ -123,7 +116,9 @@ export async function computeCurrentMetrics(drizzle: D1, now: Date = new Date())
   let mrrNzd: number | null = null
   try {
     const mrrRows = await drizzle.all<{ custom_mrr: number; preferred_currency: string }>(
-      sql`SELECT custom_mrr, preferred_currency FROM organisations WHERE status = 'active' AND custom_mrr > 0`
+      sql`SELECT custom_mrr,
+          COALESCE(NULLIF(custom_mrr_currency, 'NZD'), preferred_currency, 'NZD') AS preferred_currency
+          FROM organisations WHERE status = 'active' AND custom_mrr > 0`
     )
     mrrNzd = (mrrRows ?? []).reduce(
       (sum, row) => sum + toNzd(row.custom_mrr, row.preferred_currency ?? 'NZD', rateMap),
