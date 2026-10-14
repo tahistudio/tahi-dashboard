@@ -2,7 +2,7 @@
 
 # Tahi Dashboard, reorganised task list
 
-Last updated: 2026-10-14 (REC.0 server live per Liam; Windows client round 3 committed at 6964660b, round 4 committed at 93ce4c62).
+Last updated: 2026-10-14 (next-20 batch A reconciliation; items 1 to 7 live; REC.0 server live and Windows client built, installed-call proof pending).
 
 Proposed replacement for TASKS.md. Written 2026-09-13 from evidence, not memory:
 `git log --oneline -80`, STATUS.md "Since the last update",
@@ -59,7 +59,31 @@ tonight (Batch B, Batch C, LW.1 to LW.20).
 - An item only flips to `[x]` when the evidence names a commit AND a live
   observation. Merged with no live look stays `[~]` with the commit named.
 
-## Next-20 items 2 to 7 hardening, 2026-10-13
+## Next-20 items 1 to 7, live 2026-10-14
+
+Live evidence: item 1 deployed green at 10:46 UTC on 2026-10-11 (run log);
+Liam's 2026-10-14 batch brief confirms items 2 to 7 live in 6f9f2170.
+These checkboxes track the shipped changes. First-run unlinked-customer
+reconciliation remains under SW.1, and scoped-seat live isolation under T1.16.
+
+- [x] N20.1 - [BE] Default Stripe sync to no client creation. Source 962b184b;
+  deployed green 2026-10-11. Unlinked payments/invoices are skipped and named
+  in cron summaries. Customer linking and broader reconciliation remain SW.1.
+- [x] N20.2 - [BE] Fence edited suggestion targets. Source c6bc5bc5; reviewed
+  in b4430181 and follow-ups, integrated 38792ae0, live in 6f9f2170 per Liam.
+- [x] N20.3 - [BE] Scope nested client and related routes. Source 6ef22225;
+  review repairs b4430181/e2e59289/dfddb517, live in 6f9f2170 per Liam.
+- [x] N20.4 - [BE] Fence schedule children, atomically delete only drafts,
+  pin invoice recovery and bound importer retries. Source 8f01919a;
+  reviewed b4430181, live in 6f9f2170 per Liam.
+- [x] N20.5 - [BE/FE] Preview and confirm Stripe customer linking as a super
+  admin. Source 69696a72; reviewed b4430181, live in 6f9f2170 per Liam.
+- [x] N20.6 - [BE/FE] Import Xero invoices only for explicit contact links.
+  Source 57058148; link/push review repairs e2e59289/dfddb517,
+  live in 6f9f2170 per Liam. Xero remains an invoice rail, not cash truth.
+- [x] N20.7 - [BE] Defer transient suggester errors without stamping calls.
+  Source 73ddff69; retry/outage repairs e2e59289/dfddb517,
+  live in 6f9f2170 per Liam.
 
 Suggestion decisions keep the stored client immutable, permit same-client
 request links, and allow only supported task fields with team-member assignees.
@@ -94,8 +118,9 @@ sweep succeeds. Counted failures exhaust after five attempts; second-read
 exhaustion keeps the first read's drafts before stamping. Counters clear on
 processing or exhaustion, with the reason in the run summary. No migration.
 
-Source regression coverage is recorded in the run log. Deployment and signed-in
-proof are still required before the existing task states can be completed.
+Source regression coverage is recorded in the run log. The release is live
+per Liam's current brief. Historical preparation notes in that log do not
+override this confirmation or close broader verification tasks.
 
 ## Execution update, 2026-10-11
 
@@ -140,20 +165,27 @@ pass. FU.10 is the small follow-up found and verified during this lap.
 The existing CI=1 check mode skips the remote AI dev proxy; it grants no
 production access. Vivaldi is Liam's main browser; it is not connected to Codex.
 
-## Current triage, 2026-10-10
+## Current triage, 2026-10-10, refreshed 2026-10-14
 
 Execution order and evidence:
 docs/superpowers/plans/2026-10-10-dashboard-task-triage.md.
 This scheduling view references existing ids; it does not duplicate checkboxes.
 
-1. SW.1: recover the missing payment after identity/duplicate checks.
-2. T1.6/T1.16: remaining permission gaps, global search first.
-3. FU.1/FU.7: suggestion request timeouts and valid route exports.
-4. FU.2/FU.4, then FU.5/FU.6: contract expiry and responsive/dark repairs.
-5. V1-QA.2/FU.9 plus the grouped client/studio/deliverable live laps.
-6. CT.15/T3.8/T3.9 and CT.17: truthful actions and remaining MCP mismatch.
-7. CN.3 integration with migration 0111, then bounded invoice/client ports.
-8. REC.0 and WQA.0 scope alongside repairs; no provider or new schema chosen.
+1. SW.1: reconcile broader historical Stripe invoices/charges and read the
+   first live cron's unlinked-customer list; Lingorama is already recovered.
+2. T1.6/T1.16: prove the deployed search/nested guards with scoped/denied seats.
+3. FU.1: watch scheduled durations/queue drain after timeout/deferral repairs;
+   FU.7 route exports are done.
+4. FU.2/FU.4: expired-link/email-preview and date-display proof; FU.5/FU.6
+   remaining schedule/menu/Wire and recorded responsive/dark observations.
+5. V1-QA.2/FU.9: authenticated e2e and repaired-SQLite browser cleanup,
+   plus grouped client/studio/deliverable live laps.
+6. CT.15/T3.8/T3.9 and CT.17: verify shipped honest actions/adapters, then
+   finish bounded outreach and sales artifact residue.
+7. CN.2/CN.3 Slack DM/digest proof, then bounded invoice/client ports
+   (CN.3 integrated and 0111 applied).
+8. REC.0 phases 1/1b and phase 2 server are live (#071/#072); Windows tray
+   installed-call proof remains. WQA.0 is still scope only.
 
 MCP consent, roleless deny, most named entity scoping and calendar/transcript
 scheduling already exist. Nineteen design ports may proceed under Liam's
@@ -230,7 +262,8 @@ These are live failures, ahead of feature work.
   Production health probes passed and signed-in /overview rendered real data.
   No application code, signature checks or UI changed; phone/dark checks are
   not applicable to this configuration repair. SW.1 remains open separately.
-- [ ] SW.1 - [BE] Reconcile the missed Lingorama payment after SW.0: live
+- [~] SW.1 - [BE] Finish historical Stripe reconciliation after the recovered
+  Lingorama payment. Historical failure before source 2f81243f:
   Stripe invoice in_1UMcjRRx4rjcHALL0MTr5BjK (WEBL8VAA-0002, USD 1,000)
   is paid in the failed event but has no dashboard row by Stripe invoice id.
   Lingorama exists as org e7d560e6-2416-4e7c-b610-09aa80c6e23d with no
@@ -249,8 +282,10 @@ These are live failures, ahead of feature work.
   2f81243f). Invoice d11e91e4-4e06-56d7-aaa5-6490d45d1ed3 is paid, USD 1,000,
   with one line item and a stripe_invoice_recovered audit entry. The existing
   Lingorama org now maps to cus_VFXeA5BxU9jgs7. Live detail and the deployed
-  paid-month filter show it. Broader reconciliation remains; the bulk importer
-  auto-creates organisations, so it was not used for this controlled recovery.
+  paid-month filter show it. Broader reconciliation and the first live cron's
+  unlinked-customer list remain. The bulk importer was not used for that recovery;
+  since live 962b184b it defaults to no-create and reports no_client_linked.
+  The prior zero-import result used the test-mode key, not proof of live parity.
 
 ## Operator steps waiting on Liam
 
@@ -307,17 +342,18 @@ Reviewers' notes that were not blocking. Each names its file.
 
 - [~] FU.1 - [BE] Suggester: give each Anthropic read a timeout capped at the
   time left in the sweep budget, with fewer retries (lib/task-suggester.ts).
-  The budget only decides when a read starts, so one hanging transcript can
-  still pass the cron-trigger's 120 s cut and block the queue behind it.
-  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
-  checks pass; signed-in live evidence is pending.
+  Implemented 2f81243f, deployed 2026-10-11: each read is capped at remaining
+  budget. Transient-failure deferral and outage-safe retry accounting are also
+  live in 6f9f2170 (N20.7). Watch scheduled cron durations and queue draining;
+  the 2026-10-10 zero-eligible-call run did not prove the timeout path.
 - [~] FU.2 - [BE/FE] Contracts past their expiry: a Lapsed pill on the admin
   detail and list, and the same guard on POST /api/admin/contracts/[id]/email
   and the MCP send path, so the studio cannot email a link that opens on "This
-  contract has expired". The client signing email (emails/contract-sign.tsx
-  about line 94) still leaves the signing deadline out of its expiry line.
+  contract has expired". The signing email now includes the deadline;
+  its changed preview is still owed.
   Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
-  checks pass; signed-in live evidence is pending.
+  checks pass. Signed-in contracts/time checks are recorded in bc7412e9;
+  the changed signing-email preview and expired-link send round trip remain.
 - [ ] FU.3 - [Decision] A partly signed contract marked signed by hand gets no
   fully-signed email and no signed PDF although real signatures exist. Block
   the hand mark when signatures exist, or turn it into a real countersign.
@@ -331,14 +367,16 @@ Reviewers' notes that were not blocking. Each names its file.
   menus colour danger with var(--color-danger) (proposal detail, kanban board,
   messages); the Wire timestamp and News feed label use --text-faint (3.2:1).
   The new --color-danger-ink token is the fix for the danger cases.
-  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
-  checks pass; signed-in live evidence is pending.
+  Implemented 2f81243f, deployed 2026-10-11. Contract cards at 375 light/dark,
+  768 dark and signed-in contracts/time checks (bc7412e9) are recorded.
+  Schedule/menu/Wire dark observations remain; partial evidence is not closure.
 - [~] FU.6 - [FE] Desktop: a long Wire item wraps inside the fixed 1.6rem strip
   and its second line is clipped (wants a one-line ellipsis); the contracts
   table at 1280 is wider than its card, so Sent, Expiry and Row actions sit
   behind a sideways scroll.
-  Implemented 2f81243f, deployed 2026-10-11. Local gates and targeted UI
-  checks pass; signed-in live evidence is pending.
+  Implemented 2f81243f, deployed 2026-10-11. The populated 1280 contract table
+  fits locally; bc7412e9 records signed-in production contracts/time checks.
+  A recorded live Wire/table layout observation remains, rather than a rebuild.
 - [x] FU.7 - [BE] app/api/admin/overview/brief/route.ts exports non-route
   symbols (computeBrief, readBriefCache, writeBriefCache, isBriefFresh,
   BRIEF_CACHE_KEY); type-check fails whenever a dev server's .next/types is
@@ -349,9 +387,9 @@ Reviewers' notes that were not blocking. Each names its file.
   file inline and file_shared), so one recording may give two cards; check in
   the first live DM. Before channels go live, send the channel pointer and the
   stranger refusal with chat.postEphemeral.
-- [ ] FU.9 - [QA] The seeded QA sqlite lost its FK cascades, so the D3 specs
-  leave contract_signers, contract_signatures and proposal children behind
-  (cleanup command in docs/local-dev-and-qa.md); reseed with cascades intact.
+- [~] FU.9 - [QA] Verify browser cleanup against the repaired seeded QA SQLite.
+  The former missing-cascade defect left contract and proposal children behind
+  (cleanup command in docs/local-dev-and-qa.md).
   Local repair 2f81243f preserves rows with backups. Rollback-only fixtures
   proved all eight edges in both shards; deliverable browser cleanup remains
   to be exercised. No production cascade/data operation was performed.
@@ -394,6 +432,8 @@ seen on production.
 - [~] LW.9 Hide the onboarding checklist card on the client home for now (it
   will come back). MERGED 7ca50bff:
   CLIENT_HOME_ONBOARDING_CHECKLIST_ENABLED = false, the card never mounts.
+  bc7412e9 records Giant Group read-only home with the checklist hidden at
+  375 light/dark and 768 dark. A5 real-client/onboarding proof remains.
 - [~] LW.10 Client home shows three New request CTAs. MERGED 23b5c681 (code
   21dc21b2): the header button is the only primary CTA; the empty state keeps a
   text link when there are no open requests.
@@ -474,28 +514,39 @@ Liam: an AI with the exclusive job of checking tasks, clients and requests, nudg
 
 Audit by the lead against production payloads; every card traced to its route. Workflow home-accuracy-fixes builds the fixes in three slices (A1 sonnet, A2 sonnet, B opus), each reviewed.
 
-- [~] HA.1 (MERGED b30a95ae, aged bar completed c554076d) - [BE/FE] Receivables read "Overdue NZ$0" with three invoices past due (about NZ$16.1k): the aging buckets called 0 to 30 days late "current". Buckets become not due, 1 to 30, 31 to 60, 61+, with a count for invoices lacking a due date. Slice A1.
-- [~] HA.2 (MERGED b30a95ae) - [BE] Daily brief prints "$3,668" where the cards print "NZ$3,668". Slice A1.
-- [~] HA.3 (MERGED b30a95ae: label "vs Jul (no Aug snapshot)"; the writer was already idempotent, the August gap is a cron run that did not fire, not a code bug) - [BE/FE] MRR "down 40%" compares to July because there is no August snapshot; label the basis month and make the snapshot writer upsert every month. Slice A1.
-- [~] HA.4 (MERGED 87f9cdc3) - [FE] Pipeline ahead annualises monthly deal value (NZ$6.2k) while the forecast and deals page say NZ$3.2k plus NZ$250 a month; "closing this month" counts a deal whose close date passed. Same basis as the forecast; past-due closes counted apart. Slice A2.
-- [~] HA.5 (MERGED 87f9cdc3; c554076d moved the active-member rule to its own setting team.inactiveMemberEmails, set to Nathan on production) - [BE/FE] Studio capacity: "booked" was hours already logged, and an inactive member counted as a third of capacity. Booked = assigned open work this week; active members only. Slice A2.
-- [~] HA.6 (MERGED 87f9cdc3) - [BE/FE] Retainer health called quiet retainers "at risk" from a churn score while the API says green; the test org counted as a retainer. Bucket follows the API; no MRR, not a retainer. Slice A2.
-- [~] HA.7 (MERGED 87f9cdc3) - [FE] Proposals live listed drafts. Shared, published or accepted only; drafts as a count. Slice A2.
-- [~] HA.8 (MERGED a24df8b2: lib/cash-position.ts; finance.lastYearTaxOwed now means the IRD balance and is set to 24242.68 on production) - [BE/FE] Money cards on one source: cash position computed once (total cash all currencies, tax owed NZ$24,242.68 as the IRD balance with the 15k pot counted toward it and never on top, recurring burn, project run-rate, surplus, gross and net runway); the Cash runway card reads "+NZ$13.2k a month net, 3.6 months if revenue stopped"; Take-home reads about NZ$51.9k disposable instead of NZ$0; the finance page reads the same. Slice B. LEAD: set the tax owed setting to 24242.68 on production after the deploy.
-- [~] HA.9 (MERGED a24df8b2) - [BE/FE] Cash-flow ribbon full picture: retainers plus the trailing project run-rate plus weighted pipeline, minus commitments, with the basis stated under the card. Slice B.
+All nine were traced and verified on production after c554076d on 2026-09-19;
+1a7ef35b records the live figures. Those figures are dated observations, not
+current cash claims. HA.3's basis label is dynamic; September can be the basis
+in October. Next-20 item 12 is a fresh label/snapshot check, not the old repair.
+
+- [x] HA.1 (MERGED b30a95ae, aged bar completed c554076d) - [BE/FE] Receivables aging uses not due, 1 to 30, 31 to 60 and 61+, with missing-date counts. Live 2026-09-19: NZ$16,106 overdue.
+- [x] HA.2 (MERGED b30a95ae) - [BE] Prefix the daily brief currency with NZ$. Verified live 2026-09-19.
+- [x] HA.3 (MERGED b30a95ae, source c5623ed9) - [BE/FE] Label MRR change with the actual prior snapshot month. mrrDeltaLabel uses the payload month; "vs Jul" was the September observation, not fixed copy. Writer already upserts; August cash is intentionally unavailable. Verified live 2026-09-19. Current September comparison check remains next-20 item 12.
+- [x] HA.4 (MERGED 87f9cdc3) - [FE] Use the forecast basis for pipeline ahead and count past-due closes apart. Verified live 2026-09-19.
+- [x] HA.5 (MERGED 87f9cdc3, c554076d) - [BE/FE] Compute booked capacity from assigned open work and active members. team.inactiveMemberEmails excludes Nathan on production. Verified live 2026-09-19.
+- [x] HA.6 (MERGED 87f9cdc3) - [BE/FE] Bucket retainer health by the API status and exclude clients without MRR. Verified live 2026-09-19.
+- [x] HA.7 (MERGED 87f9cdc3) - [FE] Show shared, published or accepted proposals, with drafts counted separately. Verified live 2026-09-19.
+- [x] HA.8 (MERGED a24df8b2, lib/cash-position.ts) - [BE/FE] Compute money cards from one cash position. finance.lastYearTaxOwed was applied as 24242.68, with the 15k savings pot counted toward it. Live 2026-09-19 after c554076d: cash NZ$76.1k and take-home NZ$51.8k free. Current yield freshness remains LW.42.
+- [x] HA.9 (MERGED a24df8b2) - [BE/FE] Include retainers, trailing project run-rate, weighted pipeline and commitments in the cash-flow ribbon, with its basis stated. Verified live 2026-09-19.
 - [x] HA.10 - Greyhive INV-2025000024 (GBP 1,279.60, imported from ManyRequests, issued December 2025, no due date) written off as Liam on 2026-09-19: Greyhive will not pay, a debt collector is engaged. Outstanding now NZ$21,394 across 6 invoices.
 - Right as traced: outstanding NZ$24,328 across 7 invoices, cash NZ$76.1k (Airwallex, 17 Sep), Needs you and the brief items, open requests, contracts, calls, replies, worklog, content counts.
 
 ## Client hand-offs on requests (Liam, 2026-09-18)
 
-- [~] HO.1 (MERGED d8d9355e model, acdb8942 UI; migration 0104 applied on production first; deployed 89b312b4; seen live: Waiting on card and the Hand off to a client dialog on a request, waitingOn on payloads, the waitingOn=client filter; a real hand-off with a client is Liam's first use) - [BE/FE] **Hand a request to a named client contact.** A request keeps its Tahi owner; it can be handed to one contact with a reason (approval, content, access, decision, file, other), a note and an optional date; the contact sees it first in their personal Waiting on you with the one action verb; the org admin sees the org-wide list; the studio sees a chip on rows and cards, a "Waiting on clients" rail view and a Waiting on card on the detail; the Blocked by card shows the hand-off as a synthetic line; the request hands itself back when the person approves, uploads or replies; a nudge email goes out after requests.handoffNudgeDays (default 3), never more than once per 3 days; a contact without a seat is invited in the same email. Migration 0104 (waiting_on_* columns on requests). Workflow client-handoff-build: H1 model and routes (opus), H2 UI (sonnet), H3 MCP and guide (sonnet), each reviewed, then merged in order.
+- [~] HO.1 (MERGED d8d9355e model, acdb8942 UI; migration 0104 applied on production first; deployed 89b312b4; seen live: Waiting on card and the Hand off to a client dialog on a request, waitingOn on payloads, the waitingOn=client filter; a real hand-off with a client is Liam's first use) - [BE/FE] **Hand a request to a named client contact.** A request keeps its Tahi owner; it can be handed to one contact with a reason (approval, content, access, decision, file, other), a note and an optional date; the contact sees it first in their personal Waiting on you with the one action verb; the org admin sees the org-wide list; the studio sees a chip on rows and cards, a "Waiting on clients" rail view and a Waiting on card on the detail; the Blocked by card shows the hand-off as a synthetic line; the request hands itself back when the person approves, uploads or replies. The three-day reminder implementation is NOT scheduled: delivery-watch and automation-sweep are absent from workers/cron-trigger, so no automatic nudge has run. Liam's reminder-policy decision (next-20 item 20) is required before enabling it; built contact invite/email support does not prove reminder delivery. Migration 0104 (waiting_on_* columns on requests). Workflow client-handoff-build: H1 model and routes (opus), H2 UI (sonnet), H3 MCP and guide (sonnet), each reviewed, then merged in order.
 - [~] HO.3 (MERGED: lib/request-handoff-copy.ts holds the pure copy and types, components import it, the local file is gone) - [FE] Tidy: the UI slice typed the hand-off payload locally in lib/request-handoff-types.ts (5 importers) while lib/request-handoff.ts exports the same names; point the imports at lib/request-handoff.ts and delete the local file.
 - [~] HO.4 (MERGED: contacts may be follower, watcher, approver or contributor; team members pm, assignee or follower; the People panel still shows only its three fixed slots) - [BE] The participants POST route still limits contacts to the follower role; widen VALID_ROLES and the contact guard so the People panel can add an approver or contributor by hand (hand-offs already write those roles).
 - [x] LW.43 - Crons fire from a Cloudflare Worker, not GitHub Actions (2026-09-22). GitHub dropped most scheduled runs (measured 2 to 5 an hour against 12 or more configured), so the suggester never ran after 19 Sep and Liam's Charles call produced no suggestions until a manual sweep (9 filed). workers/cron-trigger with Cron Triggers mirroring the yml schedule table; the yml keeps only the manual dispatch. Deployed eb89d21d; secrets set from GitHub on each deploy; every slot verified firing on time on 22 Sep (calendar :17 and :32, digest every 10 min, Drive :37, suggester :42).
 - [x] LW.44 - content-gap-hunt failed on 20 Sep with "Claude returned non-JSON": 8 to 15 gaps with rationale overran the 4096 token cap and the truncated JSON failed to parse. Cap raised to 8192 (2026-09-22).
 - [ ] LW.45 - schema-watchdog reports 0 of 50 pages passing every Sunday (schema_not_in_html): the CMS schema field is filled on every blog post but no JSON-LD renders on the live tahi.studio pages, and it never has (the May run showed the same). The blog post template in Webflow needs an Embed bound to the schema field (or the existing one re-bound). A Webflow Designer change and a publish, so it waits for Liam's go. Also: the watchdog marks the run as a failed cron when nothing passes, which reads as a plumbing error in notifications; report it as a finding instead.
 - [ ] BL.SVG - Blog creation with SVG images (Liam, 2026-09-22: "I definitely want to get back into blog creation using SVG images, which have come a long way"). Scope: where images enter the pipeline today (hero, inline), generating SVG illustrations in the Tahi style per post, review in the polish stage, upload to Webflow assets, alt text. Needs a short scoping chat: style reference and how many images per post.
-- [ ] LW.42 - Yield balances drift: Airwallex Capital (yield) is not on the public balances API, so it lives in the setting finance.yieldHoldings and goes stale (2026-09-22: USD 20,014 in the setting against 25,100 in Airwallex, a NZ$8.6k gap on the cash card). Options: read the Xero AWX_Yield_USD and AWX_Yield_AUD bank accounts (already synced through the Xero bank summary) as the yield source on each Airwallex sync, and show a warning on the cash card when the setting is older than 30 days. Updated by hand as Liam this time.
+- [ ] LW.42 - [BE/FE] Prevent manually maintained yield from going stale.
+  Airwallex Capital is absent from the wallet API; sync still reads
+  finance.yieldHoldings. The 2026-09-22 USD 20,014 setting versus USD 25,100
+  Airwallex difference was a historical observation, updated by hand as Liam.
+  Current balances have not been re-read in this batch. Next-20 item 11 owns
+  the proposed Xero yield import or age warning; validate against Airwallex.
+  T0.3 references this single owner. T0.2 owns the remaining UI/API comparison.
 - [x] LW.41 - Feedback comments can be removed through the app (Liam, 2026-09-19: remove the fixed comments). No delete route existed, so the ten fixed rows and their seven screenshots were removed directly on production this once; workflow feedback-delete-route adds DELETE /api/admin/feedback/[id] (object first, then the row) and the MCP tool delete_feedback_comment (sonnet, 7f11de99, review clean, 10 tests); merged 2026-09-19.
 - [x] LW.40 - Feedback comments round (Liam, 2026-09-19: check the comments made on the site and fix them). Nine real comments, one already fixed (churned retainers in retainer health, 75932933). Eight fixed by workflow feedback-comments-fixes (three sonnet builders, reviews clean, one 44px chip fixed at merge), deployed 31069e8a: overview daily brief meta stacking on phone, a two-line activity item wrapping, the comment widget help box text in dark; contract preview background in dark, the More actions popover off frame on phone, list Delete navigating instead of deleting; client cards laid out vertically, the deal-linked calls row on phone. Fixes: the brief meta stacks inside the existing phone container query; the Wire ticker item was absolutely positioned inside a fixed-height clipped track and now flows with a hanging indent; the comment ball hint used a hard-coded white on the text token, now the bg token; the shared builder header had a hard-coded white glass, now a header-glass token for light and dark with a hairline, and its More menu uses the portal Popover aligned end with a 44px trigger; DataTable row actions run through runRowAction so Delete never fires the row navigation (39 tests); client cards use an auto-fit metric grid with a min height; the deal-linked call row stacks on phone. Live phone and dark pass still owed: the Chrome extension was disconnected for the whole round, so the eight fixes rest on the reviewers' reading and the DataTable tests until Liam or the next session looks at them at 375px.
 - [x] LW.39 - Calls: two more meeting types, mentoring and other (Liam, 2026-09-19). MEETING_TYPES and a shared MEETING_TYPE_META in lib/calls.ts feed the validation (message derived from the list), the Type filter, the badges, the slide-over select, the row menu, the classifier (mentor, mentoring, coaching in a title) and the MCP descriptions; the calendar sync keeps a hand-set type when the event has no lead, org or deal parent. Built as workflow call-types-mentoring-other (sonnet, cd9aa3fb, review clean), merged with the row menu and a preview test fix (cbb089ce). Live: six filter chips, mentoring accepted, coffee rejected with the derived message, revert 200. No migration (free-text column).
@@ -520,6 +571,8 @@ Audit by the lead against production payloads; every card traced to its route. W
 - [x] LW.33 - Giant Group allowed on the email gate (email.allowedOrgIds = [aa80a2d6], applied as Liam 2026-09-14 10:40 NZ). Invites to Michael Day and Mark Ramsey follow once the spelling of Mark's address is confirmed (row says ramsey, Liam typed ramsay).
 - Note: "Ask about this plan" opening a new request is by design (the Ask sheet files a request); Liam can change it to a message if he prefers.
 - [~] LW.27 (MERGED b268d048) - [FE] Client home empty state: keep the dark header panel, drop the leaf badge (Liam: "remove that badge with the fern in it, I liked the full dark mode header"). Agent home-empty-onboarding-exit.
+  Partial live evidence: bc7412e9 records Giant Group read-only home at 375
+  light/dark and 768 dark, including its header state. A5 real-client lap remains.
 - [~] LW.28 (MERGED b268d048) - [FE] Onboarding has no way out: a "Sign out and return to sign in" line on every step and on /welcome. Same agent.
 - [~] LW.29 (MERGED 62d905c6; cause confirmed: the contact was linked to the Clerk user by email while Clerk held no membership, and the old route turned that into a 502) - [BE/FE] Settings > People: the bin on a teammate row does nothing for a person who signed up by hand and never joined the Clerk org; route made resilient to a missing membership, ConfirmDialog, honest errors. Agent people-delete-fix.
 - Merge evidence for the canonical LW.21 to LW.24 checkboxes above: bdf333c4
@@ -620,7 +673,9 @@ order inside catalogue batches G and H.
 
 ## Claude Design write-back
 
-- [x] DL.3 - [Design] Write the invoices-studio shell wiring under Finance (done 2026-09-13, recorded in the run log and the catalogue section 6; the reorganiser could not see it because design writes leave no git trace)
+- [~] DL.3 - [Design] Verify the reported invoices-studio shell wiring under Finance.
+  The lead marked it done on 2026-09-13 (run log and catalogue section 6),
+  but a design-project file listing/readback is not recorded in the repo.
   (exact edits scoped in
   `docs/superpowers/audits/2026-09-07-invoices-services-stalled-integration.json`:
   one stylesheet link, three script tags, one app-mount line, one app-shell prop
@@ -629,14 +684,9 @@ order inside catalogue batches G and H.
   `.claude/qa/svc-ladder-patch.cjs`), the Stalled-as-a-flag rework (staged under
   `.claude/qa/stall`), and archive the scratch mounts. Services v2 is confirmed
   already wired for the client audience.
-  UNRESOLVED: two documents disagree.
-  `docs/superpowers/plans/2026-09-13-page-catalogue.md` sections 5 and 6 say
-  DL.3 is done ("DL.3 landed the invoices-studio shell wiring under Finance, the
-  services plan ladder, the Stalled-as-a-flag rework and the archive scratch
-  mounts", "DL.3 shell wiring is done too"). STATUS.md says "DL.3 shell wiring
-  and DL.4 re-critique are next". Claude Design writes leave no git trace, so
-  neither claim can be checked from the repo. Resolve by listing the design
-  project files.
+  Current state: reported written, external readback unverified. Both TASKS.md
+  and STATUS.md use this state; DL.4 needs that readback first. Claude Design
+  writes leave no git trace and no project listing is available in this batch.
 - [ ] DL.4 - [Design] Re-render and re-critique in the real shell after the
   writes. Gated on DL.3. Liam ran /design-login at 22:35 NZ 2026-09-13, so the
   access this needs is live.
@@ -659,7 +709,10 @@ Overnight 2026-09-14: every module in this section has a fresh design in Claude 
   2026-09-14 review document, and finance.md has the full port plan.
   The old "fixer outcome not recorded" blocker is obsolete. CB4 owns the
   implementation; it may proceed as "ported, unchecked" under Liam's
-  2026-09-26 instruction. Review boxes remain empty until he looks.
+  2026-09-26 instruction. List source a14d0dea is live at 511c7d5f: 120-row
+  CSV/pagination and 375/768 dark cards, fitted 1280 table (bc7412e9).
+  Detail and remaining finance.md slices are still open under CB4.
+  Review boxes remain empty until he looks.
 
 - [~] MR.7 - [Design/FE] Services showcase: the CB1 half is live
   (6534ebdd). The fuller portal-money plan exists, with the review document's
@@ -667,10 +720,10 @@ Overnight 2026-09-14: every module in this section has a fresh design in Claude 
   Services hidden for clients by default and do not settle the CT.11 order
   path by porting speculative checkout/request controls.
 
-- [ ] CB4 - [FE/BE] Studio invoices port is ready from
+- [~] CB4 - [FE/BE] Finish the partial studio invoices port from
   docs/superpowers/design/port-plans/finance.md (revision SHIP).
   Liam's 2026-09-26 unchecked-port instruction removes the advance-review
-  dependency. Start with invoice list/detail, preserve all real billing fields
+  dependency. Continue with invoice detail, preserve all real billing fields
   and guards, then record port commits with review boxes left empty.
   2026-10-11 bounded local list port: complete ledger reads, scoped CSV export,
   truthful paid-month totals, mobile/tablet cards and fitted desktop columns.
@@ -860,7 +913,7 @@ I4 and I5 have no id in TASKS.md and are carried here as catalogue lines only.
 
 ## Batch J. Files, notifications and integrations depth
 
-J1 = CL.1 (files as a small Google Drive with threads, design first).
+J1 = FILES.1 (formerly the duplicate CL.1, files with threads, design first).
 J2 notification preferences, rich content, sidebar badges, quiet hours reader,
 weekly digest cron (the T682 to T699 group). J3 Slack notification wiring plus
 the T570 Zapier config surface. J4 = T1.16 batch B (deals, conversations, calls,
@@ -1065,26 +1118,25 @@ scoping.
   Studio editor has an Audience control and a Visibility control that write both
   flags in lockstep. 28 tests. MCP list/create/update_service carry both fields.
   REMAINING: the ORDER PATH, which waits on Liam's call between minting a request
-  and a Stripe checkout; "Ask about this" is untouched. Known gap left as its own
-  problem: the global admin search returns private service names to a scoped team
-  member, because it applies no scoping to ANY entity.
-- [ ] CT.15 (1d) - [FE] /reviews: the Send button sends nothing, Copy review link
-  404s (`/review?token=` vs `/review/[token]`); delete or fix, and the orphaned
-  outreach routes. Catalogue D4 deletes the lies; catalogue I2 builds the real
-  testimonial pipeline.
+  and a Stripe checkout; "Ask about this" is untouched. Global search now scopes
+  private service names in 2f81243f, deployed 511c7d5f; further nested guards
+  are live in 6f9f2170. Scoped-seat live isolation remains T1.16.
+- [~] CT.15 (1d) - [FE] Finish review outreach after the honesty repair.
+  Source 2f81243f, deployed 511c7d5f: Send became "Mark as asked", and Copy
+  review link uses /review/<token>, matching app/review/[token]. Orphaned
+  outreach routes, a real testimonial pipeline and signed-in action proof
+  remain. Catalogue D4/I2 reference this same task.
 - [~] CT.16 (1d) - [Liam decision + FE] /billing in or out of the client nav; its
   Manage Billing popup fails silently. MERGED c1e8c24e (CB2): /billing is out of
   the client nav by default (nav-model test), the page runs on the v3 primitives,
   Manage Billing renders only when the subscription reports canManagePayment
   (Stripe rail), so a Xero-rail client such as Giant Group never sees the failing
   popup. Live smoke in Client view still owed.
-- [ ] CT.17 - [BE/MCP] Messaging adapters are implemented: the messages API
+- [~] CT.17 - [BE/MCP] Verify implemented messaging and invoice adapters end to end.
+  The messages API
   accepts body as an alias for content and conversations accept the MCP
   participant shape. Verify them end to end rather than rebuilding them.
-  Remaining confirmed mismatch: create_invoice's worker schema still requires
-  amountUsd/totalUsd and exposes no lineItems, while the API requires non-empty
-  lineItems. Align schema/mapping and test the real tool-to-route contract on
-  QA data. Triage 2026-10-10, source checked on main.
+  create_invoice now accepts non-empty lineItems and forwards the API contract.
   Schema/mapping repaired and tool-to-route tests pass in 2f81243f, deployed
   2026-10-11. Signed-in creation/messaging round trips remain to verify.
 
@@ -1108,9 +1160,10 @@ scoping.
   until the stamp has run. The before-date regex accepting an impossible calendar
   date was fixed in 42b331c3.
   **LIAM**: run the dry run from Settings or the MCP, read the count, then apply.
-- [ ] IC.9 (0.5d) - [FE] /time at 375: segmented tabs 37px, Add filter 30px, sort
-  headers 18px, search input 19px are under the 2.75rem target (pre-existing; the
-  /time week grid redesign supersedes this page).
+- [x] IC.9 (0.5d) - [FE] Repair /time control targets at 375.
+  Source 2f81243f, deployed 511c7d5f: search/filter controls measure at least
+  2.75rem at 375 dark. bc7412e9 records the signed-in production time check.
+  Future week-grid redesign remains separate; wider dark residue is FU.5/FU.6.
 
 ### Requests, tasks and messages polish
 
@@ -1134,16 +1187,15 @@ scoping.
   (spanned across the days it will take), not just dropped on one due date. Needs
   a design and probably a schema decision (a per-day allocation, distinct from
   the single due date). Extends the shipped My week strip. Catalogue F1.
-- [ ] TP.4 - [Design first, then FE] **Notifications page (not urgent).** An All
-  notifications and Past notifications page: the full history behind the bell,
-  simple list with read state. Design in Claude Design first. Low priority.
-  Note: AR.1 and PP.4 shipped a /notifications page for both audiences with
-  views, kinds and facet counts, so re-scope this against what is live before
-  starting.
+- [~] TP.4 - [QA] Verify the existing notifications history instead of building
+  another page. AR.1/PP.4 shipped /notifications for both audiences: source
+  dbbbb916 and rail revision fbb9f4f0, views/kinds/facet counts and read state.
+  Liam's history/read-state look remains; add any new preference work to the
+  existing post-launch notifications group. The requested page is already built.
 
 ### Files
 
-- [ ] CL.1 - [Design first, then FE/BE] **Files as a small Google Drive with
+- [ ] FILES.1 (formerly the duplicate CL.1) - [Design first, then FE/BE] **Files as a small Google Drive with
   threads.** Folders per client (Deliverables, Brand, References, Uploads),
   drag-and-drop uploads from the client, a comment thread per file (reuse the
   request thread composer and the messages table with a file target), versions
@@ -1151,9 +1203,8 @@ scoping.
   with threads so they can upload docs for us there." Design in Claude Design
   alongside the Clients pages; the current /files page (list, upload, download)
   stays until then. Catalogue J1.
-  ID COLLISION: a different, already shipped item also carries the id CL.1
-  ("Deletes verify with Clerk first", LIVE dfb1d158). Liam's call which one keeps
-  the id.
+  Renamed 2026-10-14 to keep the shipped Clerk-delete CL.1 stable. Catalogue
+  J1 references FILES.1; no scope or work was removed.
 
 ### Live QA laps never yet done
 
@@ -1163,9 +1214,12 @@ scoping.
   (non-internal) request in an impersonated org; set one to client_review first.
   Row-filtering confirmed unchanged in code; this is the last unverified
   client-facing piece.
-- [ ] V1-QA.2 - [QA] e2e specs (`mobile.spec.ts`, `portal-flow.spec.ts`) assert a
-  Messages tab and will fail; update them for the V1 hide. Both files still exist
-  and still carry the assertion. Catalogue E5.
+- [ ] V1-QA.2 - [QA] Run the updated portal/mobile e2e specs with client auth.
+  2f81243f already made Messages assertions negative. Uncommitted next-20 batch
+  A refreshes Overview/Requests/Files plus More (Notifications, How this works,
+  Settings), with Messages/Services hidden by default. Static listing passes
+  (14 tests); actual Playwright spawn is blocked by sandbox EPERM.
+  Clerk client-session execution remains owed. Catalogue E5.
 - [ ] T2.QA (C4.2) - [QA] **Full live client-session lap on prod** as a real
   client org at 375px plus dark: every nav item, file download, invoice pay,
   request thread round-trip. Never been done. Overlaps CT.10 and A5.
@@ -1195,7 +1249,7 @@ not need re-scoping, only executing.
 - [~] T3.5 (C1.5) - [FE] Mobile money path: VariantTabStrip overflow (375px third
   package unreachable); gantt narrow-mode card stack; contract canvas rotation.
   MERGED as C2 (bad0d7ef) for the tab strip and the gantt. The contract canvas
-  rotation is catalogue D1, still open.
+  rotation is owned solely by T3.10 (catalogue D1), still open.
 - [~] T3.6 (C1.6) - [BE] Contract artifact persistence: signed PDF to R2
   `signedStorageKey` plus download button plus admin resend action. MERGED as C4
   (32c78bee, code 90d9afc4). Migration 0099 applied through the runner. Live lap
@@ -1203,17 +1257,19 @@ not need re-scoping, only executing.
 - [~] T3.7 (C1.7) - [BE] Contract tamper anchor: hash bodyHtml into chain; block
   body PATCH after draft; fix revoke-resets-partially-signed. MERGED as C4
   (32c78bee). Live lap owed.
-- [ ] T3.8 (C1.8) - [FE/BE] Deals honesty: remove or implement scheduled and auto
-  nudges; no fake 'sent' without RESEND_API_KEY; dialog error surfacing.
-  Catalogue I3.
-- [ ] T3.9 (C1.9) - [FE] Small-fix batch: alert() to toast; EmailShareModal
-  preselect; founders image compress; public tab titles and OG; em-dash metadata;
-  /pipeline hrefs; accept validates against snapshot; expiresAt enforcement;
-  client-detail ContractsTab data shape; save-as-template 400; search reads
-  contract_documents. Catalogue D2. Fold in: retire the dead
-  `emails/contract-signature.tsx` and `studioContractSignatureEmailPlan`, which
-  only the preview page uses now that C4's contract-partially-signed is the live
-  path. Note that C2 already shipped the OG tags and removed the alert().
+- [~] T3.8 (C1.8) - [FE/BE] Verify shipped manual-only deal nudges.
+  2f81243f, deployed 511c7d5f: scheduledAt returns 409, the sidebar states
+  automatic follow-ups are unavailable, and held recipients are explicit.
+  Missing Resend never yields fake sent status. Manual delivery/refusal and
+  dialog live proof remain. Catalogue I3 no longer schedules an engine build.
+- [~] T3.9 (C1.9) - [FE] Finish the remaining sales artifact small fixes:
+  EmailShareModal preselect, founders image compression, remaining metadata
+  punctuation and /pipeline hrefs, plus save-as-template regression proof.
+  C2 bad0d7ef shipped OG/title work and removed alert(); C3 97e51af0 freezes
+  accepted snapshot amounts. 2f81243f enforces contract email expiry and searches
+  contract_documents. ContractsTab shape was already repaired in b9b47cbd;
+  be6d7365 removed the duplicate signature template/preview plan. These shipped
+  portions need the shared deliverable live lap, not rebuilding. Catalogue D2.
 - [ ] T3.10 (C3.4) - [FE] /p/contract viewer onto the deliverable kit (the only
   public viewer off-kit), plus a rotation-safe signature pad. Catalogue D1,
   unblocked now that C2 and C4 are merged.
@@ -1229,15 +1285,21 @@ not need re-scoping, only executing.
 
 ## Ops and operator steps (4 open)
 
-- [ ] T0.2 (C0.2) - [QA] After deploy lands: fire sync-airwallex, verify
+- [~] T0.2 (C0.2) - [QA] Finish the Airwallex UI/API comparison after live sync.
+  Sync succeeded on 2026-10-09 with two yield rows (2026-10-10 triage SELECTs).
+  Source 0ab09233/e1341912 is deployed; verify
   `get_bank_balances` returns Airwallex wallet plus yield:CUR rows matching the
   Airwallex UI.
-- [ ] T0.3 (C0.3) - [Liam+BE] Refresh `finance.yieldHoldings` against the
-  Airwallex UI (Xero suggests Yield USD 33,956.89 / AUD 638.80 vs the setting's
-  20,014.13 / 531.51).
+- [ ] T0.3 (C0.3) - [QA] Verify yield freshness with the T0.2 money lap.
+  Implementation/source ownership is LW.42, not a second yield repair.
+  The August Xero/setting figures are historical and cannot establish today's
+  cash. Compare current Airwallex Capital balances with finance.yieldHoldings;
+  have Liam refresh through the app only if the live comparison finds drift.
 - [ ] T0.4 (C0.4) - [BE/Ops] Verify migration apply state on prod D1 (0081/0082
   and everything since; `list_migrations`). Now also covers 0098 on staging,
-  which refused the wrangler token.
+  which refused the wrangler token. Access was restored and 0111 applied on
+  2026-10-11; 0113/0114 are also applied per Liam's current brief. Retry the
+  remaining staging 0098/readback audit; token refusal is no longer the blocker.
 - [ ] MC.10b (judgement) - [Liam] Physitrack carries two Stripe customers (the
   organisation keeps one after the Evan Kwan merges, the other stays on the
   invoice rows). Still open.
@@ -1333,8 +1395,9 @@ scheduled; each needs a scope before building.
   current brief at main 729cc282: manual mic/system capture, transcript
   paragraphs and speaker names, durable uploads, optional Nova group mode,
   transcript linking and PWA reminders. The live WAV probe passed both tracks;
-  retain Whisper vad_filter. Phase 2 dashboard implementation is committed on
-  feat/rec0-tray-server: migration 0114 shipped alone at 97b0b0ae, server/UI at e961108f,
+  retain Whisper vad_filter. Migration 0113 (c18f09c7) is applied per Liam.
+  Phase 2 dashboard is live at main 15de17d7 per Liam:
+  migration 0114 shipped alone at 97b0b0ae and is applied, server/UI at e961108f,
   device auth/pairing, idempotent creates,
   owned slim reads, quotas, upcoming calls, Settings devices and blocked-designer
   MCP list/revoke. The tray brief confirms the server side is live at main
@@ -1359,15 +1422,26 @@ scheduled; each needs a scope before building.
   for all three projects with zero warnings/errors; all 207 xUnit tests pass,
   zero failed/skipped, in one test assembly. Logs and TRX are under
   apps/recorder-tray/.build-logs/round4-*. No publish in this follow-up.
+  Live-call bug, 2026-10-14: Zoom uploaded 68 chunks per track, but system
+  transcription was empty because Zoom played to a non-default render device.
+  Mic speaker bleed labelled both voices as Liam. Uncommitted tray repair
+  follows the detector's meeting process tree across all render/capture
+  endpoints, including Zoom's NVIDIA Broadcast virtual mic, with runtime-gated
+  process loopback, saved manual overrides, source-change diagnostics and a
+  sixty-second silent-system toast. Installed call and mid-call switch proof
+  remains required; do not close this task on source tests alone.
+  Audio device fix: Release solution build has zero warnings/errors; all 256
+  xUnit tests pass, zero failed/skipped. Source QA and tray UX pass. Logs/TRX:
+  apps/recorder-tray/.build-logs/audio-devices-*. No commit or deploy.
   Installed Windows checks and real calls remain required
-  before closing REC.0. No commit, push, deploy, live pairing or production
-  write in this review run.
+  before closing REC.0. This documentation batch performs no commit, push,
+  deploy, live pairing or production write.
   Automatic known and unknown call capture,
   no recording notice and the pairing MCP exception are approved in #072.
   Review repair is committed at 54b14081: call windows/member
   matching, stuck recording recovery, rolling audio quotas, pairing security/audit,
-  batched reads and Settings fixes. The final security fixes are verified locally;
-  no commit, push, migration apply, deploy or secret change in this session.
+  batched reads and Settings fixes. Final security fixes are committed in
+  15de17d7 and the dashboard release is live per Liam's current brief.
   Migration files remain unchanged.
   See docs/recorder-tray-server-handoff.md and the 2026-10-14 run log.
 - [ ] LP.1 - [BE] Scope changes caught on a call: the suggester proposes a
@@ -1394,8 +1468,8 @@ scheduled; each needs a scope before building.
 - [ ] LP.11 - [BE] Chapters on call transcripts, written by the summariser.
 - [ ] LP.12 - [BE/FE] Per-meeting audio controls once REC.0 lands: skip a
   meeting or start/stop capture; transcript is the primary output. Calendar
-  detection does not settle whether recording starts automatically; that
-  behaviour remains for scoping. No video or bot-selection UI.
+  capture policy is now approved in Decision #072. Verify installed tray
+  controls and real calls before expanding controls. No video or bot-selection UI.
 
 ---
 
@@ -1543,7 +1617,7 @@ One line each, with the commit. Grouped by week.
   dfb1d158; one kit in `emails/_components.tsx`; preview set of 26 sent to Liam.
 - [x] AU.1 A fresh sign-in with no active organisation goes to /continue LIVE
   dfb1d158, which was the root cause of Staci landing in client onboarding.
-- [x] CL.1 (the Clerk one, id collides with the open files item) Deletes verify
+- [x] CL.1 Deletes verify
   with Clerk first LIVE dfb1d158; "Staci's workspace" deleted through it.
 - [x] CT.1 Internal request titles no longer leak into client bells (a9e44f43,
   f7e5de41).
@@ -1769,31 +1843,30 @@ These did not close, but their evidence moved.
 ## Could not resolve from evidence (left open, with the reason)
 
 1. **DL.3** stays `[~]`. `docs/superpowers/plans/2026-09-13-page-catalogue.md`
-   says twice that the shell wiring is done; STATUS.md says it is next. Claude
-   Design writes leave no git trace, so the repo cannot settle it. Resolve by
-   listing the design project's files.
-2. **MR.6** stays `[~]`. The critic returned FIX and "a fixer is running", and no
-   document records what the fixer produced. CB4, the studio invoices port,
-   is blocked on this.
-3. **MR.7** stays `[~]` for the same reason. Its PORT half is definitely live
-   (CB1); only the design fixer's outcome is unknown.
-4. **The whole LW.2 to LW.19 block** stays `[~]`. Every one is merged with a
-   named commit and the deploys went green, but STATUS.md records "Live checks by
-   Liam pending" and no live observation exists for any of them. The A5 lap
-   closes them as a group.
+   and the lead's run-log update report the shell wiring written. Both current
+   status files now require external project listing/readback rather than
+   claiming done or unwritten. No project listing is available in this batch.
+2. **MR.6** stays `[~]` for the partial port and Liam's unchecked review.
+   The September SHIP revision/finance.md supersedes the old unknown-fixer
+   blocker. CB4's list is deployed/live-checked; detail and remaining slices
+   remain. Advance design review does not block ports under Liam's exception.
+3. **MR.7** stays `[~]` for the fuller portal-money port and unchecked review.
+   CB1 is live; the old unknown-fixer blocker is superseded by the current
+   design review/port plan, which retains bounded FIX caveats.
+4. **The whole LW.2 to LW.19 block** stays `[~]` for incomplete group proof.
+   Named commits/deploys and LW.9's read-only Giant Group observations exist;
+   A5 still owns the real-client writes, invite and second-seat checks.
 5. **C1 to C4** stay `[~]`. Merged, deployed, migrations applied, but the live
    lap (share, edit, publish, revoke, accept, sign) has not been run.
 6. **T1.17** may be partly superseded by LW.18, which removed Clerk invitations
    from product code and added an admin team accept route. Nobody has re-scoped
    T1.17 against that merge, so its text is unchanged and it stays open.
-7. **TP.4** may be largely superseded by AR.1 and PP.4, which shipped a
-   /notifications page with views, kinds and facet counts for both audiences. The
-   original TP.4 text asks for the same thing. Left open pending Liam's look.
-8. **CL.1 is used by two different items**, one shipped ("Deletes verify with
-   Clerk first", LIVE dfb1d158) and one open ("Files as a small Google Drive with
-   threads"). Neither was renamed here, because renaming would invent an id.
-   Liam's call which keeps it.
+7. **TP.4** is `[~]` verification of the already shipped AR.1/PP.4 page, not
+   another page build. Liam's history/read-state look remains.
+8. **CL.1 collision resolved 2026-10-14:** the shipped Clerk-delete guard
+   keeps CL.1; files expansion is FILES.1 with its former-id note and J1 alias.
 9. **T0.4** now has a second, newer reason to exist: migration 0098 applied to
    production but the STAGING apply was refused by the wrangler token
-   (Authentication error 10000). Folded into T0.4's text rather than raised as a
-   new id.
+   (Authentication error 10000). That was historical: access was restored on
+   2026-10-11. Staging 0098 still needs retry/readback; 0111, 0113 and 0114 are
+   applied on production. T0.4 retains the broader migration audit.

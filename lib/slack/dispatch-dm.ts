@@ -33,6 +33,8 @@ import { recordSuggestionMessage } from './mirror'
 import { draftFromNote, noteRowBelongsTo, type NoteSuggestionRow } from './notes'
 import { isAudioFile, preflightAudio, transcribeAudio, type AudioFileLike, type WhisperBinding } from './voice'
 import { downloadFile as downloadSlackFile, type SlackFile } from './api'
+import { detectSlackIntent, slackHelpLine } from './intents'
+import { answerSlackQuestion } from './questions'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -92,6 +94,8 @@ export const READING_STATUS = 'Reading your note'
 
 export type SlackDmReason =
   | 'ok'
+  | 'help'
+  | 'question'
   | 'ignored_bot'
   | 'empty'
   | 'denied'
@@ -242,13 +246,13 @@ async function postCards(
       continue
     }
     const message = studio
-      ? studioCard(row, options.orgName)
+      ? studioCard(row, row.orgName ?? options.orgName)
       : clientDraftMessage({
         id: row.id,
         kind: row.kind,
         proposal: row.proposal,
         quote: row.quote,
-        orgName: options.orgName,
+        orgName: row.orgName ?? options.orgName,
       })
     const ref = await deps.postMessage({ channel, text: message.text, blocks: message.blocks })
     if (studio && isMessageRef(ref)) {
@@ -304,6 +308,23 @@ export async function handleSlackDm(event: SlackDmEvent, deps: SlackDmDeps): Pro
     return outcome(true, 'denied', voice, 1)
   }
 
+  const answerIntent = async (text: string): Promise<SlackDmOutcome | null> => {
+    const intent = detectSlackIntent(text, { voice })
+    if (intent.kind === 'note') return null
+    const reply = intent.kind === 'help'
+      ? slackHelpLine(identity.level)
+      : await answerSlackQuestion({ database: deps.database, identity, intent: intent.question, now: deps.now })
+    await deps.postMessage({ channel: event.channelId, text: reply })
+    return outcome(true, intent.kind, voice, 1)
+  }
+
+  // Greetings and typed questions need neither the model nor the audio path.
+  // A caption beside audio is not used to classify the recording itself.
+  if (!audio) {
+    const answered = await answerIntent(typed)
+    if (answered) return answered
+  }
+
   // The status line goes up before the first expensive thing and comes down
   // in the finally below, whichever way this ends (contract section 6b).
   const status = deps.setStatus ?? (async () => {})
@@ -347,6 +368,9 @@ export async function handleSlackDm(event: SlackDmEvent, deps: SlackDmDeps): Pro
       // words in the audio are the ones the sender said, and the suggester's
       // quote has to be checkable against them.
       text = transcript.text
+
+      const answered = await answerIntent(text)
+      if (answered) return answered
     }
 
     const draft = await draftFromNote({

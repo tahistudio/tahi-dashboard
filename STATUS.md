@@ -1,9 +1,56 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (REC.0 server live per Liam; Windows client round 3 committed at 6964660b, round 4 committed at 93ce4c62). Older sections retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-14** by Codex (next-20 batch A reconciliation; items 1 to 7 live; REC.0 server live and Windows tray built). Older observations retain their dates. Reading order for any agent: AGENTS.md.
+
+## Current reconciliation, 2026-10-14
+
+Next-20 item 1 is live at 962b184b (green deployment, 2026-10-11 10:46 UTC):
+Stripe invoice/payment sync defaults to no-create and logs unlinked customers.
+Items 2 to 7 are live in 6f9f2170 per Liam's batch brief: suggestion target
+guards, nested access guards, billing race/parent fences, previewed Stripe
+customer linking, explicit Xero contact linking and transient suggester deferral.
+Their individual source/review commits are recorded under N20.1 to N20.7 in
+TASKS.md. SW.1 still owns the first-run unlinked list and historical recovery;
+T1.16 still needs scoped-seat isolation proof.
+
+Decision #070's per-person MCP is live (0870fb71 dashboard, 2a01b12b worker,
+0112 applied). REC.0 phases 1/1b are live (6f9f2170/729cc282), and phase 2
+dashboard is live at 15de17d7, per Liam. Migrations 0113 and 0114 are applied
+per the current brief. The tray app under apps/recorder-tray is built through
+93ce4c62; installed Windows integration and representative real-call proof
+remain. REC.0 is open, rather than treating a build as installed-call evidence.
+
+Reconciled backlog states: IC.9 and HA.1 to HA.9 have recorded live evidence;
+CT.15, CT.17, T3.8/T3.9, SW.1, FU.9, CB4/MR.6 and TP.4 are partial or
+verification work. DL.3 is reported written but lacks external design-project
+readback, so remains [~] before DL.4. Files expansion is FILES.1; CL.1 remains
+the shipped Clerk-delete guard. The dated inventory appendix records each
+contradiction and the evidence used. This documentation batch performs no
+production reads/writes, commit, push, migration apply or deployment.
+
+Contract/time repairs retain partial proof: bc7412e9 records signed-in
+contracts and time; 2f81243f records 375 light/dark and 768 dark contract
+cards, fitted local 1280 table and 2.75rem time controls. FU.2 still needs the
+changed signing-email preview/send proof; FU.5/FU.6 retain schedule/menu/Wire
+and recorded table-layout observations. LW.9/LW.27's read-only Giant Group
+home rendering is proved, while A5's real-client session remains open.
 
 ## REC.0 phase 2 Windows client, prepared 2026-10-14
+
+Liam's first real Zoom call detected and linked correctly, uploading 68 chunks
+per track, but every system chunk transcribed empty. The default Communications
+render endpoint was different from Zoom's playback endpoint. Mic speaker bleed
+then labelled the other party as Liam. The uncommitted fix in the tray worktree
+follows meeting process-tree sessions on render/capture endpoints, adds saved
+manual choices and per-track silence diagnostics, and prefers runtime-gated
+Windows process loopback. REC.0 remains open for installed real-call proof.
+Release solution build passes with zero warnings/errors; all 256 xUnit tests
+pass, zero failed/skipped. Source QA and tray UX pass after device-stop callback
+races, missing-device diagnostics and keyboard/touch access to peaks were fixed.
+Logs and TRX: apps/recorder-tray/.build-logs/audio-devices-*. No commit or deploy.
+Own-process native loopback activation, PCM initialization, capture and disposal
+also pass on Windows 11 build 26200, without saving audio or running the host.
 
 Liam's tray-app brief confirms the server side is live on production at main
 15de17d7. Earlier server preparation notes below remain historical.
@@ -44,20 +91,21 @@ The main session must publish and verify Windows integration and real calls.
 REC.0 stays open. Build steps and hardware/integration checks are in
 apps/recorder-tray/README.md.
 
-## REC.0 phase 2 dashboard, prepared 2026-10-14
+## REC.0 phase 2 dashboard, live per Liam 2026-10-14
 
 Phases 1 and 1b are live per Liam's current brief, main 729cc282. The live
 five-second WAV probe passed for both tracks; retain Whisper vad_filter.
-The tray dashboard implementation is committed on feat/rec0-tray-server:
+The tray dashboard implementation is live at main 15de17d7 per Liam:
 migration 0114 shipped alone at 97b0b0ae, server/UI at e961108f, restricted device auth/pairing, owned slim recording
 APIs, quotas, upcoming calls, Settings devices and full-profile list/revoke
 MCP tools. The review repair is committed at 54b14081: overlapping call windows,
 member matching, empty/stale recording recovery, rolling audio quotas, pairing
 limits/HMAC/audits, batched reads and Settings fixes. Decision #072 records
 the fixed choices and pairing's MCP exception.
-0114 is shipped. The main session must review and deploy the server,
-then verify signed-in 375/768 light/dark states. No migration apply, deploy,
-secret change or C# app is performed here. REC.0 stays open. The following
+0114 is applied per Liam's current brief, as is phase 1 migration 0113.
+Signed-in device UI 375/768 light/dark observations and installed tray/call
+proof remain. No migration apply, deploy, secret change or C# execution is
+performed in this batch. REC.0 stays open. The following
 phase 1b notes are historical preparation details superseded by this live status.
 
 ## REC.0 phase 1b, prepared 2026-10-14
@@ -99,7 +147,7 @@ group attempts. Audio deletion removes the Nova JSON, manual Whisper fallback
 is admin-only, and malformed transcription JSON returns 400. Follow-up gate
 results are recorded in the run log. REC.0 stays open for phase 2.
 
-## Next-20 items 2 to 7 hardening, 2026-10-13
+## Next-20 items 2 to 7 hardening, live in 6f9f2170
 
 Suggestion decisions keep the stored client immutable, permit same-client
 request links, and allow only supported task fields with team-member assignees.
@@ -134,8 +182,9 @@ sweep succeeds. Counted failures exhaust after five attempts; second-read
 exhaustion keeps the first read's drafts before stamping. Counters clear on
 processing or exhaustion, with the reason in the run summary. No migration.
 
-Source regression coverage is recorded in the run log. Deployment and signed-in
-proof are still required before the existing task states can be completed.
+Source regression coverage is recorded in the run log. Liam's current brief
+confirms this release is live. Broader scoped-seat and reconciliation tasks
+remain separate from the shipped items 2 to 7.
 
 ## Live 2026-10-12: per-person MCP connector (Decision #070)
 
@@ -192,11 +241,11 @@ reviewed by Opus. Review fixes are in 989e31db (re-reviewed, PASS with notes). T
 build adds a manual Windows
 Chromium mic/system recorder at /calls/record, durable chunk uploads,
 Whisper turbo transcription, explicit transcript linking and read/link MCP
-parity. This is not live. Additive migration 0113 is written and registered
-but has not been applied. Apply 0113 BEFORE deployment: the suggestion sweep,
-rebuild, client delete/merge and ManyRequests cleanup read meeting_recordings.
-The main session will apply it to production before merging. This review-fix
-session performs no commit, push, deploy, migration apply or secret change.
+parity. Phase 1 is now live at 6f9f2170 and 0113 is applied per Liam's current
+brief. The earlier review worktree wrote and registered 0113 but did not apply
+it; that preparation note is superseded by the main session's confirmation.
+This documentation batch performs no commit, push, deploy, migration apply
+or secret change.
 The standard test/build runners previously hit subprocess spawn EPERM.
 Local checks and browser-proof gaps are recorded in
 docs/superpowers/audits/2026-10-13-rec0-phase1-report.md. REC.0 stays open.
@@ -241,19 +290,22 @@ connected to Codex. TASKS.md and the run log keep the remaining evidence.
 
 Liam's call: ship every surface a client touches first (proposals, contracts, schedules, portal), cut over from ManyRequests, then improve team/owner surfaces slowly. TASKS.md now carries five sprints: **C0 ops unblock -> C1 sell without embarrassment (deliverable money paths, ~5d) -> C2 portal truth (five blockers, ~12d) -> C3 client-facing redesign stragglers (~4d) -> C4 live QA gate.** Roughly 4-5 focused weeks to a defensible cutover.
 
-## Next work, triaged 2026-10-10
+## Next work, triaged 2026-10-10, refreshed 2026-10-14
 
 See docs/superpowers/plans/2026-10-10-dashboard-task-triage.md for readiness,
-source evidence and dependencies. Recommended order: SW.1 billing recovery;
-remaining search/permission gaps (T1.6/T1.16); suggestion timeout and route
-export repairs (FU.1/FU.7); contract expiry and responsive/dark fixes; shared
-live QA; then CN.3 integration and bounded invoice/client design ports.
-REC.0 meeting audio and WQA.0 website QA can be scoped alongside repairs.
+source evidence and dependencies. Remaining order: SW.1 historical Stripe
+reconciliation/unlinked customers; scoped-seat isolation (T1.6/T1.16); FU.1
+scheduled duration/drain proof (FU.7 is done); expired-link/signing-email
+preview and responsive/dark residue; authenticated e2e/browser cleanup and
+shared live laps; honest-action/MCP adapter proof; CN.2/CN.3 Slack DM/digest
+proof and bounded invoice/client ports. REC.0 needs installed Windows tray
+integration and real-call proof; WQA.0 remains scope only.
 
 MCP consent hardening, roleless deny, core hire linking and most named entity
 scoping are already implemented. They need verification, not the old rebuild
-briefs. CN.3 exists on cn3-ready and requires reviewed migration 0111 plus
-integration. The nineteen design ports may proceed as "ported, unchecked"
+briefs. CN.3 was integrated in a14d0dea and deployed at 511c7d5f after 0111
+was applied on 2026-10-11; Slack DM proof still depends on CN.2.
+The nineteen design ports may proceed as "ported, unchecked"
 under Liam's 2026-09-26 instruction, with the review boxes kept empty.
 
 Live cron SELECTs on 2026-10-10 show calendar, transcript and suggestion jobs
@@ -272,12 +324,12 @@ Detail with commit ids is in TASKS.md (CN.1c, CN.2, LW.34, LW.40, LW.43, D3, and
 - **Crons fire from a Cloudflare Worker** (LW.43, 2026-09-22): workers/cron-trigger replaced the GitHub schedules, which dropped most runs. **But the call-notes suggester never reached its handler from 22 to 26 September**: it lives under /api/admin/crons/ (plural), the worker sends only x-cron-secret, and the path was missing from the middleware's public list, so Clerk answered every run with a 404. Fixed and deployed 33f61601 on 2026-09-26; the 05:13 UTC run read the missed call and filed a suggestion. middleware.test.ts now walks every cron-trigger target through the middleware, so a new schedule entry cannot ship without its public line.
 - **The Slack app (CN.2) is deployed** (b06b0d91, migration 0110) and waits only on Liam's manifest, reinstall and the two secrets. Its three loose ends shipped 2026-09-26: a channel mention answers with a pointer to a DM and never creates a note, a modal submit is acknowledged cleanly, and slack_events_seen is swept daily after seven days.
 - **Suggestions (CN.1c) deployed ed2d4385**: a re-read adds to what is waiting instead of replacing it (only an explicit replace expires rows), and every call is read twice, the second read shown the first and asked for what it missed. The sweep has a 75 s budget under the worker's 120 s cut, about one call per half-hour run; calls that do not fit wait unstamped for the next run.
-- **CN.3, keeping in sync (built, merged on branch cn3-ready, NOT deployed)**: a dashboard change to an item that came from a suggestion posts one line under its Slack card (only when Slack is configured; a no-op otherwise), reject reasons feed the suggester as negative examples for the same client only, the request wizard remembers what calls agreed, and a Monday digest of unreviewed suggestions goes to each founder by DM. A client's Slack DM only ever shows text written for that client. **Migration 0111 must be applied on tahi-db BEFORE the push** (`npx wrangler d1 execute tahi-db --remote --file=drizzle/migrations/0111_cn3_sync.sql`): every full-row read of task_suggestions names the new reject_reason column. Then fast-forward main to cn3-ready and push. Contract: docs/superpowers/plans/2026-09-26-cn3-sync-contract.md.
+- **CN.3, keeping in sync (current state updated 2026-10-14)**: integrated a14d0dea and deployed 511c7d5f on 2026-10-11 after migration 0111 was applied and verified. Slack thread lines, weekly digest, same-client rejection examples and wizard learning are deployed. The earlier cn3-ready preparation instruction is complete; CN.2 setup and live DM/digest proof remain. Contract: docs/superpowers/plans/2026-09-26-cn3-sync-contract.md.
 - **Tests (LW.34)**: the three files that failed only under a full parallel run were fixed at the root; 387 files green.
 - **Phone and dark (LW.40 round two, ed2d4385)**: the morning's live pass at 375 found five of the eight fixes good and three not: the brief's Refresh and Nudge buttons at 26px, the Wire ticker with no hanging indent, and the contracts list as a sideways desktop table with its row menu 900px off screen. All three are fixed and deployed (44px targets, the Wire indent, mobile contract cards, 44px row menus on every DataTable, a dark danger ink token). **Not yet seen live**: the extension disconnected after the deploy.
 - **Contract truth (ed2d4385)**: a contract past its expiry now shows its expired state before any signature pad (it used to let the client draw and then refuse); the viewer's fine print says what the link really does; a contract marked signed by hand (the Lingorama SoW) no longer reads "Fully signed, 0 of 2 signed" with today's date invented as the signing date; the admin preview pill and audit trail hold at 375; the signed PDF is stored even when no email goes; public links no longer flash dark. Not yet seen live.
 - **Deliverable specs (D3)**: e2e/sales-publish.spec.ts and e2e/public-viewers.spec.ts green on the QA harness (proposal share to accept to studio notified, contract send to two signatures to stored PDF, revoke, expiry, 375 and dark). The live rehearsal with real inboxes is still owed.
-- **Financial snapshots**: August 2026 has no row and cannot be honestly rebuilt: yield was held in August and past yield balances are not stored, so month-end cash is unknown; MRR and active clients never have history. The backfill used to overwrite earlier backfilled months (May and June) and now never overwrites without an explicit refresh; a single-month fill (?fill=YYYY-MM, MCP snapshot_fill_month) inserts only what it can prove. The home's MRR change reads "vs Jul (no Aug MRR)" until 1 October, when September's row becomes the basis. The Airwallex sync now records finance.yieldFirstHeldAt ('unknown' the first time it sees yield), which blocks cash rebuilds for later months until someone sets the real date of the first transfer into yield.
+- **Financial snapshots**: August cash cannot be honestly rebuilt because yield was held and past yield amounts are not stored. Insert-only single-month fill preserves earlier backfills. "vs Jul (no Aug MRR)" was the September observation, superseded in October by the actual prior snapshot month from mrrDeltaBasisMonth; the dynamic label already exists. Next-20 item 12 retains the October check. Airwallex sync records finance.yieldFirstHeldAt to prevent fabricated historic cash.
 
 ### Operator steps waiting on Liam (2026-09-26)
 
@@ -292,7 +344,7 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 
 - **Giant Group is live on the portal** (2026-09-14, LW.33): their org is on the email allowlist, Michael Day was invited through the real flow (link valid to 27 September), Mark Ramsey's invite waits on the spelling of his address. The first real hand-off went through the MCP on 2026-09-18: request #244 to Mickey Day, due 30 September. Their two shared proposals are the only ones on the home's Proposals live card.
 - **Liam's second walk-through round** (2026-09-14, LW.21 to LW.36): one scrollbar on the requests board; delete a file from every files surface with MCP delete_file; Services hidden for clients the way Messages is; one focus ring on the AI composer; the seat invite flow fixed end to end (signed out plus a token goes to sign-up with the email prefilled, acceptance runs on arrival, seat versus first contact decided from the org's contacts); the client home empty state keeps the dark header; "Sign out and return to sign in" on every onboarding step; People delete resilient to a missing Clerk membership; member seats never see plan or billing; prep notes on every call (migration 0102); the "test manual" phantom invoice written off and the Stripe importer taught never to demote written_off or paid; the comment ball picks its element and snaps to an edge (0101) and stores screenshots (0103, applied 2026-09-15 after the insert had failed for a day). Google Calendar: the production grant was read-only, so kickoff bookings never reached the calendar; scopes widened, Liam reconnects once (LW.8b).
-- **Client hand-offs on requests** (2026-09-18, HO.1 to HO.4, Decision #063): a request can be handed to a named client contact with a reason, note and date (migration 0104); the contact sees Waiting on you in the portal, the studio sees a chip, a rail view and a Waiting on card, the request hands itself back on approve, upload or reply, a nudge email goes out after three days, and a contact without a seat is invited in the same email. MCP hand_off_request, hand_back_request, list_requests_waiting_on_clients and get_dashboard_guide; /help renders the ten-section guide for both audiences.
+- **Client hand-offs on requests** (2026-09-18, HO.1 to HO.4, Decision #063): named contact/reason/note/date, Waiting on cards and automatic hand-back on approve/upload/reply are built (0104 applied). Reminder support is built but NOT scheduled: delivery-watch and automation-sweep are absent from workers/cron-trigger, so no three-day automatic email has run. Liam decides reminder policy before enabling it. MCP hand_off_request, hand_back_request, list_requests_waiting_on_clients and get_dashboard_guide; /help renders for both audiences.
 - **MCP worker hardened** (LW.37, LW.38, Decision #066): connector arguments arrive as strings, so create_task lost subtasks and every boolean flag misread; coerceArgs now normalises every call against the tool's inputSchema at the tools/call boundary. New tools show up in a connector only in a fresh session.
 - **Studio home accuracy** (2026-09-19, HA.1 to HA.10, Decision #065): every card was traced to its route on production; nine were wrong and are fixed and verified live (receivables aging buckets, the brief's currency prefix, the MRR delta basis month, pipeline ahead on the forecast's basis, capacity by assigned work and active members, retainer health by the API's own status, proposals live without drafts, one cash position for the money cards, the cash-flow ribbon on the full picture). Settings applied as Liam: finance.lastYearTaxOwed 24242.68 (the IRD balance), team.inactiveMemberEmails nathan@tahi.studio. Greyhive INV-2025000024 written off (a debt collector is engaged). Live after c554076d: outstanding NZ$21,394 across 6 invoices with NZ$16,106 overdue; cash NZ$76.1k, +NZ$13.2k a month net, 3.6 months if revenue stopped; take-home NZ$51.8k free; September net +NZ$14.5k, twelve months +NZ$136.5k.
 - **Pay-rise question** (2026-09-19, decision open): Liam asked whether the pipeline retainer justifies a rise for Staci and him. The model from the live numbers recommends NZ$78k each from the 1 October payroll on today's revenue (nearly tax neutral inside the 30 percent band), with NZ$74k each also comfortable, with or without Meditrain; Bharat's 17 September transcript confirms the Meditrain package at 2,200 a month, which the CRM still carries as 1,250 and which may include the SE Ranking subscription. Conditions and revert rules are in the run log under 2026-09-19. Liam decides; nothing was changed in settings or code.
@@ -321,7 +373,7 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 - **Decisions:** MC.4, Giant Group gets no emails yet, the allowlist stays closed. MC.10, both Dante Media invoices were paid, recorded as paid on the ledger (detail in TASKS.md). DL.0 unblocked: Liam ran /design-login on 2026-09-12, so the Claude Design write-back (DL.1 to DL.4) can run.
 - **MC.9 residue sweep** shipped (abeb9bc8, `residue: true` on POST /api/admin/import/cleanup, dry run by default, MCP parity) and applied by Liam on production the same day: 36 orphan rows removed (tracks, checklist items, a blocker, empty request threads, unreachable notifications, the Acme Corp seed subscription, timer smoke entries, test conversations); a second dry run plans zero. Acme Corp itself: hard deleted by Liam the same day; the residue sweep still plans zero afterwards, so the last seed organisation is gone without leaving orphans.
 - **Xero void no longer demotes a paid invoice** (eb5592db, live): the two Dante Media invoices paid through ManyRequests and voided in Xero read paid with their real payment dates and stay that way through the hourly sync.
-- **Claude Design write-back (DL.1, DL.2) complete**: 14 of 14 files in. Eleven went through write_files and were read back line for line; the three over 100 KB (sales-artifacts.jsx, sales-artifacts.css, sales-pipeline.jsx) went in through the design-sync disk upload on 2026-09-13 and read back at their full line counts. DL.3 shell wiring and DL.4 re-critique are next.
+- **Claude Design write-back (DL.1, DL.2) complete**: 14 of 14 files in. Eleven went through write_files and were read back line for line; the three over 100 KB (sales-artifacts.jsx, sales-artifacts.css, sales-pipeline.jsx) went in through the design-sync disk upload on 2026-09-13 and read back at their full line counts. DL.3 is reported written by the lead's 2026-09-13 catalogue/run-log update, but external project listing/readback is not recorded. It remains [~] for that proof before DL.4 re-critique; this batch cannot inspect the design project.
 - **Pre-call digest timing fixed** (482627b8, live): Google Calendar rows carried a +12:00 offset and the cron compared them lexicographically, so New Zealand calls fired about twelve hours late. Every writer now stores a UTC instant, the cron compares instants, the email prints NZ time; the 71 stored rows were normalised on 2026-09-13 (dry run, apply, second dry run clean).
 - **Giant Group readiness Batch A is live** (66b18917, 2f0c20a0; TASKS.md "Batch A"): the portal tells a Scale client the truth about rate, currency and tracks; an existing client is never sent through a plan picker or a card form; How to pay shows when a Xero invoice has no link; client emails carry the org id to the allowlist gate; the home call is joinable; the services catalogue is populated (Maintain, Scale, three add-ons, no prices); Messages is hidden for every client; the importer handles subset runs. Smoked in Client view of Giant Group on production. Open: the A4 isolation spec has to run green on the harness (a pre-existing goto race is being fixed), import notes leaking into the client invoice (fix in flight), per-currency bank details, and the real-session lap that only Liam or Staci can do. Readiness estimate: about 92 percent, the real lap and a week of studio use are what buy the last points.
 - **Overnight design pass, 2026-09-14** (docs/superpowers/plans/2026-09-14-design-review-for-liam.md): 27 requirement documents written from the code and the backlog, then 19 design modules built in Claude Design by opus designers and screenshot-critiqued at 1440 and 375 in light and dark, one revision each. 14 modules stand at SHIP, 4 at FIX with a bounded list (portal-account, portal-files, portal-money, requests, tasks), calculator-analytics awaiting its critique. Every module is reachable in the app shell for its audience with zero console errors. Nothing is ported; Liam reviews first.
@@ -333,7 +385,11 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 
 ---
 
-## Triage snapshot (audited against code 2026-08-18; no commits since dc41442a / Aug 10)
+## Triage snapshot (historical 2026-08-18 audit, corrections through 2026-10-14)
+
+The original August blockers below are historical findings. Current deployed
+behavior and remaining proof are recorded here and in TASKS.md; the old
+"no commits since August" heading did not describe the October platform.
 
 ### Tenancy proof
 
@@ -341,8 +397,8 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
 
 ### Trusted 100% (daily-driven and/or live-verified)
 
-- **Sales pipeline** (daily-trusted; data real; UI is pre-v3 but honest except the nudge affordances below)
-- **/financial-reports** (daily-trusted; Airwallex-first fix pending the deploy approval above)
+- **Sales pipeline** (daily-trusted; data real; UI is pre-v3; manual-only nudges after 2f81243f)
+- **/financial-reports** (daily-trusted; Airwallex-first cash source deployed; yield freshness remains LW.42)
 - **Docs Hub** (locked reference pattern)
 - **Requests** admin + portal (v3 lift, live-verified June; the request loop is the portal's strongest feature: intake forms, thread, AI wizard, tenancy solid)
 - **Overview homes** (owner + client verified live July; teammate home never visually verified)
@@ -379,22 +435,22 @@ Full detail with commit ids is in docs/superpowers/plans/2026-09-13-overnight-ru
   `e2e/tasks.spec.ts` against the local harness; dark mode is a live check
   only.
 
-### Built and impressive, but NOT client-safe yet (sprint C1)
+### Deliverable fixes shipped, shared round-trip proof remains
 
-- **Proposals**: public viewer + list are premium; but share serves LIVE rows until a separate Publish click, the Publish button permanently disappears after first use in a session, accepting a proposal notifies NOBODY (no email/notification/deal move; viewer promises "we'll be in touch within one business day"), and at 375px the package tabs clip so a phone client can't select the third package.
-- **Contracts**: emailed-link signing genuinely works end to end (drawn signature, hash chain, fully-signed PDF emailed to all parties). But the signed PDF is never stored (one fire-and-forget email is the only copy), the body isn't hash-locked and stays editable after signatures, nobody is notified on partial signature, and the portal nav item silently bounces clients to /requests.
-- **Schedules**: strongest client-facing document in the codebase (snapshot semantics, dwell analytics). But share-before-publish leaks live edits, a viewer's dark-mode localStorage corrupts the public document, dark slide themes render invisible text, the gantt is a 64rem pinch-scroll strip on phones, and drafts leak phase names onto the client home.
-- **Deals** (internal): every traced button hits a real API (sales kit one-click proposal/schedule/contract creation, convert-to-client provisioning). Two lying affordances to remove or build: scheduled nudges are recorded as queued but never send; "auto-nudges active" toggles have no engine. Nothing closes the loop when a client accepts/signs. v3 lap still pending (board/list/filters/dialogs bespoke; 2-3 day composition swap).
+- **Proposals**: C1 3ecafbba snapshots on share and re-arms Publish; C2 bad0d7ef repairs phone tabs/public themes; C3 97e51af0 notifies the studio on accept, decline and question, with accepted amounts frozen. T3.1 to T3.4 and D3 retain shared live round-trip proof.
+- **Contracts**: C4 32c78bee persists signed PDFs in R2, notifies on signatures and anchors/locks the body. Migration 0099 is applied; 2f81243f adds deadline/send guards. The duplicate signature template was removed in be6d7365. T3.6/T3.7/D3 live signing/PDF proof, FU.3 countersign policy and the T3.10 viewer/rotation port remain.
+- **Schedules**: C1/C2 shipped snapshot sharing and phone gantt/public theme repairs. Verification of the deliverable round trips remains; the August share/theme bugs are not current rebuild tasks.
+- **Deals** (internal): 2f81243f rejects scheduled nudges with 409, removes automatic-follow-up claims and reports held recipients. Manual nudge proof remains T3.8. Acceptance/signature notifications are shipped; v3 composition and the Stalled flag remain separate work.
 
-### Broken or missing for clients (sprint C2 - the five blockers, all re-verified 2026-08-18)
+### Historical portal blockers (C2 shipped, real-session proof remains)
 
 **Update 2026-09-05:** B3, B4 and B5 shipped in the Tier 1 cutover (`docs/superpowers/plans/2026-09-05-cutover-tier1.md`) and were verified on production: portal invoice detail with a persisted pay link, the client Files page and honest nav, invites minted and emailed from the client detail with the portal admin role on the first contact, the second seat linked on sign-in, "invoice me" completing onboarding. The cron workflows also needed the Clerk public matcher opened (b8b3f366) after the URL fix. B1 and B2 were not in the 2026-09-04 ship readiness audit's blocker list; treat them as fixed earlier and re-check on the first real client. The entries below are kept as the historical record.
 
-1. **B1 uploads identity** - clients 403 on every team-uploaded file; /api/uploads/confirm is a cross-tenant write hole (any authed user can write files rows into another org); Clerk-vs-D1 org-id split also hides client self-uploads from the portal list. (~2.5d)
-2. **B2 notification identity** - inserts use domain row ids, queries use Clerk ids: clients never see team replies, team never sees client comments. Correct resolver helpers exist unused. (~1.5d)
-3. **B3 portal invoice dead end** - detail page always hits the admin API (403 for clients); no pay link is ever stored; "Pay" buttons just navigate to the list. (~2.5d)
-4. **B4 dead client nav** - Schedule/Contracts/Proposals nav items bounce to /requests; /files is a hardcoded "No files yet" stub (client-only page!); Book-a-call CTAs loop to /overview. Stale sub-claim: /billing now has a working client branch, it's just unlisted. (~2d)
-5. **B5 onboarding not operable** - nothing in UI/MCP mints invite links; second-seat teammates never get clerkUserId backfilled (no Clerk webhook) and are stuck at the onboarding gate forever; "invoice me" 402-strands the client; the kickoff booking step discards the chosen slot. (~3.5d)
+1. **B1 uploads identity**: confirm resolves the authenticated client's owner and ignores a client-supplied target org; portal files reads the resolved org. The old cross-org confirmation claim is superseded. A5/CT.10 retain real-client round-trip proof.
+2. **B2 notification identity**: recipient resolution and notification routing shipped; the real-session bell/reply proof remains A5. The August unused-helper claim is superseded.
+3. **B3 portal invoices**: the 2026-09-05 Tier 1 cutover shipped portal detail, persisted pay links and truthful pay actions, verified on production. Full client payment lap remains T2.QA.
+4. **B4 client nav/files**: the Tier 1 cutover shipped Files and honest nav; Messages and Services are hidden by default, with per-org overrides. Shared document links and scoped portal APIs provide document access; named Contracts/Proposals/Schedules nav entries remain removed. Current mobile nav is Overview, Requests, Files and More (Notifications, How this works, Settings).
+5. **B5 onboarding**: the Tier 1 cutover shipped app invites, second-seat linking and invoice-me completion. LW.18/LW.19 move invites into Tahi mail and gate completion by organisation. A5 real-seat proof and LW.8b Google reconnect/kickoff booking remain open.
 
 ### Redesign coverage (sweep 2026-08-18)
 
@@ -413,7 +469,8 @@ preview returned 404. The repeated preview and recovery succeeded. Wrangler
 access and browser sign-in now work.
 
 **Verification before adding a scoped teammate (T1.16):** the search and
-nested feature/client guards are deployed in 2f81243f and a14d0dea. Real SQLite
+nested feature/client guards are deployed in 2f81243f and a14d0dea; next-20
+item 3 adds the reviewed nested-route repairs, live in 6f9f2170. Real SQLite
 tests cover denied/scoped identities, current permissions and empty scope.
 The remaining live isolation lap needs controlled scoped/denied seats; Liam's
 super-admin smoke alone cannot prove those refusals.
@@ -428,10 +485,10 @@ loaded its real data. No billing data writes or application code changes.
 Older items refreshed 2026-09-26, kept below with their state.
 
 1. **P1 - deployed, not yet seen live:** the three LW.40 fixes that failed the 2026-09-26 morning pass and the contract truth fixes (ed2d4385); the list is in TASKS.md under LIAM. The real-session lap (A5: greeting, bell, invite path, second seat) is Liam's or Staci's and has not happened.
-2. **P1 - `finance.yieldHoldings` may be stale** (last noted 2026-08-18: Xero showed Yield USD 33,956.89 / AUD 638.80 vs the setting's 20,014.13 / 531.51; not re-checked since). Confirm in the Airwallex UI and update through update_settings; the home cash figure (NZ$76.1k on 17 Sep) depends on it, and Liam quoted NZ$85k on 2026-09-19.
-3. **P2 - FU.1:** the suggester's time budget decides when a read starts, not how long it runs; a hanging Anthropic read can still pass the worker's 120 s cut. Watch cron_runs durations. (CN.1c itself, rebuilds replacing passes, is fixed and deployed.)
-4. **P2 - the hand-off nudge (HO.1) has never run, nor has the automation sweep:** delivery-watch and automation-sweep are not in the workers/cron-trigger schedule (list_crons shows no run ever), so the "nudge email after three days" in the hand-offs entry above never fires. Scheduling delivery-watch as built would email Giant Group's contact automatically (their org is on the allowlist); the PM scope (decision 7) recommends the studio presses Send reminder instead. Liam decides before either is scheduled.
-5. **P3 - August 2026 has no financial snapshot and will not get one:** its month-end cash cannot be honestly rebuilt (yield was held), so the cash trend skips August and the MRR change reads against July until 1 October. (The LW.34 flaky tests are fixed.)
+2. **P1 - `finance.yieldHoldings` freshness (LW.42, T0.3):** Airwallex is cash truth. The 2026-09-22 USD 20,014 setting versus USD 25,100 in Airwallex was updated by hand as Liam; older August Xero/setting figures are historical. No current balance was re-read in this batch. A successful 2026-10-09 sync wrote two yield rows but does not prove their amount is current. T0.2 owns the live UI/API comparison; LW.42 owns an automated yield source or age warning (next-20 item 11).
+3. **P2 - FU.1 verification:** 2f81243f caps each read at remaining budget; the hanging-read implementation defect is repaired and deployed. Transient-failure and outage-safe deferral is live in 6f9f2170. Watch scheduled durations and queue draining; the zero-eligible-call triage run is not timeout-path proof.
+4. **P2 - the hand-off nudge (HO.1) has never run, nor has the automation sweep:** delivery-watch and automation-sweep are not in the workers/cron-trigger schedule (list_crons shows no run ever). The built three-day nudge remains unscheduled. Scheduling delivery-watch as built would email Giant Group's contact automatically (their org is on the allowlist); the PM scope (decision 7) recommends the studio presses Send reminder instead. Liam decides before either is scheduled.
+5. **P3 - August 2026 cash remains unavailable:** month-end cash cannot be honestly rebuilt because yield was held. HA.3's MRR label already follows the actual prior snapshot month, rather than hard-coded July. Next-20 item 12 still checks the October September-basis rendering/snapshot. HA.1 to HA.9 have recorded September live evidence (1a7ef35b); those dated figures are not current balance claims.
 6. **P3 - HO.5:** request_waiting_on_you has no notification preference toggle (bell and email on, cannot be muted); add when a client asks.
 7. **P3 - board drop targets**: on the Tasks board a card in the SAME column as the dragged card still lights as a drop target. Cosmetic, inside `KanbanBoard`, so it shows on the Requests board too.
 8. **Older items, for the record:** the production deploy gate is RESOLVED (2026-09-10); T0.2 (sync-airwallex plus a get_bank_balances check) stays open on its own merits; migrations 0081/0082 apply state on prod D1 (C0.4) was never re-verified; the five portal blockers (C2) shipped 2026-09-05; the proposal and schedule share leaks and the silent accept and sign (C1) were closed by Catalogue Batch C on 2026-09-13.
@@ -452,7 +509,9 @@ Event bus fires automations + outgoing webhooks on real domain events; announcem
 
 - Web Push (no service worker handler)
 - Email-to-Request intake (state unknown since 2026-07-07; verify)
-- Scheduled deal nudges + auto-nudge engine (UI exists, engine doesn't - C1.8 removes or builds)
+
+Scheduled and automatic deal nudges are unavailable by design after the
+2f81243f honesty repair, not an exposed stub. T3.8 retains manual action proof.
 
 ---
 

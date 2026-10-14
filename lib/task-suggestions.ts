@@ -41,6 +41,7 @@ import {
 } from '@/lib/request-writes'
 import { slackBotToken } from '@/lib/slack/api'
 import { mirrorSuggestionDecision, repostSuggestion } from '@/lib/slack/mirror'
+import { clientChoicesFromProposal } from '@/lib/slack/note-quality'
 import { resolveSubmitterBrandId } from '@/lib/submitter-brand'
 import { TAHI_BOT } from '@/lib/tahi-bot'
 import { postRequestBotMessage, postTaskComment } from '@/lib/task-comments'
@@ -279,6 +280,9 @@ export interface ApplyOutcome {
 
 /** The refusal an approve gets when a hand-off names nobody the gate can use. */
 export const CONTACT_REQUIRED = 'contact_required'
+
+/** A Slack note named more than one client. Tweak must resolve it before approval. */
+export const CLIENT_REQUIRED = 'client_required'
 
 /** The refusal an approve gets when the client already has this work (CN.1d). */
 export const POSSIBLE_DUPLICATE = 'possible_duplicate'
@@ -1616,6 +1620,9 @@ export async function applySuggestion(
 ): Promise<ApplyOutcome> {
   try {
     const proposal = parseProposal(row.proposal)
+    if (!row.orgId && clientChoicesFromProposal(proposal).length > 0) {
+      return { ok: false, appliedTaskId: null, appliedRequestId: null, error: CLIENT_REQUIRED }
+    }
     const actor = { actorType: 'system' as const, actorId: ctx.actorId }
 
     if ((REQUEST_KINDS as readonly string[]).includes(row.kind)) {
@@ -1887,6 +1894,11 @@ export async function decideSuggestion(
       appliedTaskId: row.appliedTaskId,
       appliedRequestId: row.appliedRequestId,
     }
+  }
+
+  // Use the stored metadata, never an override that could remove the choice guard.
+  if (decision.action === 'approve' && !row.orgId && clientChoicesFromProposal(row.proposal).length > 0) {
+    return { suggestion: row, changed: false, error: CLIENT_REQUIRED, appliedTaskId: null, appliedRequestId: null }
   }
 
   // Attaching is not deciding: it rewrites what the row proposes onto

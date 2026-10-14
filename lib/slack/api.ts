@@ -259,13 +259,13 @@ export interface SlackSuggestedPrompt {
  * a working bot, it just gets an empty composer.
  */
 export async function setSuggestedPrompts(
-  input: AssistantThreadRef & { prompts: readonly SlackSuggestedPrompt[]; title?: string },
+  input: { channelId: string; threadTs?: string; prompts: readonly SlackSuggestedPrompt[]; title?: string },
 ): Promise<void> {
   if (input.prompts.length === 0) return
   try {
     await callSlack<SlackEnvelope>('assistant.threads.setSuggestedPrompts', {
       channel_id: input.channelId,
-      thread_ts: input.threadTs,
+      ...(input.threadTs ? { thread_ts: input.threadTs } : {}),
       prompts: input.prompts.map(prompt => ({ title: prompt.title, message: prompt.message })),
       ...(input.title ? { title: input.title } : {}),
     })

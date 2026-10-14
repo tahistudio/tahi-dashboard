@@ -265,6 +265,10 @@ The 158 rows are all 159 checkbox lines in TASKS.md except T571 (see appendix). 
 
 ## Contradictions
 
+Historical 2026-10-11 findings. The 2026-10-14 reconciliation at the end of
+this document supersedes these task states and descriptions; the inventory
+counts and original line numbers above remain a dated snapshot.
+
 Open items whose text is contradicted, fully or partly, by STATUS.md, the Codex triage or a later commit. "Fix the text" means TASKS.md or STATUS.md should be updated, not that code is wrong.
 
 | ID | What the text says | What contradicts it |
@@ -316,3 +320,57 @@ Not counted because they have no checkbox (prose in TASKS.md, parked until Batch
 - Older STATUS.md "Stubs / not functional" bullets with no id: Web Push (no service worker handler), Email-to-Request intake (T716) and scheduled deal nudges (T3.8).
 
 Notes on groupings the triage prefers (one pass instead of many): the client home, request and account lap covers LW.2 to LW.19, LW.23, LW.27 to LW.29, LW.32, T1.3, T1.14, CT.10, CT.16, T2.9, V1-QA.1, T2.QA and A5; the studio phone and dark pass covers LW.12, LW.31, GI.3, DPM.1, BP.1, FU.5, FU.6; money truth covers HA.1 to HA.9, T0.2, T0.3, LW.42, T600, LIT-BOOKS; the deliverable loop covers CA4, C1 to C4, D3, T3.1 to T3.7, T3.QA; calls and hand-offs cover CN.1c, HO.1 to HO.4, GI.3, T568, LW.6, LW.8.
+
+## Reconciliation applied, 2026-10-14 (next-20 item 10)
+
+Checked current code and git history from main 749b56b4. TASKS.md and
+STATUS.md now distinguish shipped implementation, partial live evidence and
+remaining proof. No production lookup or write was performed in this batch.
+Liam's current brief supplies live release and 0113/0114 apply confirmation;
+historical run-log/commit notes supply earlier observations.
+
+| Finding | Change and reason | Code/history evidence |
+|---|---|---|
+| CT.15 | [~], honesty repair shipped; orphan outreach/pipeline and action proof remain. | reviews-content.tsx uses Mark as asked and /review/<token>; 2f81243f, deployed 511c7d5f. |
+| T3.8 | [~], verify manual nudges; remove the scheduled/automatic engine stub claim. | nudges/route.ts refuses scheduledAt with 409; deal-detail.tsx reports unavailable automation and held recipients; 2f81243f. |
+| CT.17 | [~], schema/mapping repaired; invoice/messaging round trips remain. | Worker create_invoice inputSchema/mapping accepts lineItems; tool-to-route tests in 2f81243f. |
+| IC.9 | [x], target repair has source and signed-in production evidence. | time-list.tsx/shared controls use minimum 2.75rem; 2f81243f measured 375 dark, bc7412e9 records live time checks. |
+| T3.9 | [~], list only remaining fixes and shared verification. | C2 bad0d7ef removed alert/added OG; C3 97e51af0 freezes snapshot amounts; 2f81243f guards email expiry/searches contractDocuments; b9b47cbd fixes Papers shape; be6d7365 retires duplicate signature email. Remaining /pipeline links are still in source. |
+| SW.1 | [~], Lingorama recovered; broader history and first-run unlinked list remain. Remove present-tense missing-row/key instructions. | Recovery 2f81243f, live invoice/mapping recorded bc7412e9; stripe-sync.ts default no-create and cron unlinked logging 962b184b. |
+| CB4 / MR.6 | Both [~], list live; detail/remaining finance.md and Liam's unchecked review remain. | a14d0dea, deployed 511c7d5f; bc7412e9 records 120-row CSV/pagination and 375/768 dark, 1280 table. finance.md provides the SHIP plan. |
+| DL.3 | [~], reported written, external project readback pending; both files agree. | Lead's 2026-09-13 catalogue/run-log claim conflicts with preparation text; design writes leave no git trace. No project listing is available here, so no done claim is invented. |
+| HO.1 | Keep [~], remove automatic three-day reminder from live behavior. Policy precedes scheduling. | Handoff model/UI d8d9355e/acdb8942, live 89b312b4; workers/cron-trigger has neither delivery-watch nor automation-sweep. |
+| CT.11 | Remove private-service search leak as a current defect; order-path choice/isolation lap remain. | search/route.ts filters services through scopedOrgIds/owned; admin-search-permissions tests, 2f81243f; nested repairs live 6f9f2170. |
+| T1.6 / T1.16 | Keep [~], implementation deployed; real scoped/denied-seat isolation remains. | Current route guards and SQLite coverage in 2f81243f/a14d0dea and 6ef22225/reviews, release 6f9f2170. Super-admin smoke does not prove denial. |
+| FU.1 | Remove hanging-read defect as current; retain cron duration/drain proof. | task-suggester.ts caps reads in 2f81243f; transient/outage handling 73ddff69/e2e59289/dfddb517, live 6f9f2170. |
+| FU.2 / FU.5 / FU.6 | Keep [~], record partial contracts/time evidence; email preview/send, schedule/menu/Wire and specific live layout observations remain. | 2f81243f local 375/768/dark contract cards and 1280 fit; bc7412e9 signed-in contracts/time. Email preview explicitly pending there. |
+| FU.9 | [~], seeded SQLite repaired, browser cleanup proof remains. | scripts/repair-local-qa-cascades.mjs and rollback fixtures in 2f81243f prove eight cascade edges across both shards. |
+| CN.3 / original STATUS line 79 | Replace NOT deployed/apply-first instruction with live integration and 0111 applied; Slack proof stays open. | a14d0dea/511c7d5f, migration objects verified and deploy observed in bc7412e9/run log. |
+| LW.9 | Keep [~], add hidden-checklist rendering evidence; A5 real-client flow remains. | client-home flag in 7ca50bff; bc7412e9 Giant Group read-only 375 light/dark and 768 dark. |
+| LW.27 | Keep [~], add read-only home/header evidence; real empty-client session remains. | b268d048 implementation; bc7412e9 home observations. |
+| HA.1 to HA.9 | [x], recover already recorded September live verification. HA.3 label is dynamic, not fixed July; October check stays item 12. | b30a95ae/87f9cdc3/a24df8b2 and c554076d; 1a7ef35b records each live card/API result. owner-home.tsx mrrDeltaLabel uses actual prior month. |
+| T0.2 | [~], sync already succeeded; Airwallex UI/API amount comparison remains. | Sync route writes yield:CUR rows from settings (0ab09233/e1341912); 2026-10-10 triage records 9 October success with two yield rows. |
+| T0.3 / LW.42 | LW.42 owns source/freshness repair, T0.3 only verification. Date old figures rather than quote them as current cash. | Sync still reads finance.yieldHoldings; a4034d1a records 22 September manual refresh. No new live balances read; Xero is not cash authority. |
+| T0.4 | Keep open migration audit/staging 0098 retry; token refusal is historical, not current blocker. | 511c7d5f/bc7412e9 record restored Wrangler and applied 0111; current brief confirms 0113/0114 applied. No claim about the unverified staging apply. |
+| T3.5 | Point rotation ownership to T3.10 only. | C2 bad0d7ef shipped tabs/gantt; public contract still uses its own canvas/viewer. T3.10 owns the remaining rotation port. |
+| TP.4 | [~], verify existing history/read state instead of rebuilding Notifications. | dbbbb916 page and fbb9f4f0 rail, current notifications-content and cursor/read-state API; AR.1/PP.4 evidence. Liam's look remains. |
+| Original STATUS line 236 / August triage | Replace closed accept/sign/share/PDF and B1 to B5 bugs with shipped behavior and remaining real-session proof. | C1 to C4 commits; Tier 1 cutover 2026-09-05; current uploads confirm scopes owner, notification helpers resolve recipients, Files/nav/invite flows exist. A5/D3/T2.QA remain. |
+| Duplicate CL.1 (additional brief finding) | Keep shipped Clerk guard CL.1; rename open files expansion FILES.1 and J1 alias, preserving scope/history. | clients/[id]/route.ts uses Clerk preflight; e50f6052, live dfb1d158. File threads/folders expansion is separate future work. |
+
+Since 11 October, both status files now record Stripe no-create 962b184b and
+next-20 items 1 to 7 as done, with individual source/review/release references.
+Items 2 to 7 are live in 6f9f2170 per Liam. First-run customer linking is still
+SW.1, not silently completed with item 1's code fix. Decision #070's per-person
+MCP is live at 0870fb71/2a01b12b. REC.0 phases 1/1b (6f9f2170/729cc282) and
+phase 2 dashboard (15de17d7) are live, with 0113/0114 applied per Liam.
+The apps/recorder-tray client is built through 93ce4c62 with recorded Release
+build/207-test proof, but installed Windows integration and real calls remain;
+REC.0 stays open. Historical preparation instructions no longer contradict
+those current states. V1-QA.2 now describes pending authenticated execution
+of the updated specs, since Messages assertions were already negative in
+2f81243f; this batch refreshes fuller nav coverage without product edits.
+
+Integrity follow-up outside this bounded batch: HEAD 749b56b4 already repeats
+the T1.7/T1.11 to T1.16 checkbox block, T1.18 and the partial T1.19 calls
+entry. These are unchanged here and need a separate single-home reconciliation;
+the requested CL.1 collision is resolved. No global uniqueness claim is made.

@@ -64,6 +64,7 @@ const {
   handleDm,
   handleAction,
   handleAssistantThreadStarted,
+  handleAppHomeOpened,
   handleSlackEvent,
   handleSlackInteraction,
   ASSISTANT_PROMPTS,
@@ -374,7 +375,7 @@ describe('the assistant pane (contract section 6b)', () => {
     await handleAssistantThreadStarted(identity('founder'), started)
     expect(posted).toHaveLength(1)
     expect(posted[0]).toMatchObject({ channel: 'D_LIAM', threadTs: '1758.1' })
-    expect(String(posted[0].text)).toContain('press a button')
+    expect(String(posted[0].text)).toContain('approval')
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toMatchObject({ channelId: 'D_LIAM', threadTs: '1758.1' })
     expect(ASSISTANT_PROMPTS.map((prompt) => prompt.message)).toEqual([
@@ -384,16 +385,54 @@ describe('the assistant pane (contract section 6b)', () => {
     ])
   })
 
-  it('opens a client thread with the client line', async () => {
+  it('opens a client thread without promising request filing', async () => {
     await handleAssistantThreadStarted(identity('client'), started)
-    expect(String(posted[0].text)).toContain('draft the request')
+    expect(String(posted[0].text)).toContain('your own requests')
+    expect(String(posted[0].text)).not.toMatch(/draft|send notes|voice notes|Request:/i)
     expect(prompts).toHaveLength(1)
+    expect(JSON.stringify(prompts[0])).not.toContain('Task for me')
   })
 
   it('gives a stranger the refusal line and no prompts to press', async () => {
     await handleAssistantThreadStarted(identity('unknown'), started)
     expect(posted[0]).toMatchObject({ text: DENIAL_LINE })
     expect(prompts).toHaveLength(0)
+  })
+})
+
+describe('new agent_view Messages open', () => {
+  const opened = { type: 'app_home_opened', user: 'U', channel: 'D_LIAM', tab: 'messages' }
+
+  it('handles only Messages opens in a DM', () => {
+    expect(isHandledEvent(opened)).toBe(true)
+    expect(isHandledEvent({ ...opened, tab: 'home' })).toBe(false)
+    expect(isHandledEvent({ ...opened, tab: undefined })).toBe(false)
+    expect(isHandledEvent({ ...opened, channel: 'C_PUBLIC' })).toBe(false)
+  })
+
+  it('sets channel prompts without posting or drafting on each open', async () => {
+    const dm = spyOnDmHook()
+    await handleSlackEvent(fakeDrizzle, { team_id: 'T', event: opened })
+    expect(prompts).toEqual([{ channelId: 'D_LIAM', prompts: ASSISTANT_PROMPTS }])
+    expect(posted).toHaveLength(0)
+    expect(dm.calls).toBe(0)
+  })
+
+  it('keeps client prompts personal and gives strangers no prompts', async () => {
+    await handleAppHomeOpened(identity('client'), opened)
+    expect(JSON.stringify(prompts)).toContain('My requests')
+    expect(JSON.stringify(prompts)).toContain('Due this week')
+    expect(JSON.stringify(prompts)).not.toMatch(/New request|Please help with/)
+    expect(JSON.stringify(prompts)).not.toContain('Task for me')
+    prompts.length = 0
+    await handleAppHomeOpened(identity('unknown'), opened)
+    expect(prompts).toHaveLength(0)
+    expect(posted).toHaveLength(0)
+  })
+
+  it('continues acknowledging both context events without acting', () => {
+    expect(isHandledEvent({ type: 'app_context_changed' })).toBe(false)
+    expect(isHandledEvent({ type: 'assistant_thread_context_changed' })).toBe(false)
   })
 })
 

@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
-using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Wave;
 using TahiRecorder.Core.Audio;
 
@@ -18,11 +17,18 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     private readonly Stopwatch _clock = new();
     private readonly Dictionary<string, CaptureChannel> _channels = [];
     private readonly RenderDeviceOutagePolicy _renderOutage = new();
+    private readonly RecorderAudioLevels _levels = new();
+    private readonly HashSet<int> _failedProcessLoopbacks = [];
     private CaptureSpool? _spool;
     private CancellationTokenSource? _captureCancellation;
     private Task? _pump;
     private MMDeviceEnumerator? _enumerator;
-    private EndpointNotifications? _notifications;
+    private WindowsAudioDeviceObserver? _deviceObserver;
+    private MeetingObservation _meeting = MeetingObservation.Inactive;
+    private MeetingObservation _meetingSource = MeetingObservation.Inactive;
+    private AudioDevicePreferences _preferences = new();
+    private Guid _clientRef;
+    private int _selectionDirty;
     private bool _running;
     private bool _disposed;
     private int _reopenMic;
@@ -37,6 +43,8 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
 
     public event EventHandler<CapturedChunkEventArgs>? ChunkReady;
     public event EventHandler<CaptureErrorEventArgs>? Error;
+    public event EventHandler<SilentSystemAudioEventArgs>? SilentSystemAudio;
+    public AudioLevelSnapshot AudioLevels { get { lock (_gate) return _levels.Snapshot; } }
     public int LastDurationMs { get; private set; }
     public bool HasPersistenceFailure => Volatile.Read(ref _persistenceFailure) != 0;
     public bool HasAudioGap => Volatile.Read(ref _audioGapStopDurationMs) >= 0;
@@ -47,10 +55,25 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     {
         public string Track { get; } = track;
         public MMDevice? Endpoint { get; set; }
-        public WasapiCapture? Capture { get; set; }
+        public IWaveIn? Capture { get; set; }
+        public CaptureSourceSelection? Source { get; set; }
+        public AudioEndpointSelection? EndpointSelection { get; set; }
+        public volatile bool Available;
         public long LastAudioEndSample { get; set; } = -1;
-        public bool Closing { get; set; }
+        public volatile bool Closing;
         public DateTimeOffset RetryAt { get; set; }
+    }
+
+    public void UpdateAudioContext(MeetingObservation observation, AudioDevicePreferences preferences)
+    {
+        lock (_gate)
+        {
+            _meeting = observation;
+            if (observation.IsActive)
+                _meetingSource = observation;
+            _preferences = preferences;
+        }
+        Interlocked.Exchange(ref _selectionDirty, 1);
     }
 
     public async Task StartAsync(string clientRef, CancellationToken cancellationToken = default)
@@ -74,22 +97,32 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     private void StartCore(Guid clientRef)
     {
         _spool = new CaptureSpool(_spoolDirectory, clientRef);
+        _clientRef = clientRef;
         _channels["mic"] = new CaptureChannel("mic");
         _channels["system"] = new CaptureChannel("system");
         LastDurationMs = 0;
         LastStopCompleted = false;
         _renderOutage.Reset();
+        lock (_gate)
+        {
+            _levels.Reset();
+            if (!_meeting.IsActive)
+                _meetingSource = MeetingObservation.Inactive;
+        }
+        lock (_failedProcessLoopbacks) _failedProcessLoopbacks.Clear();
         Interlocked.Exchange(ref _persistenceFailure, 0);
         Interlocked.Exchange(ref _audioGapStopDurationMs, -1);
         _clock.Restart();
-        lock (_gate) _running = true;
+        lock (_gate)
+        {
+            _running = true;
+            _levels.ShouldWarn(TimeSpan.Zero, _meeting.IsActive);
+        }
         try
         {
             _enumerator = new MMDeviceEnumerator();
-            _notifications = new EndpointNotifications(this);
-            Marshal.ThrowExceptionForHR(_enumerator.RegisterEndpointNotificationCallback(_notifications));
-            OpenChannel(_channels["mic"]);
-            OpenChannel(_channels["system"]);
+            _deviceObserver = new WindowsAudioDeviceObserver(() => Interlocked.Exchange(ref _selectionDirty, 1));
+            ReselectChannels();
             _captureCancellation = new CancellationTokenSource();
             _pump = Task.Run(() => PumpAsync(_captureCancellation.Token));
         }
@@ -109,30 +142,57 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
 
     private void OpenChannel(CaptureChannel channel)
     {
-        channel.Closing = false;
-        channel.LastAudioEndSample = -1;
+        lock (_gate)
+        {
+            channel.Closing = false;
+            channel.LastAudioEndSample = -1;
+        }
         try
         {
-            var flow = channel.Track == "mic" ? DataFlow.Capture : DataFlow.Render;
-            channel.Endpoint = _enumerator!.GetDefaultAudioEndpoint(flow, Role.Communications);
-            var capture = channel.Track == "mic"
-                ? new WasapiCapture(channel.Endpoint)
-                : new WasapiLoopbackCapture(channel.Endpoint);
-            channel.Capture = capture;
+            IWaveIn capture;
+            if (channel.Source?.ProcessLoopbackId is { } processId)
+                capture = new WindowsProcessLoopbackCapture(processId);
+            else
+            {
+                if (channel.Source?.EndpointId is not { } endpointId)
+                    throw new InvalidOperationException("The selected audio endpoint is unavailable.");
+                channel.Endpoint = _enumerator!.GetDevice(endpointId);
+                capture = channel.Track == "mic"
+                    ? new WasapiCapture(channel.Endpoint)
+                    : new WasapiLoopbackCapture(channel.Endpoint);
+            }
+            lock (_gate) channel.Capture = capture;
             // NAudio 2.2.1 sets AutoConvertPcm and SrcDefaultQuality on both capture types.
             // Windows resamples the endpoint mix format to the canonical upload format.
             capture.WaveFormat = new WaveFormat(SampleRate, 16, 1);
-            capture.DataAvailable += (_, args) => OnAudio(channel, args);
-            capture.RecordingStopped += (_, args) => OnCaptureStopped(channel, args);
+            capture.DataAvailable += (_, args) => OnAudio(channel, capture, args);
+            capture.RecordingStopped += (_, args) => OnCaptureStopped(channel, capture, args);
+            lock (_gate)
+            {
+                channel.Available = true;
+                channel.RetryAt = DateTimeOffset.MaxValue;
+            }
             capture.StartRecording();
-            channel.RetryAt = DateTimeOffset.MaxValue;
-            if (channel.Track == "system")
-                _renderOutage.ObserveAvailability(isAvailable: true);
+            LogSelection(channel, unavailable: !channel.Available);
+            lock (_gate)
+                if (channel.Track == "system" && channel.Available)
+                    _renderOutage.ObserveAvailability(isAvailable: true);
         }
         catch (Exception exception) when (exception is COMException or InvalidOperationException
-            or ArgumentException)
+            or ArgumentException or NotSupportedException or TimeoutException or DllNotFoundException
+            or EntryPointNotFoundException
+            // Process loopback activation can surface any HRESULT; fall back rather than stop.
+            || (channel.Source?.ProcessLoopbackId is not null && exception is not OutOfMemoryException))
         {
             CloseChannel(channel);
+            if (channel.Source?.ProcessLoopbackId is { } processId)
+            {
+                lock (_failedProcessLoopbacks) _failedProcessLoopbacks.Add(processId);
+                HostLog.Error("Meeting process loopback unavailable; selecting endpoint loopback", exception);
+                ReselectChannel(channel, _deviceObserver!.Snapshot);
+                return;
+            }
+            LogSelection(channel, unavailable: true);
             channel.RetryAt = DateTimeOffset.UtcNow.AddSeconds(5);
             if (channel.Track == "mic" || _renderOutage.ObserveAvailability(isAvailable: false))
                 ReportError(channel.Track, channel.Track == "mic"
@@ -141,7 +201,76 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         }
     }
 
-    private void OnAudio(CaptureChannel channel, WaveInEventArgs args)
+    private void ReselectChannels()
+    {
+        if (_deviceObserver is null)
+            return;
+        foreach (var channel in _channels.Values)
+            ReselectChannel(channel, _deviceObserver.Snapshot);
+    }
+
+    private void ReselectChannel(CaptureChannel channel, IReadOnlyList<AudioEndpointSnapshot> endpoints)
+    {
+        MeetingObservation meeting;
+        AudioDevicePreferences preferences;
+        lock (_gate) { meeting = _meetingSource; preferences = _preferences; }
+        var flow = channel.Track == "mic" ? AudioEndpointFlow.Capture : AudioEndpointFlow.Render;
+        var processIds = meeting.ProcessTreeIds.Count > 0 ? meeting.ProcessTreeIds
+            : meeting.ProcessId is { } id ? new[] { id } : Array.Empty<int>();
+        var overrideId = channel.Track == "mic" ? preferences.CaptureEndpointId : preferences.RenderEndpointId;
+        var selection = AudioEndpointSelector.Select(flow, endpoints, processIds, overrideId,
+            channel.EndpointSelection?.EndpointId);
+        var rootId = meeting.ProcessTreeRootId ?? meeting.ProcessId;
+        bool processFailed;
+        lock (_failedProcessLoopbacks) processFailed = rootId is { } root && _failedProcessLoopbacks.Contains(root);
+        var useProcessLoopback = channel.Track == "system" && overrideId is null
+            && WindowsProcessLoopbackCapture.IsSupported && rootId is > 0
+            && !processFailed;
+        var source = useProcessLoopback ? new CaptureSourceSelection(null, rootId)
+            : new CaptureSourceSelection(selection.EndpointId);
+        channel.EndpointSelection = selection;
+        if (channel.Source == source && !channel.Available && DateTimeOffset.UtcNow < channel.RetryAt)
+            return;
+        if (source.EndpointId is null && source.ProcessLoopbackId is null)
+        {
+            var firstUnavailableSelection = channel.Source is null || channel.Source != source
+                || channel.Available;
+            if (channel.Capture is not null)
+                CloseChannel(channel);
+            lock (_gate) channel.Source = source;
+            channel.RetryAt = DateTimeOffset.UtcNow.AddSeconds(5);
+            if (firstUnavailableSelection)
+            {
+                LogSelection(channel, unavailable: true);
+                if (channel.Track == "mic" || _renderOutage.ObserveAvailability(isAvailable: false))
+                    ReportError(channel.Track, channel.Track == "mic"
+                        ? "Microphone capture is unavailable. Reconnecting while preserving the recording timeline."
+                        : "System audio is unavailable. Recording the microphone with system silence until the output device reconnects.");
+            }
+            return;
+        }
+        if (!CaptureSwitchDecision.ShouldSwitch(channel.Source, source, channel.Available))
+            return;
+        // Source changes leave Stopwatch, per-track peaks, spool and chunk sequence intact.
+        CloseChannel(channel);
+        lock (_gate) channel.Source = source;
+        OpenChannel(channel);
+    }
+
+    private static void LogSelection(CaptureChannel channel, bool unavailable = false)
+    {
+        var selection = channel.EndpointSelection;
+        var name = selection?.Name ?? "Unavailable";
+        var reason = selection?.Reason ?? "No active endpoint";
+        // Endpoint friendly names only, never raw audio, device credentials or server responses.
+        name = name.Replace('\r', ' ').Replace('\n', ' ');
+        var source = channel.Source?.ProcessLoopbackId is { } processId
+            ? $"meeting process tree pid={processId}; render endpoint={name}; endpoint reason={reason}"
+            : $"endpoint={name}; reason={reason}";
+        HostLog.Write($"Audio selection track={channel.Track}; source={source}; available={!unavailable}.");
+    }
+
+    private void OnAudio(CaptureChannel channel, IWaveIn source, WaveInEventArgs args)
     {
         if (args.BytesRecorded <= 0)
             return;
@@ -149,10 +278,12 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         {
             lock (_gate)
             {
-                if (!_running || _spool is null || channel.Closing || HasPersistenceFailure || HasAudioGap)
+                if (!_running || _spool is null || channel.Closing || !ReferenceEquals(channel.Capture, source)
+                    || HasPersistenceFailure || HasAudioGap)
                     return;
                 var byteCount = args.BytesRecorded - args.BytesRecorded % 2;
                 var samples = byteCount / 2;
+                _levels.ObservePcm(channel.Track, args.Buffer.AsSpan(0, byteCount), _clock.Elapsed);
                 var nowSample = _clock.ElapsedTicks * SampleRate / Stopwatch.Frequency;
                 var startSample = Math.Max(0, nowSample - samples);
                 // Small callback scheduling jitter does not open a false gap in a live stream.
@@ -174,16 +305,26 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         }
     }
 
-    private void OnCaptureStopped(CaptureChannel channel, StoppedEventArgs args)
+    private void OnCaptureStopped(CaptureChannel channel, IWaveIn source, StoppedEventArgs args)
     {
-        if (channel.Closing || !IsRecording || args.Exception is null)
-            return;
-        channel.RetryAt = DateTimeOffset.UtcNow.AddSeconds(2);
-        if (channel.Track == "mic")
-            Interlocked.Exchange(ref _reopenMic, 1);
-        else
-            Interlocked.Exchange(ref _reopenSystem, 1);
-        if (channel.Track == "mic" || _renderOutage.ObserveAvailability(isAvailable: false))
+        bool report;
+        lock (_gate)
+        {
+            if (channel.Closing || !_running || !ReferenceEquals(channel.Capture, source))
+                return;
+            channel.Available = false;
+            channel.RetryAt = DateTimeOffset.UtcNow.AddSeconds(2);
+            if (channel.Track == "mic")
+                Interlocked.Exchange(ref _reopenMic, 1);
+            else
+            {
+                if (channel.Source?.ProcessLoopbackId is { } processId)
+                    lock (_failedProcessLoopbacks) _failedProcessLoopbacks.Add(processId);
+                Interlocked.Exchange(ref _reopenSystem, 1);
+            }
+            report = channel.Track == "mic" || _renderOutage.ObserveAvailability(isAvailable: false);
+        }
+        if (report)
             ReportError(channel.Track, "The audio device disconnected. Reconnecting without resetting the recording timeline.");
     }
 
@@ -196,23 +337,29 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             {
                 if (HasPersistenceFailure || HasAudioGap)
                     return;
-                if (Interlocked.Exchange(ref _reopenMic, 0) != 0)
-                    ReopenChannel(_channels["mic"]);
-                if (Interlocked.Exchange(ref _reopenSystem, 0) != 0)
-                    ReopenChannel(_channels["system"]);
-                foreach (var channel in _channels.Values)
-                {
-                    if (channel.Capture is null && DateTimeOffset.UtcNow >= channel.RetryAt)
-                        OpenChannel(channel);
-                }
+                var retry = _channels.Values.Any(channel => !channel.Available
+                    && DateTimeOffset.UtcNow >= channel.RetryAt);
+                var dirty = Interlocked.Exchange(ref _selectionDirty, 0) != 0;
+                var micFailed = Interlocked.Exchange(ref _reopenMic, 0) != 0;
+                var systemFailed = Interlocked.Exchange(ref _reopenSystem, 0) != 0;
+                if (dirty || retry || micFailed || systemFailed)
+                    ReselectChannels();
                 IReadOnlyList<CapturedChunk> chunks;
+                bool warn;
                 lock (_gate)
                 {
                     var elapsedMs = checked((int)Math.Min(_clock.ElapsedMilliseconds, 43_200_000));
                     var safeMs = Math.Max(0, elapsedMs - DeliverySlackMs);
                     chunks = _spool!.Advance(safeMs, complete: false);
+                    warn = _levels.ShouldWarn(_clock.Elapsed, _meeting.IsActive);
                 }
                 Publish(chunks);
+                if (warn)
+                {
+                    HostLog.Write("System track has been silent for 60 active meeting seconds.");
+                    try { SilentSystemAudio?.Invoke(this, new SilentSystemAudioEventArgs(_clientRef)); }
+                    catch { /* Tray delivery failures must not stop durable capture. */ }
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -229,18 +376,20 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         }
     }
 
-    private void ReopenChannel(CaptureChannel channel)
-    {
-        CloseChannel(channel);
-        OpenChannel(channel);
-    }
-
     private void CloseChannel(CaptureChannel channel)
     {
-        channel.Closing = true;
+        lock (_gate)
+        {
+            channel.Closing = true;
+            channel.Available = false;
+        }
         try
         {
             channel.Capture?.StopRecording();
+        }
+        catch (Exception exception) when (exception is COMException or InvalidOperationException)
+        {
+            HostLog.Error("Audio capture stop released a disconnected source", exception);
         }
         finally
         {
@@ -248,10 +397,18 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             {
                 channel.Capture?.Dispose();
             }
+            catch (Exception exception) when (exception is COMException or InvalidOperationException)
+            {
+                HostLog.Error("Audio capture dispose released a disconnected source", exception);
+            }
             finally
             {
-                channel.Capture = null;
+                lock (_gate) channel.Capture = null;
                 try { channel.Endpoint?.Dispose(); }
+                catch (Exception exception) when (exception is COMException or InvalidOperationException)
+                {
+                    HostLog.Error("Audio endpoint release failed", exception);
+                }
                 finally { channel.Endpoint = null; }
             }
         }
@@ -333,18 +490,15 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
 
     private void ReleaseEnumerator()
     {
-        if (_enumerator is null)
-            return;
         try
         {
-            if (_notifications is not null)
-                _enumerator.UnregisterEndpointNotificationCallback(_notifications);
+            _deviceObserver?.Dispose();
         }
         finally
         {
-            _enumerator.Dispose();
+            _enumerator?.Dispose();
             _enumerator = null;
-            _notifications = null;
+            _deviceObserver = null;
             Interlocked.Exchange(ref _reopenMic, 0);
             Interlocked.Exchange(ref _reopenSystem, 0);
         }
@@ -401,27 +555,4 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         _lifecycle.Dispose();
     }
 
-    private sealed class EndpointNotifications(WindowsAudioRecorder owner) : IMMNotificationClient
-    {
-        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
-        {
-            if (role != Role.Communications)
-                return;
-            if (flow is DataFlow.Capture or DataFlow.All)
-                Interlocked.Exchange(ref owner._reopenMic, 1);
-            if (flow is DataFlow.Render or DataFlow.All)
-                Interlocked.Exchange(ref owner._reopenSystem, 1);
-        }
-
-        public void OnDeviceStateChanged(string deviceId, DeviceState newState) => Recheck();
-        public void OnDeviceAdded(string deviceId) => Recheck();
-        public void OnDeviceRemoved(string deviceId) => Recheck();
-        public void OnPropertyValueChanged(string deviceId, PropertyKey key) { }
-
-        private void Recheck()
-        {
-            Interlocked.Exchange(ref owner._reopenMic, 1);
-            Interlocked.Exchange(ref owner._reopenSystem, 1);
-        }
-    }
 }

@@ -1740,3 +1740,22 @@ when its path is already present, and reset the render-outage report for each
 recording. These are repairs to the approved client behavior. Full Release
 solution build and test verification belong in the running log; installed
 Windows checks and real-call proof remain required before REC.0 closes.
+
+Client live-call audio repair, 2026-10-14 (uncommitted, Liam's explicit brief):
+follow the meeting process tree's active render and capture sessions, including
+its virtual microphone. Saved per-track overrides take precedence; an absent
+manual endpoint stays unavailable rather than silently substituting a device.
+Automatic endpoint fallback is Communications, Multimedia, then another active
+endpoint. Prefer process-tree loopback on Windows build 20348 or newer when
+there is no render override; fall back to endpoint loopback if activation or
+capture fails. Switch sources without resetting the shared recording clock or
+chunk timeline. Record names/reasons and per-track peaks, and warn once after
+sixty seconds without qualifying system signal during continuous meeting
+activity. These repair the approved capture contract. No schema, API, secret,
+commit, deploy or production-data change is part of this session.
+## Decision #073, Explicit integration commits and permission review
+Date: 2026-10-14
+Decision: Integration changes land as separate commits. Never hide code that appears on neither parent inside one large merge commit (an "evil merge"). Permission changes introduced during integration or merge resolution require their own fresh Opus sign-off before landing, with the reviewed commit and outcome recorded in the run log.
+Why: The 2026-10-11 review found roughly 5,700 lines in a14d0dea that appeared on neither parent. Explicit commits make integration work reviewable, and a branch review cannot cover permission changes added later.
+How: AGENTS.md now states both rules under Commits and docs. This batch records the process rule only and performs no merge, commit, push or deployment.
+Escalated to Liam: No, implements his next-20 item 19 brief.

@@ -68,12 +68,14 @@ public sealed class WindowsMeetingDetector : IDisposable
                         }
                         finally
                         {
-                            manager.Dispose();
+                            try { manager.Dispose(); }
+                            catch (COMException) { }
+                            finally { GC.SuppressFinalize(manager); }
                         }
                     }
                 }
 
-                PublishSelection(CaptureSessionSelector.Select(_selectedSession, observations));
+                PublishSelection(CaptureSessionSelector.Select(_selectedSession, observations), processes);
             }
             catch (Exception)
             {
@@ -91,7 +93,8 @@ public sealed class WindowsMeetingDetector : IDisposable
         WriteCaptureProcessLog($"capture-session process={processName}");
     }
 
-    private void PublishSelection(CaptureProcessSession? selected)
+    private void PublishSelection(CaptureProcessSession? selected,
+        IReadOnlyDictionary<int, ObservedProcess> processes)
     {
         if (_selectedSession?.ProcessId != selected?.ProcessId || _selectedSession?.Platform != selected?.Platform)
         {
@@ -102,8 +105,17 @@ public sealed class WindowsMeetingDetector : IDisposable
             WriteCaptureProcessLog($"capture-session key-change{previous}{current}");
         }
         _selectedSession = selected;
-        Volatile.Write(ref _latest, selected is null ? MeetingObservation.Inactive
-            : new MeetingObservation(true, selected.Platform, selected.ProcessId));
+        if (selected is null)
+            Volatile.Write(ref _latest, MeetingObservation.Inactive);
+        else
+        {
+            var tree = ProcessTree.ResolveMeetingTree(selected.ProcessId, selected.Platform, processes);
+            Volatile.Write(ref _latest, new MeetingObservation(true, selected.Platform, selected.ProcessId)
+            {
+                ProcessTreeRootId = tree.RootId,
+                ProcessTreeIds = tree.ProcessIds
+            });
+        }
     }
 
     private void WriteCaptureProcessLog(string message)
