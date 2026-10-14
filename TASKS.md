@@ -1359,6 +1359,17 @@ scheduled; each needs a scope before building.
   for all three projects with zero warnings/errors; all 207 xUnit tests pass,
   zero failed/skipped, in one test assembly. Logs and TRX are under
   apps/recorder-tray/.build-logs/round4-*. No publish in this follow-up.
+  Live-call bug, 2026-10-14: Zoom uploaded 68 chunks per track, but system
+  transcription was empty because Zoom played to a non-default render device.
+  Mic speaker bleed labelled both voices as Liam. Uncommitted tray repair
+  follows the detector's meeting process tree across all render/capture
+  endpoints, including Zoom's NVIDIA Broadcast virtual mic, with runtime-gated
+  process loopback, saved manual overrides, source-change diagnostics and a
+  sixty-second silent-system toast. Installed call and mid-call switch proof
+  remains required; do not close this task on source tests alone.
+  Audio device fix: Release solution build has zero warnings/errors; all 256
+  xUnit tests pass, zero failed/skipped. Source QA and tray UX pass. Logs/TRX:
+  apps/recorder-tray/.build-logs/audio-devices-*. No commit or deploy.
   Installed Windows checks and real calls remain required
   before closing REC.0. No commit, push, deploy, live pairing or production
   write in this review run.

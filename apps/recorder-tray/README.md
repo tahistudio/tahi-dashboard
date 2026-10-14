@@ -129,12 +129,39 @@ uses can trigger the unknown-call path. Detection retains the current process
 while its capture session remains active. Key-change logs contain process names,
 PIDs and UTC timestamps, no audio or credential.
 
-Mic capture uses the default Communications capture endpoint with `WasapiCapture`.
-NAudio 2.2.1 uses the default Communications render endpoint with
-`WasapiLoopbackCapture` fallback here, so system audio includes all desktop
-output during the call. Both formats request Windows audio-engine conversion
-to 16 kHz mono s16le. One Stopwatch drives sample positions and silence padding.
-Default endpoint notifications reopen capture without resetting the timeline.
+Automatic capture follows active sessions belonging to the detected meeting
+process tree across every active render and capture endpoint. The microphone
+therefore follows Zoom's NVIDIA Broadcast virtual endpoint when Zoom captures
+there. Endpoint fallback order is Communications, Multimedia, then another
+available endpoint. A still-active current meeting endpoint wins ties to avoid
+unnecessary switches. Playback alone still never starts a recording.
+
+Automatic system capture prefers Windows process-tree loopback on runtime
+build 20348 or later (including Windows 11), using `ActivateAudioInterfaceAsync`
+with `AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK`. The target remains
+`net8.0-windows10.0.17763.0` and NAudio stays pinned at 2.2.1. The native adapter
+uses the SDK x64 `VT_BLOB` activation layout, an agile completion callback,
+three-second activation timeout and safe late-completion disposal. It captures
+the resolved meeting root and descendants independently of render endpoints.
+For Meet, that is the detected browser tree and can include other tabs in that
+browser instance. A manual Call audio endpoint always selects endpoint loopback.
+Older Windows builds and native activation/stream failures fall back to the
+selected render endpoint. A failed process root is not retried during the same
+recording. Endpoint loopback includes other playback on its selected device.
+Implementation reference: [Microsoft's ApplicationLoopback sample](https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/ApplicationLoopback)
+and [the SDK activation parameters](https://learn.microsoft.com/en-us/windows/win32/api/audioclientactivationparams/ns-audioclientactivationparams-audioclient_activation_params).
+
+The Audio devices tray submenu has a global Automatic (follow meeting app)
+choice and independent Call audio and Microphone choices. Manual endpoint IDs
+are saved in settings and apply during recording. A disconnected override
+stays selected and unavailable until it reconnects, another device is chosen,
+or Automatic is selected. The menu retains its saved name with a disconnected
+label. It refreshes the device list whenever opened.
+
+Both tracks remain 16 kHz mono s16le. One Stopwatch drives sample positions and
+silence padding. Device and session changes re-evaluate the source and reopen
+only a changed or failed capture, without resetting the clock or chunk sequence.
+Old-source callbacks cannot append audio after replacement.
 Temporary reconnect errors keep recording. A silent loopback track, including a
 missing render device, stays padded while the microphone delivers audio. A late
 first system packet retains its wall-clock position. Only a gap with no audio
@@ -206,9 +233,17 @@ tolerating an absent journal for an already ready or failed recording.
   Restart from the stable exe location; use tray Stop regardless.
 - Detection: inspect `logs/capture-processes-*.log` during real calls. Verify
   new Teams/WebView2 and browser process trees on the actual computer.
-- Device switch: check Windows default Communications capture/render devices and
-  microphone privacy settings. A silent single track remains padded. A shared
-  reconnect gap above ten seconds stops the recording.
+- Device switch: use Audio devices to follow the meeting app or choose its
+  render/capture endpoints manually. Check microphone privacy settings.
+  The host log records chosen endpoint names and selection reasons at recording
+  start and every switch, without audio or credentials. Last recording: system
+  audio level OK / silent shows the highest observed system level, with both
+  track peaks in its tooltip and a keyboard/touch accessible details dialog.
+  After sixty seconds without system signal above
+  0.001 full scale while the meeting remains active, a toast says
+  "Call audio is silent. Check Audio devices in the tray menu." Once per
+  recording. Silence still never changes meeting detection. A silent single
+  track remains padded. A shared reconnect gap above ten seconds stops capture.
 - Disk/journal/transfer errors: retain folders for recovery. Do not delete the
   outbox to fix network errors. Damaged journals need operator review.
 
@@ -241,6 +276,21 @@ Release solution build passed for all three projects with zero warnings/errors;
 all 207 xUnit tests passed, zero failed/skipped, in one test assembly. Logs are
 `.build-logs/round4-build.log`, `round4-tests.log` and `round4-tests.trx`.
 No folder publish or recorder launch was performed in these follow-ups.
+The uncommitted live-call device repair builds all three solution projects in
+Release with zero warnings/errors and passes all 256 xUnit tests, zero
+failed/skipped. The 49 new cases cover endpoint selection and fallbacks,
+explicit overrides, source switches, per-track peaks and silence boundaries,
+process-tree isolation and settings compatibility. Build/test output and TRX
+are in `.build-logs/audio-devices-build.log`, `audio-devices-tests.log` and
+`audio-devices-tests.trx`. Independent source QA and native tray UX reviews
+cover callback shutdown, recording UUID fences and keyboard/touch diagnostics.
+A native smoke on Windows 11 build 26200 passed endpoint enumeration and
+own-process loopback activation, 16 kHz mono s16le initialization, start,
+stop and disposal (36 silent packets, no audio serialized). Three native
+observer subscription/snapshot/disposal cycles also passed. It verified the
+agile COM marker required by the native completion callback. The output is
+`.build-logs/native-audio-smoke-output.txt`. This is ABI/lifecycle proof;
+audible meeting capture and real device switching still require a call test.
 Before distribution, verify
 pairing/single instance/Windows startup/toast buttons; real
 calendar and unknown Zoom/Meet/Teams calls; muted mic and both-sided transcript;

@@ -5,6 +5,20 @@
 
 ## REC.0 phase 2 Windows client, prepared 2026-10-14
 
+Liam's first real Zoom call detected and linked correctly, uploading 68 chunks
+per track, but every system chunk transcribed empty. The default Communications
+render endpoint was different from Zoom's playback endpoint. Mic speaker bleed
+then labelled the other party as Liam. The uncommitted fix in the tray worktree
+follows meeting process-tree sessions on render/capture endpoints, adds saved
+manual choices and per-track silence diagnostics, and prefers runtime-gated
+Windows process loopback. REC.0 remains open for installed real-call proof.
+Release solution build passes with zero warnings/errors; all 256 xUnit tests
+pass, zero failed/skipped. Source QA and tray UX pass after device-stop callback
+races, missing-device diagnostics and keyboard/touch access to peaks were fixed.
+Logs and TRX: apps/recorder-tray/.build-logs/audio-devices-*. No commit or deploy.
+Own-process native loopback activation, PCM initialization, capture and disposal
+also pass on Windows 11 build 26200, without saving audio or running the host.
+
 Liam's tray-app brief confirms the server side is live on production at main
 15de17d7. Earlier server preparation notes below remain historical.
 The feat/rec0-tray-app client is committed at 8665e762, with .NET 8 Core,

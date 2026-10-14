@@ -1,10 +1,13 @@
 using System.Text.Json;
+using TahiRecorder.Core.Audio;
 using TahiRecorder.Core.Automation;
 
 namespace TahiRecorder.App;
 
 internal sealed record HostSettings(string? DeviceId = null, string? DeviceName = null,
-    AutomationSnapshot? Automation = null, Guid? ActiveCaptureRef = null);
+    AutomationSnapshot? Automation = null, Guid? ActiveCaptureRef = null,
+    AudioDevicePreferences? AudioDevices = null, string? RenderEndpointName = null,
+    string? CaptureEndpointName = null, AudioLevelSnapshot? LastAudioLevels = null);
 
 internal sealed class HostSettingsStore
 {

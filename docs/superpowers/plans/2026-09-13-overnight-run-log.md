@@ -1552,3 +1552,78 @@ apps/recorder-tray/.build-logs/round4-build.log, round4-tests.log and
 round4-tests.trx. Independent source QA and source UX review passed with no
 findings. No code changed after the successful gate. No folder publish,
 installation, recorder launch or real-call proof is claimed for this follow-up.
+
+## 2026-10-14, REC.0 tray live-call audio device repair (uncommitted)
+
+First command confirmed clean git status on feat/rec0-tray-app at 749b56b4.
+Liam requested no commit. His first real Zoom call detected and linked correctly
+and uploaded 68 chunks on each track, but all system-track transcriptions were
+empty. Zoom played to a different endpoint from the default Communications
+render device; speaker bleed into the mic labelled both voices as Liam.
+
+The detector now supplies the resolved meeting root and descendant process IDs.
+All active render/capture endpoints are scanned through IAudioSessionManager2.
+Selection follows an active matching session, retains a matching current
+endpoint, then falls back to Communications, Multimedia or another available
+endpoint. Zoom's virtual NVIDIA Broadcast capture endpoint wins when it owns
+the capture session there. An MTA observer subscribes to session created/state/
+disconnected and endpoint/default changes, with a one-second polling fallback.
+Only changed or failed sources reopen. The same clock, spool, chunks, padding
+and per-track peak history survive switching. Stale callbacks are identity
+checked under the recorder gate; native thread joins happen outside it.
+
+Process-tree loopback is the preferred automatic system source on Windows
+build 20348 or later, including Windows 11, through ActivateAudioInterfaceAsync
+and AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK. NAudio 2.2.1 and the existing
+net8.0-windows10.0.17763.0 target are preserved. ABI and conversion flags were
+checked against Microsoft's ApplicationLoopback sample and NAudio source.
+The x64 VT_BLOB layout, agile completion callback, bounded activation wait,
+late-result disposal and native buffer release are implemented. Failure falls
+back to the chosen render endpoint and disables that process root's loopback
+retry for the recording. A manual Call audio endpoint always uses endpoint
+loopback. Browser capture covers the resolved browser tree, including other
+tabs in that instance; endpoint fallback covers all playback on that endpoint.
+
+Audio devices has global and per-track Automatic choices, independently saved
+render/capture overrides, opening-time refresh and visible disconnected saved
+names. A missing manual endpoint remains selected/unavailable. Selection names
+and reasons are logged at start and each switch without audio or credentials.
+Last recording reports system OK/silent with both peaks and microphone status
+available by tooltip or keyboard/touch details dialog. A monotonic watchdog
+warns once after sixty continuous active meeting seconds without system signal
+above 0.001 full scale, independently of packet arrival. The exact requested
+toast is fenced by recording UUID and removed on stop. Silence does not alter
+meeting detection or existing stop rules.
+
+Added 49 regression cases for non-default/virtual devices, defaults, overrides,
+stable switches, process source identity, peaks, silence thresholds and timing,
+process trees and settings compatibility. All previous 207 cases remain passing.
+PM scope review, independent source QA and native tray UX passed. Review fixes
+cover initial unavailable diagnostics, observer/native disposal, old stop-event
+races, stale silence toasts, override copy and accessible peak details.
+
+Final Release gate, exit 0 for both stages:
+    dotnet build TahiRecorder.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false
+    Build succeeded. 0 Warning(s), 0 Error(s). Time Elapsed 00:00:03.16.
+    dotnet test TahiRecorder.sln -c Release --no-build --no-restore -m:1 --logger "trx;LogFileName=audio-devices-tests.trx" --results-directory .build-logs
+    Passed! Failed: 0, Passed: 256, Skipped: 0, Total: 256, Duration: 3 s.
+All three solution projects built and one xUnit assembly ran with the existing
+.packages cache. Raw output/TRX: apps/recorder-tray/.build-logs/audio-devices-build.log,
+audio-devices-tests.log and audio-devices-tests.trx. No commit, push, deploy,
+publish, installed recorder launch, pairing, secret or production-data change.
+Real Zoom/NVIDIA Broadcast, audible process isolation and mid-call device
+switch checks remain required before REC.0 closes.
+
+Additional native smoke (temporary ignored console harness, no recorder host,
+credentials, settings or pairing): on Windows 11 build 26200, enumerate all
+five active endpoints, including NVIDIA Broadcast render and capture. Native
+process-loopback activation initially returned E_ILLEGAL_METHOD_CALL. Its
+IAgileObject marker required ComImport, matching NAudio's imported interface;
+the marker's QueryInterface changed from E_NOINTERFACE to S_OK after that fix.
+Own-process activation, 16 kHz mono s16le initialization, 350 ms capture, stop
+and disposal then passed with 36 silent packets in the final smoke. Three
+observer subscription/snapshot/disposal cycles also passed, five endpoints each.
+The target was the harness's
+own PID only; no call/user audio was captured or serialized. Output is in
+apps/recorder-tray/.build-logs/native-audio-smoke-output.txt. The final whole
+solution build and all 256 tests above were rerun after the marker repair.

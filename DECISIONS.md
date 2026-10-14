@@ -1740,3 +1740,16 @@ when its path is already present, and reset the render-outage report for each
 recording. These are repairs to the approved client behavior. Full Release
 solution build and test verification belong in the running log; installed
 Windows checks and real-call proof remain required before REC.0 closes.
+
+Client live-call audio repair, 2026-10-14 (uncommitted, Liam's explicit brief):
+follow the meeting process tree's active render and capture sessions, including
+its virtual microphone. Saved per-track overrides take precedence; an absent
+manual endpoint stays unavailable rather than silently substituting a device.
+Automatic endpoint fallback is Communications, Multimedia, then another active
+endpoint. Prefer process-tree loopback on Windows build 20348 or newer when
+there is no render override; fall back to endpoint loopback if activation or
+capture fails. Switch sources without resetting the shared recording clock or
+chunk timeline. Record names/reasons and per-track peaks, and warn once after
+sixty seconds without qualifying system signal during continuous meeting
+activity. These repair the approved capture contract. No schema, API, secret,
+commit, deploy or production-data change is part of this session.
