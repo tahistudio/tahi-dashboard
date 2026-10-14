@@ -153,7 +153,7 @@ export interface NameBook {
   contact: Map<string, string>
 }
 
-async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[]): Promise<NameBook> {
+async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[], contactOrgIds?: readonly string[]): Promise<NameBook> {
   const teamIds = [...new Set(messages.filter(m => m.authorType === 'team_member').map(m => m.authorId))]
   // 'bot' is excluded here, not swept into the contact bucket: it has no
   // contacts row, and authorName below answers it from TAHI_BOT directly.
@@ -170,12 +170,11 @@ async function loadNames(database: DrizzleDB, messages: readonly WindowMessage[]
     for (const r of rows) team.set(r.id, { name: r.name, avatarUrl: r.avatarUrl ?? null })
   }
   for (const slice of chunkThreadIds(contactIds)) {
-    // Message rows are already scoped. A merge can move the author to another
-    // org without changing who wrote an existing message.
     const rows = await database
       .select({ id: schema.contacts.id, name: schema.contacts.name })
       .from(schema.contacts)
-      .where(inArray(schema.contacts.id, slice))
+      .where(and(inArray(schema.contacts.id, slice),
+        contactOrgIds === undefined ? undefined : sql`${schema.contacts.orgId} IN (SELECT value FROM json_each(${JSON.stringify(contactOrgIds)}))`))
     for (const r of rows) contact.set(r.id, r.name)
   }
   return { team, contact }
@@ -423,7 +422,7 @@ export async function loadInboxThreads(
   // ── the previews ───────────────────────────────────────────────────────────
   const previewMessages = windowMessages.filter(m => lastIds.includes(m.id))
   const [book, voices] = await Promise.all([
-    loadNames(database, previewMessages),
+    loadNames(database, previewMessages, unrestricted ? undefined : orgIds),
     loadVoiceNotes(database, lastIds),
   ])
 
@@ -538,6 +537,7 @@ export async function loadThreadMessages(
       deletedAt: null,
       body: '',
     })),
+    unrestricted ? undefined : !isClient && input.orgScope?.kind === 'some' ? input.orgScope.orgIds : [input.orgId],
   )
   const voices = await loadVoiceNotes(database, ids)
 

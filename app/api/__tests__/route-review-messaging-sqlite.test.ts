@@ -135,7 +135,7 @@ describe('review corrections for request message destinations', () => {
 })
 
 describe('review corrections for existing message and contact metadata', () => {
-  it.each(['studio', 'client'] as const)('keeps message author names after a contact moves orgs for %s readers', async audience => {
+  it.each(['studio', 'client'] as const)('keeps the messages but hides an out-of-scope author name after a contact moves orgs for %s readers', async audience => {
     await fixture.database.update(schema.requests).set({ isInternal: false, updatedAt: '2026-10-14T00:00:00Z' }).where(eq(schema.requests.id, 'request-a'))
     fixture.insert(schema.organisations, { id: 'org-b', name: 'B' })
     fixture.insert(schema.contacts, { id: 'moved-author', org_id: 'org-a', name: 'Moved author' })
@@ -167,10 +167,11 @@ describe('review corrections for existing message and contact metadata', () => {
       channelsByOrg: new Map([['org-a', 'channel-a']]), orgNames: new Map(), now: new Date('2026-10-14T00:00:00Z'),
     })
     expect(inbox.threads.map(item => item.id).sort()).toEqual(['channel-a', 'request-a'])
-    expect(inbox.threads.map(item => item.lastMessage?.authorName)).toEqual(['Moved author', 'Moved author'])
+    // Names are looked up only inside the reader's scope, so a contact who moved away loses their name here.
+    expect(inbox.threads.map(item => item.lastMessage?.authorName)).toEqual([null, null])
     for (const [source, id, messageId] of [['request', 'request-a', 'request-message'], ['channel', 'channel-a', 'channel-message']] as const) {
       const thread = await loadThreadMessages(fixture.database, { source, id, orgId: 'org-a', viewer, audience, orgScope })
-      expect(thread.map(message => ({ id: message.id, authorName: message.authorName }))).toEqual([{ id: messageId, authorName: 'Moved author' }])
+      expect(thread.map(message => ({ id: message.id, authorName: message.authorName }))).toEqual([{ id: messageId, authorName: null }])
     }
     expect(fixture.errors).toEqual([])
   })
