@@ -57,8 +57,8 @@ export async function POST(req: NextRequest) {
   const dealId = calc.dealId
   const orgIdForArtefact = calc.orgId
 
-  // Resolve client + deal context for nicer naming. Best-effort. we
-  // don't fail the draft if the lookup misses.
+  // Resolve client + deal context for nicer naming. This is best effort:
+  // we don't fail the draft if the lookup misses.
   let dealTitle: string | null = null
   if (dealId) {
     const [deal] = await database.select({ title: schema.deals.title })

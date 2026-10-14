@@ -1,10 +1,10 @@
 # T1.6 admin route access audit, 2026-10-14
 
-Batch D on chore/next20-n20d, baseline main 749b56b4. The first git status was clean. The original audit and repairs were committed as 67594c29. Both the regression and security reviews FAILED that commit. The follow-up repairs below are uncommitted. No migration, push, deployment, production data operation, TASKS.md edit or STATUS.md edit was performed.
+Batch D on chore/next20-n20d, baseline main 749b56b4. The first git status was clean. The original audit and repairs were committed as 67594c29. Both the regression and security reviews FAILED that commit. The follow-up repairs below are committed as 9b3a862b. The security re-review PASSED. The final Low repairs in this audit started with a clean worktree at a0273a34 and remain uncommitted. No migration, push, deployment, production data operation, TASKS.md edit or STATUS.md edit was performed.
 
 ## Review repairs after FAILED 67594c29
 
-Started clean at 67594c29 on chore/next20-n20d. No commit, push, deploy, migration, production-data write, TASKS.md or STATUS.md edit in this follow-up. Both current seats are super_admin; these repairs prevent scoped-seat access failures and do not claim an exploit today.
+Started clean at 67594c29 on chore/next20-n20d; follow-up repairs committed as 9b3a862b. No push, deploy, migration, production-data write, TASKS.md or STATUS.md edit in that follow-up. Both current seats are super_admin; these repairs prevent scoped-seat access failures and do not claim an exploit today.
 
 | Brief item | Current file:line | Change |
 | --- | --- | --- |
@@ -63,22 +63,91 @@ The owner lock uses the existing settings table, with an atomic upsert, value-ma
 
 H3, the systemic action-level permission model, remains OPEN as a separate planned batch. A viewer's seeded view grants must eventually be distinct from create/edit/delete privileges across the dashboard. This batch blocks the explicitly named privileged operations and parent escapes, without claiming that a scoped viewer can no longer perform every unrelated mutation.
 
-All remaining Low findings stay OPEN, except the three fixes in item 24. Existing MCP audit/copy author attribution in permissions/team writes still records api-service in places; it is documented for that remaining batch. Invoice channel/payment-term action permissions also remain part of H3. Earned unrestricted artifact access and established counts-only cron behavior are deliberate compatibility conventions.
+Low findings outside item 24 and the final Low repairs recorded below stay OPEN. Existing MCP audit/copy author attribution in permissions/team writes still records api-service in places; it is documented for that remaining batch. Invoice channel/payment-term action permissions also remain part of H3. Earned unrestricted artifact access and established counts-only cron behavior are deliberate compatibility conventions.
 
-### Follow-up test and gate evidence
+## Final Low repairs after PASSED security re-review
 
-Final fail-closed checks passed, exit 0 at every stage. Type-check, lint, MCP worker tsc, cron-trigger worker tsc and then the touched/related sandbox Vitest run completed against the final code. No build, push, deploy or live QA is claimed.
+Started clean on chore/next20-n20d at a0273a34. These are the requested Low follow-ups only; the owner permission behavior is retained. No commit, push, deploy, migration, production-data operation, TASKS.md or STATUS.md edit in this pass.
+
+| Item | Current file:line | Change and regression evidence |
+| --- | --- | --- |
+| L1 | [workers/mcp-server/src/index.ts:846](../../../workers/mcp-server/src/index.ts#L846), :851, :882, :890; [app/api/__tests__/mcp-owner-settings-parity.test.ts:13](../../../app/api/__tests__/mcp-owner-settings-parity.test.ts#L13) | Descriptions explain browser-only super_admin owner grants, demotions, removals, role/login changes and copying from admin sources, with the service-token 403 by design. Clearing roles is deny by default. Description parity tests cover every named tool. Settings descriptions also explain the reserved lock and secret redaction. |
+| L2 | [lib/super-admin-safety.ts:39](../../../lib/super-admin-safety.ts#L39), [app/api/admin/settings/route.ts:112](../../../app/api/admin/settings/route.ts#L112), :173; [app/api/admin/team/[id]/route.ts:61](../../../app/api/admin/team/[id]/route.ts#L61); [app/api/__tests__/privileged-route-access-sqlite.test.ts:282](../../../app/api/__tests__/privileged-route-access-sqlite.test.ts#L282) | Invalid JSON, null or missing lock expiry can be reclaimed. Settings GET omits the reserved lock; PATCH and actual MCP update_settings refuse it with 403, including null. Assign-role still succeeds after refusal and recovers pre-existing corrupt locks. Team PUT locks only for actual role/login changes, rereads under lock and omits unchanged access fields so profile edits cannot overwrite concurrent access changes. |
+| L3 | [app/api/admin/settings/route.ts:48](../../../app/api/admin/settings/route.ts#L48), [components/tahi/settings/sections/webhooks.tsx:67](../../../components/tahi/settings/sections/webhooks.tsx#L67); [app/api/__tests__/privileged-route-access-sqlite.test.ts:186](../../../app/api/__tests__/privileged-route-access-sqlite.test.ts#L186), :264; [components/tahi/__tests__/webhooks-secret.test.tsx:183](../../../components/tahi/__tests__/webhooks-secret.test.tsx#L183) | Settings and actual MCP get_settings omit webhook_endpoint_* secret fields and return hasSecret metadata; corrupt endpoint values fail closed. The create dialog retains the accepted signing secret once, offers clipboard/manual copy, explains that closing hides it permanently and clears it on close. Duplicate/in-flight submissions, errors and successful creation with unreadable response or failed refresh are covered. |
+| L4 | [lib/messages-store.ts:156](../../../lib/messages-store.ts#L156), :173, :426, :528; [app/api/__tests__/route-review-messaging-sqlite.test.ts:138](../../../app/api/__tests__/route-review-messaging-sqlite.test.ts#L138) | Contact names resolve by IDs from the already scoped message rows, without filtering the contact's current org. Real SQLite contact moves preserve names in studio/client inboxes and request/channel bodies while foreign-parent rows and studio wrong-org message rows remain excluded. |
+| Copy | [app/api/admin/calculator/draft/route.ts:60](../../../app/api/admin/calculator/draft/route.ts#L60), [app/api/admin/leads/[id]/calls/route.ts:12](../../../app/api/admin/leads/[id]/calls/route.ts#L12); [lib/overview-brief.ts:255](../../../lib/overview-brief.ts#L255), :317, :452; [lib/overview-brief.test.ts:230](../../../lib/overview-brief.test.ts#L230) | Comments use grammatical sentences and commas. Client/title labels use colons, with overdue copy reading "Acme: Title, 3 days overdue". Tests also cover delivered and unsigned-contract labels. No em or en dashes added. |
+
+Final fail-closed gate passed, exit 0: npm run type-check, MCP worker tsc, then the 32 touched/related Vitest files listed below through the existing scripts/run-vitest-sandbox.mjs. The normal Vitest startup was blocked before collection by esbuild spawn EPERM; the existing runner executes the same assertions with worker threads and TypeScript transforms.
+
+| Check | Final Low repair result |
+| --- | --- |
+| npm run type-check | tsc --noEmit, zero errors, exit 0 |
+| MCP worker tsc | node node_modules/typescript/bin/tsc --noEmit -p workers/mcp-server/tsconfig.json, zero errors, exit 0 |
+| Sandbox Vitest | Test Files 32 passed (32); Tests 1154 passed (1154); 14.92 seconds; exit 0 |
+| Rule scan | Zero added any types, console.log, em or en dashes, including untracked new tests |
+| git diff --check | Passed |
+| Independent QA | Passed after reviewing actual MCP dispatch, scoped SQLite and dialog keyboard tests |
+| Independent UIUX | Source review passed after fixing focus containment when create controls are disabled |
+| Protected files and HEAD | TASKS.md and STATUS.md unchanged; HEAD remains a0273a34 |
+| Lint and build | Not run locally, blocked on a Wrangler login |
+
+The dialog focuses an enabled input or its own focusable container when controls become disabled. Tab and Shift+Tab stay inside during creation; success focuses the signing secret, and Escape closes only after creation finishes. Eight component tests cover those transitions, copying, failures and once-only reveal/cleanup. QA/UIUX reviewed the final repair without further findings. Their mobile/dark checks were source-only; no live or browser-rendered visual verification is claimed.
+
+Raw combined gate output: .claude/t1-6-review/lows-final-gate.log (gitignored). No commit, push or deployment was performed.
+
+<details>
+<summary>Final 32 touched and related Vitest files</summary>
+
+- app/api/__tests__/admin-route-guard-walk.test.ts
+- app/api/__tests__/privileged-route-access-sqlite.test.ts
+- app/api/__tests__/route-review-messaging-sqlite.test.ts
+- app/api/__tests__/admin-settings-default-pm.test.ts
+- app/api/__tests__/admin-settings-email-delivery.test.ts
+- app/api/__tests__/admin-settings-invoice-channel.test.ts
+- app/api/__tests__/admin-settings-studio-pm.test.ts
+- app/api/__tests__/permission-write-guards.test.ts
+- app/api/__tests__/permissions-copy-access.test.ts
+- app/api/__tests__/permissions-route-guards.test.ts
+- app/api/__tests__/permissions-matrix.test.ts
+- app/api/__tests__/mcp-owner-settings-parity.test.ts
+- app/api/__tests__/mcp-tool-profiles.test.ts
+- app/api/__tests__/mcp-coerce.test.ts
+- app/api/__tests__/mcp-designer-routes.test.ts
+- app/api/__tests__/messages-routes.test.ts
+- app/api/__tests__/admin-request-message-gates.test.ts
+- app/api/__tests__/admin-request-thread.test.ts
+- app/api/__tests__/admin-conversation-message-mentions.test.ts
+- app/api/__tests__/overview-replies-waiting.test.ts
+- app/api/__tests__/t1-6-internal-routes.test.ts
+- lib/__tests__/messages-store.test.ts
+- lib/__tests__/messages-inbox.test.ts
+- lib/__tests__/messages-composer.test.ts
+- lib/__tests__/tahi-bot.test.ts
+- lib/permissions.test.ts
+- lib/__tests__/permissions-contact-overrides.test.ts
+- lib/__tests__/require-feature-guards.test.ts
+- lib/__tests__/invoice-pay-settings.test.ts
+- lib/__tests__/email-allowlist-settings.test.ts
+- lib/overview-brief.test.ts
+- components/tahi/__tests__/webhooks-secret.test.tsx
+
+</details>
+
+### 9b3a862b follow-up test and gate evidence
+
+The recorded type-check, MCP worker tsc, cron-trigger worker tsc and touched/related sandbox Vitest checks passed. Lint and build were not run locally, blocked on a Wrangler login. No push, deploy or live QA is claimed.
 
 | Check | Final follow-up result |
 | --- | --- |
 | npm run type-check | tsc --noEmit, zero errors |
-| CI=1 npm run lint | Zero errors, 79 existing warnings |
+| npm run lint | Not run locally, blocked on a Wrangler login |
+| npm run build | Not run locally, blocked on a Wrangler login |
 | MCP worker tsc | tsc --noEmit -p workers/mcp-server/tsconfig.json, zero errors |
 | Cron-trigger worker tsc | tsc --noEmit -p workers/cron-trigger/tsconfig.json, zero errors |
 | Sandbox Vitest | Test Files 163 passed (163); Tests 3591 passed (3591), 61.24 seconds |
 | Added-code rule scan | Zero any types, console.log, em or en dash additions, including new files |
 | git diff --check | Passed |
-| Protected files and HEAD | TASKS.md and STATUS.md unchanged; HEAD remains 67594c29 |
+| Protected files and commit | TASKS.md and STATUS.md unchanged; follow-up repairs committed as 9b3a862b |
 | Current handler walk | 418 route files, 592 HTTP exports (one debug GET deleted), all visited |
 
 New files: privileged-route-access-sqlite.test.ts (197 tests), route-review-messaging-sqlite.test.ts (22), sales-review-sqlite.test.ts (17), t1-6-time-billing-sqlite.test.ts (33), lib/__tests__/sitemap-auth.test.ts (4). The guard walker now has 20 tests, including actual auth provenance, lexical shadowing, auth/access mutation, forged prepared permissions, early success exits, consumed OAuth nonce/expiry and OR-tautology scope. Its 22 feature exceptions remain exact; 19 mixed-source and 10 alternate-identity methods have checked AST proofs. A separate reviewer reproduced all six reported false passes and verified their rejection.

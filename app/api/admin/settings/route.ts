@@ -40,8 +40,21 @@ import {
   validateStudioProjectManagerSetting,
 } from '@/lib/studio-project-manager'
 import type { DB } from '@/db/d1'
+import { OWNER_MUTATION_LOCK_KEY } from '@/lib/super-admin-safety'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/** Settings readers get endpoint metadata, never the persisted signing secret. */
+function redactWebhookSetting(value: string | null): string | null {
+  try {
+    const endpoint: unknown = JSON.parse(value ?? 'null')
+    if (!endpoint || typeof endpoint !== 'object' || Array.isArray(endpoint)) return null
+    const { secret, ...metadata } = endpoint as Record<string, unknown>
+    return JSON.stringify({ ...metadata, hasSecret: typeof secret === 'string' && secret.length > 0 })
+  } catch {
+    return null
+  }
+}
 
 /**
  * Which writes to the delivery gate need more than "is in the Tahi org".
@@ -96,7 +109,10 @@ export async function GET(req: NextRequest) {
 
   const settings: Record<string, string | null> = {}
   for (const row of rows) {
-    settings[row.key] = row.value
+    if (row.key === OWNER_MUTATION_LOCK_KEY) continue
+    settings[row.key] = row.key.startsWith('webhook_endpoint_')
+      ? redactWebhookSetting(row.value)
+      : row.value
   }
 
   if (!isInvoiceChannel(settings[INVOICE_CHANNEL_SETTING_KEY])) {
@@ -147,11 +163,15 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json() as {
     key?: string
-    value?: string
+    value?: string | null
   }
 
   if (!body.key?.trim()) {
     return NextResponse.json({ error: 'key is required' }, { status: 400 })
+  }
+
+  if (body.key.trim() === OWNER_MUTATION_LOCK_KEY) {
+    return NextResponse.json({ error: 'This setting is reserved for access updates.' }, { status: 403 })
   }
 
   // The studio default channel is a closed vocabulary: storing anything else

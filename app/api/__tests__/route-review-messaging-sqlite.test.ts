@@ -135,6 +135,46 @@ describe('review corrections for request message destinations', () => {
 })
 
 describe('review corrections for existing message and contact metadata', () => {
+  it.each(['studio', 'client'] as const)('keeps message author names after a contact moves orgs for %s readers', async audience => {
+    await fixture.database.update(schema.requests).set({ isInternal: false, updatedAt: '2026-10-14T00:00:00Z' }).where(eq(schema.requests.id, 'request-a'))
+    fixture.insert(schema.organisations, { id: 'org-b', name: 'B' })
+    fixture.insert(schema.contacts, { id: 'moved-author', org_id: 'org-a', name: 'Moved author' })
+    fixture.insert(schema.contacts, { id: 'foreign-author', org_id: 'org-b', name: 'Outside author' })
+    fixture.insert(schema.requests, { id: 'request-b', org_id: 'org-b', title: 'Outside request', status: 'submitted', is_internal: 0, updated_at: '2026-10-14T00:00:00Z' })
+    fixture.insert(schema.conversations, { id: 'channel-a', type: 'org_channel', org_id: 'org-a' })
+    fixture.insert(schema.conversations, { id: 'channel-b', type: 'org_channel', org_id: 'org-b' })
+    for (const [id, orgId, requestId, conversationId, authorId] of [
+      ['request-message', 'org-a', 'request-a', null, 'moved-author'],
+      ['channel-message', 'org-a', null, 'channel-a', 'moved-author'],
+      ['foreign-request-message', 'org-b', 'request-b', null, 'foreign-author'],
+      ['foreign-channel-message', 'org-b', null, 'channel-b', 'foreign-author'],
+    ] as const) {
+      fixture.insert(schema.messages, { id, org_id: orgId, request_id: requestId, conversation_id: conversationId, author_id: authorId, author_type: 'contact', body: id, is_internal: 0, created_at: '2026-10-14T00:00:00Z' })
+    }
+    if (audience === 'studio') {
+      for (const [id, requestId, conversationId] of [['wrong-org-request', 'request-a', null], ['wrong-org-channel', null, 'channel-a']] as const) {
+        fixture.insert(schema.messages, { id, org_id: 'org-b', request_id: requestId, conversation_id: conversationId, author_id: 'foreign-author', author_type: 'contact', body: 'Outside message', is_internal: 0, created_at: '2026-10-14T01:00:00Z' })
+      }
+    }
+    await fixture.database.update(schema.contacts).set({ orgId: 'org-b' }).where(eq(schema.contacts.id, 'moved-author'))
+
+    const viewer = audience === 'studio'
+      ? { clerkUserId: 'user_member', domainId: 'member', userType: 'team_member' as const }
+      : { clerkUserId: 'client-user', domainId: null, userType: 'contact' as const }
+    const orgScope = { kind: 'some' as const, orgIds: ['org-a'] }
+    const inbox = await loadInboxThreads(fixture.database, {
+      viewer, scope: { orgIds: ['org-a'], brandIds: null, audience, orgScope },
+      channelsByOrg: new Map([['org-a', 'channel-a']]), orgNames: new Map(), now: new Date('2026-10-14T00:00:00Z'),
+    })
+    expect(inbox.threads.map(item => item.id).sort()).toEqual(['channel-a', 'request-a'])
+    expect(inbox.threads.map(item => item.lastMessage?.authorName)).toEqual(['Moved author', 'Moved author'])
+    for (const [source, id, messageId] of [['request', 'request-a', 'request-message'], ['channel', 'channel-a', 'channel-message']] as const) {
+      const thread = await loadThreadMessages(fixture.database, { source, id, orgId: 'org-a', viewer, audience, orgScope })
+      expect(thread.map(message => ({ id: message.id, authorName: message.authorName }))).toEqual([{ id: messageId, authorName: 'Moved author' }])
+    }
+    expect(fixture.errors).toEqual([])
+  })
+
   it('keeps names on existing read receipts when the contact now belongs to another org', async () => {
     fixture.insert(schema.contacts, { id: 'moved', clerk_user_id: 'client-user', org_id: 'org-b', name: 'Existing reader' })
     fixture.insert(schema.requestReads, { id: 'read', request_id: 'request-a', user_id: 'client-user', user_type: 'contact', last_read_at: '2026-10-14T00:00:00Z' })

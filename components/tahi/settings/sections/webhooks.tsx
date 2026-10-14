@@ -15,9 +15,9 @@
  * Admin-only. Rendered inside the settings shell which already gates on admin.
  */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Webhook, Plus } from 'lucide-react'
+import { Webhook, Plus, Copy, Check } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
 import {
@@ -31,7 +31,6 @@ import {
 interface WebhookEndpoint {
   id: string
   url: string
-  secret: string
   events: string[]
   active: boolean
   createdAt: string
@@ -63,6 +62,122 @@ function portalTheme(): 'light' | 'dark' {
   const scoped = document.querySelector('.ash')?.getAttribute('data-theme')
   if (scoped === 'dark' || scoped === 'light') return scoped
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+}
+
+function AddEndpointDialog({
+  busy,
+  secret,
+  error,
+  onSave,
+  onClose,
+}: {
+  busy: boolean
+  secret: string | null
+  error: string | null
+  onSave: (values: Record<string, string>) => Promise<void>
+  onClose: () => void
+}) {
+  const [mounted, setMounted] = useState(false)
+  const [url, setUrl] = useState('https://')
+  const [events, setEvents] = useState('request.created')
+  const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const previousFocus = document.activeElement
+    setMounted(true)
+    return () => {
+      if (previousFocus instanceof HTMLElement) previousFocus.focus()
+    }
+  }, [])
+  useEffect(() => {
+    if (!mounted) return
+    const target = dialogRef.current?.querySelector<HTMLInputElement>('input:not(:disabled)') ?? dialogRef.current
+    target?.focus()
+  }, [mounted, secret, busy])
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Tab') return
+      const controls = dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)')
+      if (!controls?.length) {
+        event.preventDefault()
+        dialogRef.current?.focus()
+        return
+      }
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  async function copySecret() {
+    if (!secret) return
+    setCopyError(null)
+    try {
+      await navigator.clipboard.writeText(secret)
+      setCopied(true)
+    } catch {
+      setCopyError('Copy failed. Select and copy the secret manually.')
+    }
+  }
+
+  if (!mounted || typeof document === 'undefined') return null
+  return createPortal(
+    <div className="tahi-portal" data-theme={portalTheme()}>
+      <div className="dlg-backdrop" onClick={onClose}>
+        <div ref={dialogRef} className="dlg" tabIndex={-1} onClick={event => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Add endpoint">
+          <h3>{secret ? 'Endpoint created' : 'Add endpoint'}</h3>
+          {secret ? (
+            <>
+              <p className="dlg-warn" style={{ marginTop: 0 }}>
+                Copy this signing secret now and store it securely. You won't see this again after closing this dialog.
+                Use it to verify webhook signatures at your endpoint.
+              </p>
+              <div className="set-field">
+                <label htmlFor="webhook-signing-secret">Signing secret</label>
+                <input id="webhook-signing-secret" className="set-input" value={secret} readOnly style={{ minHeight: '2.75rem', fontFamily: 'ui-monospace,monospace' }} />
+              </div>
+              {copyError && <p className="dlg-warn" role="alert">{copyError}</p>}
+              <div className="dlg-foot" style={{ flexWrap: 'wrap' }}>
+                <button type="button" className="btn2" onClick={() => void copySecret()} style={{ minHeight: '2.75rem' }}>
+                  {copied ? <Check size={16} /> : <Copy size={16} />}
+                  {copied ? 'Copied' : 'Copy secret'}
+                </button>
+                <button type="button" className="btn1" onClick={onClose} style={{ minHeight: '2.75rem' }}>Done</button>
+              </div>
+            </>
+          ) : (
+            <form onSubmit={event => { event.preventDefault(); void onSave({ url, ev: events }) }} aria-busy={busy}>
+              <div className="set-field">
+                <label htmlFor="webhook-endpoint-url">Endpoint URL</label>
+                <input id="webhook-endpoint-url" type="url" required className="set-input" value={url} onChange={event => setUrl(event.target.value)} disabled={busy} style={{ minHeight: '2.75rem' }} />
+              </div>
+              <div className="set-field" style={{ marginTop: '0.75rem' }}>
+                <label htmlFor="webhook-endpoint-events">Events</label>
+                <input id="webhook-endpoint-events" required className="set-input" value={events} onChange={event => setEvents(event.target.value)} disabled={busy} style={{ minHeight: '2.75rem' }} />
+              </div>
+              {error && <p className="dlg-warn" role="alert">{error}</p>}
+              <div className="dlg-foot">
+                <button type="button" className="btn2" onClick={onClose} disabled={busy} style={{ minHeight: '2.75rem' }}>Cancel</button>
+                <button type="submit" className="btn1" disabled={busy} style={{ minHeight: '2.75rem' }}>{busy ? 'Creating...' : 'Create endpoint'}</button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
 }
 
 /* Small confirm dialog in the design's .dlg language, so a one-tap delete
@@ -155,6 +270,9 @@ export function WebhooksSection(_props: { isAdmin?: boolean } = {}) {
   const [adding, setAdding] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const createPending = useRef(false)
+  const [createdSecret, setCreatedSecret] = useState<string | null>(null)
+  const [createError, setCreateError] = useState<string | null>(null)
   // The last endpoint created this session, so its row gets the insert animation.
   const [justAddedId, setJustAddedId] = useState<string | null>(null)
 
@@ -167,23 +285,45 @@ export function WebhooksSection(_props: { isAdmin?: boolean } = {}) {
     const url = values.url?.trim()
     const events = parseEvents(values.ev ?? '')
     // Nothing valid to save: keep the dialog open rather than silently discard.
-    if (busy || !url || url === 'https://' || events.length === 0) return
+    if (createPending.current || createdSecret) return
+    if (!url || url === 'https://' || events.length === 0) {
+      setCreateError('Enter an endpoint URL and at least one event.')
+      return
+    }
+    createPending.current = true
     setBusy(true)
+    setCreateError(null)
+    const secret = newSecret()
     try {
       const res = await fetch(apiPath('/api/admin/webhooks'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, secret: newSecret(), events }),
+        body: JSON.stringify({ url, secret, events }),
       })
-      if (res.ok) {
-        const json = (await res.json()) as { endpoint?: WebhookEndpoint }
-        if (json.endpoint?.id) setJustAddedId(json.endpoint.id)
+      if (!res.ok) {
+        const json = await res.json().catch(() => null) as { error?: string } | null
+        setCreateError(json?.error ?? 'Could not create the endpoint. Try again.')
+        return
       }
+      // POST accepts this secret; keep it available even if the response body cannot be read.
+      setCreatedSecret(secret)
+      const json = await res.json().catch(() => null) as { endpoint?: WebhookEndpoint & { secret?: string } } | null
+      if (json?.endpoint?.id) setJustAddedId(json.endpoint.id)
+      if (json?.endpoint?.secret) setCreatedSecret(json.endpoint.secret)
+      await mutate().catch(() => undefined)
+    } catch {
+      setCreateError('Could not create the endpoint. Check your connection and try again.')
     } finally {
-      setAdding(false)
+      createPending.current = false
       setBusy(false)
-      await mutate()
     }
+  }
+
+  function closeCreateDialog() {
+    if (createPending.current) return
+    setAdding(false)
+    setCreatedSecret(null)
+    setCreateError(null)
   }
 
   async function saveEndpoint(id: string, values: Record<string, string>) {
@@ -288,15 +428,12 @@ export function WebhooksSection(_props: { isAdmin?: boolean } = {}) {
       </div>
 
       {adding && (
-        <EditDialog
-          heading="Add endpoint"
-          row={{ url: 'https://', ev: 'request.created' }}
-          fields={[
-            { key: 'url', label: 'Endpoint URL' },
-            { key: 'ev', label: 'Events' },
-          ]}
-          onSave={v => void createEndpoint(v)}
-          onClose={() => setAdding(false)}
+        <AddEndpointDialog
+          busy={busy}
+          secret={createdSecret}
+          error={createError}
+          onSave={createEndpoint}
+          onClose={closeCreateDialog}
         />
       )}
 

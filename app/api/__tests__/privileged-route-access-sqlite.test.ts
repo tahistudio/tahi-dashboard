@@ -50,8 +50,10 @@ import { GET as suppressions } from '@/app/api/admin/email-suppressions/route'
 import { POST as assignRole } from '@/app/api/admin/permissions/assign-role/route'
 import { POST as copyAccess } from '@/app/api/admin/permissions/copy-access/route'
 import * as team from '@/app/api/admin/team/[id]/route'
+import * as settings from '@/app/api/admin/settings/route'
 import { acquireOwnerMutationLock } from '@/lib/super-admin-safety'
 import * as ownerSafety from '@/lib/super-admin-safety'
+import { executeTool } from '../../../workers/mcp-server/src/index'
 
 const TABLES = [
   schema.roles, schema.permissions, schema.rolePermissions, schema.teamMembers,
@@ -126,9 +128,11 @@ beforeEach(() => {
   })
   as('viewer')
 })
-afterEach(() => { fixture.close(); vi.unstubAllEnvs() })
+afterEach(() => { fixture.close(); vi.unstubAllEnvs(); vi.unstubAllGlobals() })
 
 const CASES: Array<{ name: string; call: () => Promise<Response>; status?: number }> = [
+  { name: 'settings GET', call: () => settings.GET(req('GET')) },
+  { name: 'settings PATCH', call: () => settings.PATCH(req('PATCH', { key: 'studio.fixture', value: 'fixture' })) },
   { name: 'webhooks GET', call: () => webhooks.GET(req('GET')) },
   { name: 'webhooks POST', call: () => webhooks.POST(req('POST', { url: 'https://example.test/new', secret: 'creation-secret', events: ['request_created'] })), status: 201 },
   { name: 'webhooks PATCH', call: () => webhooks.PATCH(req('PATCH', { id: 'hook-a', active: false })) },
@@ -180,6 +184,38 @@ describe.each(CASES)('$name uses role and feature guards', scenario => {
 })
 
 describe('once-only secrets', () => {
+  it.each(['admin', 'super_admin', 'api-service'] as const)('redacts webhook signing secrets from settings for %s', async role => {
+    as(role)
+    fixture.insert(schema.settings, {
+      key: 'permissions.ownerMutationLock', value: JSON.stringify({ token: 'private-lock-token', expiresAt: '9999-01-01' }),
+    })
+    const before = state()
+    const response = await settings.GET(req('GET'))
+    expect(response.status).toBe(200)
+    const result = await response.json() as { settings: Record<string, string | null> }
+    const endpoint = JSON.parse(result.settings['webhook_endpoint_hook-a'] ?? 'null') as Record<string, unknown>
+    expect(endpoint).toMatchObject({ id: 'hook-a', url: 'https://example.test/hook', hasSecret: true })
+    expect(endpoint).not.toHaveProperty('secret')
+    expect(result.settings).not.toHaveProperty('permissions.ownerMutationLock')
+    expect(JSON.stringify(result)).not.toContain('once-only-secret')
+    expect(JSON.stringify(result)).not.toContain('private-lock-token')
+    expect(state()).toEqual(before)
+  })
+  it.each(['not-json-private-secret', '"plain-private-secret"', '["array-private-secret"]', null])('does not return an unreadable webhook record %j', async value => {
+    as('api-service')
+    fixture.insert(schema.settings, { key: 'webhook_endpoint_corrupt', value })
+    const result = await (await settings.GET(req('GET'))).json() as { settings: Record<string, string | null> }
+    expect(result.settings.webhook_endpoint_corrupt).toBeNull()
+    expect(JSON.stringify(result)).not.toContain('private-secret')
+  })
+  it('marks a webhook setting without a signing secret as unset', async () => {
+    as('admin')
+    fixture.insert(schema.settings, {
+      key: 'webhook_endpoint_unset', value: JSON.stringify({ id: 'unset', secret: '', active: false }),
+    })
+    const result = await (await settings.GET(req('GET'))).json() as { settings: Record<string, string | null> }
+    expect(JSON.parse(result.settings.webhook_endpoint_unset ?? 'null')).toEqual({ id: 'unset', active: false, hasSecret: false })
+  })
   it('discloses the webhook secret on creation, then redacts GET and PATCH', async () => {
     as('admin')
     const created = await webhooks.POST(req('POST', { url: 'https://example.test/new', secret: 'creation-secret', events: ['request_created'] }))
@@ -201,7 +237,124 @@ describe('once-only secrets', () => {
   })
 })
 
+describe('actual MCP settings dispatch against SQLite routes', () => {
+  const credential = { bearer: 'qa-service-token', actor: null }
+  const manyRequests = { token: null, baseUrl: 'https://mr.example.test/api/v1' }
+  let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>
+  let statuses: number[]
+
+  beforeEach(() => {
+    as('api-service')
+    statuses = []
+    fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const request = new NextRequest(new Request(input, init))
+      expect(request.url).toBe('https://portal.tahi.studio/api/admin/settings')
+      expect(request.headers.get('authorization')).toBe(`Bearer ${credential.bearer}`)
+      const response = request.method === 'GET'
+        ? await settings.GET(request)
+        : request.method === 'PATCH'
+          ? await settings.PATCH(request)
+          : Response.json({ error: 'Unexpected fixture method' }, { status: 405 })
+      statuses.push(response.status)
+      return response
+    })
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  it('get_settings omits the internal lock and signing secrets from the real settings response', async () => {
+    fixture.insert(schema.settings, {
+      key: 'permissions.ownerMutationLock', value: JSON.stringify({ token: 'private-lock-token', expiresAt: '9999-01-01' }),
+    })
+    const before = state()
+    const result = await executeTool('get_settings', {}, credential, manyRequests)
+    const parsed = JSON.parse(result) as { settings: Record<string, string | null> }
+    expect(JSON.parse(parsed.settings['webhook_endpoint_hook-a'] ?? 'null')).toMatchObject({
+      id: 'hook-a', hasSecret: true,
+    })
+    expect(parsed.settings).not.toHaveProperty('permissions.ownerMutationLock')
+    expect(result).not.toContain('once-only-secret')
+    expect(result).not.toContain('private-lock-token')
+    expect(statuses).toEqual([200])
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(state()).toEqual(before)
+  })
+
+  it('update_settings propagates 403 for a null lock write, then assign-role recovers the prior null lock', async () => {
+    fixture.insert(schema.settings, { key: 'permissions.ownerMutationLock', value: null })
+    const before = state()
+    await expect(executeTool('update_settings', {
+      key: 'permissions.ownerMutationLock', value: null,
+    }, credential, manyRequests)).rejects.toThrow('returned 403')
+    expect(statuses).toEqual([403])
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(state()).toEqual(before)
+    expect((await assignRole(req('POST', {
+      teamMemberId: 'viewer', roleId: 'role-project_manager',
+    }))).status).toBe(200)
+    expect(fixture.rows(schema.settings).some(row => row.key === 'permissions.ownerMutationLock')).toBe(false)
+    expect(fixture.errors).toEqual([])
+  })
+})
+
 describe('owner protections', () => {
+  it.each(['admin', 'super_admin', 'api-service'] as const)('refuses clearing the reserved lock through settings for %s, leaving assign-role working', async role => {
+    as(role)
+    const before = state()
+    const response = await settings.PATCH(req('PATCH', { key: ' permissions.ownerMutationLock ', value: null }))
+    expect(response.status).toBe(403)
+    expect(state()).toEqual(before)
+    expect((await assignRole(req('POST', { teamMemberId: 'viewer', roleId: 'role-project_manager' }))).status).toBe(200)
+    expect(fixture.rows(schema.settings).some(row => row.key === 'permissions.ownerMutationLock')).toBe(false)
+  })
+  it.each([null, '', 'invalid-json', 'null', '{}', '{"expiresAt":null}'])('recovers a corrupt or missing lock expiry %j after refusing a null settings PATCH', async value => {
+    as('super_admin')
+    fixture.insert(schema.settings, { key: 'permissions.ownerMutationLock', value })
+    const before = state()
+    expect((await settings.PATCH(req('PATCH', { key: 'permissions.ownerMutationLock', value: null }))).status).toBe(403)
+    expect(state()).toEqual(before)
+    expect((await assignRole(req('POST', { teamMemberId: 'viewer', roleId: 'role-project_manager' }))).status).toBe(200)
+    expect(fixture.rows(schema.settings).some(row => row.key === 'permissions.ownerMutationLock')).toBe(false)
+    expect(fixture.errors).toEqual([])
+  })
+  it.each(['admin', 'super_admin', 'api-service'] as const)('lets %s update a profile with unchanged role and login while the owner lock is held', async role => {
+    as(role)
+    const mutation = await acquireOwnerMutationLock(fixture.database)
+    expect(mutation.denied).toBeNull()
+    const lock = fixture.rows(schema.settings).find(row => row.key === 'permissions.ownerMutationLock')
+    const claimSpy = vi.spyOn(ownerSafety, 'acquireOwnerMutationLock')
+    try {
+      expect((await team.PUT(req('PUT', {
+        title: 'New title', role: 'member', clerkUserId: ' user_viewer ',
+      }), context('viewer'))).status).toBe(200)
+      expect(claimSpy).not.toHaveBeenCalled()
+      expect(fixture.rows(schema.teamMembers).find(row => row.id === 'viewer')).toMatchObject({
+        title: 'New title', role: 'member', clerk_user_id: 'user_viewer',
+      })
+      expect(fixture.rows(schema.settings).find(row => row.key === 'permissions.ownerMutationLock')).toEqual(lock)
+    } finally {
+      claimSpy.mockRestore()
+      await mutation.release()
+    }
+  })
+  it('does not write stale unchanged access fields over a concurrent role or login change', async () => {
+    as('admin')
+    const originalUpdate = fixture.database.update.bind(fixture.database)
+    const updateSpy = vi.spyOn(fixture.database, 'update').mockImplementationOnce(table => {
+      fixture.sqlite.prepare('UPDATE team_members SET role = ?, clerk_user_id = ? WHERE id = ?')
+        .run('admin', 'replacement-login', 'viewer')
+      return originalUpdate(table)
+    })
+    try {
+      expect((await team.PUT(req('PUT', {
+        title: 'New title', role: 'member', clerkUserId: 'user_viewer',
+      }), context('viewer'))).status).toBe(200)
+      expect(fixture.rows(schema.teamMembers).find(row => row.id === 'viewer')).toMatchObject({
+        title: 'New title', role: 'admin', clerk_user_id: 'replacement-login',
+      })
+    } finally {
+      updateSpy.mockRestore()
+    }
+  })
   it.each([null, '', '   '])('keeps one usable owner after sequential unlink attempts using %j', async clerkUserId => {
     as('super_admin')
     fixture.insert(schema.teamMemberRoles, { id: 'second-owner', team_member_id: 'admin', role_id: 'role-super_admin', ended_at: null })

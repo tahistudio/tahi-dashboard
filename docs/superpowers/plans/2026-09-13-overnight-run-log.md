@@ -1763,3 +1763,35 @@ docs/superpowers/audits/2026-10-14-slack-bot-qa.md.
 No commit, push, deploy, migration, manifest, production-data or secret
 operation. No live or browser-render claim, and no backlog item is closed.
 The changed working tree is ready for the main session's re-review.
+
+## 2026-10-14, T1.6 final Low repairs (Codex)
+
+Started with clean git status on chore/next20-n20d at a0273a34. Liam confirms
+the earlier follow-up repairs are committed as 9b3a862b and the security
+re-review PASSED. Corrected the route audit to record that lint and build
+were not run locally, blocked on a Wrangler login.
+
+Repaired only the supplied Lows: truthful browser-only owner mutation MCP
+descriptions and deny-by-default clearing; reclaim corrupt/missing owner
+locks, reserve the lock setting and avoid locking unchanged team access;
+redact webhook signing secrets from settings/API/MCP and show them once
+with copy in the creation dialog; resolve existing message author names
+after contact org moves without changing message scope; tidy comment and
+client/title brief punctuation. Real SQLite and actual MCP dispatch tests
+cover lock refusal/recovery, secret redaction and scoped author names.
+Eight dialog component tests cover copying, cleanup, errors and keyboard
+focus, including disabled controls during creation. Independent QA and
+UIUX source reviews passed after the busy-dialog Tab fix.
+
+Final fail-closed gate, exit 0: npm run type-check, MCP worker tsc and the
+32 touched/related Vitest files. TypeScript checks have zero errors.
+Test Files 32 passed (32); Tests 1154 passed (1154), 14.92 seconds.
+The existing scripts/run-vitest-sandbox.mjs runs the assertions through
+worker threads; normal esbuild startup hit spawn EPERM before collection.
+Added-code rule scan and git diff --check pass. Raw output is retained in
+.claude/t1-6-review/lows-final-gate.log (gitignored); final selection and
+file/line evidence are in docs/superpowers/audits/2026-10-14-t1-6-route-audit.md.
+
+No commit, push, deploy, migration, production-data or secret operation.
+TASKS.md and STATUS.md are unchanged; HEAD remains a0273a34. No live,
+browser-rendered, mobile or dark-mode visual proof is claimed.

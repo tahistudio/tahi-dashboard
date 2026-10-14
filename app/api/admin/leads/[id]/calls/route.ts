@@ -9,11 +9,11 @@
  *   title         (required)
  *   scheduledAt   (required, ISO 8601)
  *   durationMinutes (default 30)
- *   googleMeetUrl (optional. paste from Google Calendar)
- *   googleCalendarEventId (optional. set when wired via Calendar sync)
+ *   googleMeetUrl (optional, paste from Google Calendar)
+ *   googleCalendarEventId (optional, set when wired via Calendar sync)
  *   attendees     (optional, JSON array of {name, email, role})
  *
- * GET /api/admin/leads/[id]/calls. list calls for the lead (newest
+ * GET /api/admin/leads/[id]/calls: list calls for the lead (newest
  * scheduled date first). Same data lives on the GET /leads/[id]
  * payload too; this endpoint exists for callers that just want the
  * call list without re-fetching the lead.

@@ -48,30 +48,44 @@ export async function PUT(req: NextRequest, { params }: Params) {
     roles?: string[]
   }
 
-  const mutation = body.clerkUserId !== undefined || body.role !== undefined
+  const [before] = await drizzle
+    .select({ id: schema.teamMembers.id, clerkUserId: schema.teamMembers.clerkUserId, role: schema.teamMembers.role })
+    .from(schema.teamMembers)
+    .where(eq(schema.teamMembers.id, id))
+    .limit(1)
+  if (!before) {
+    return NextResponse.json({ error: 'Team member not found' }, { status: 404 })
+  }
+
+  const nextClerkUserId = body.clerkUserId?.trim() || null
+  const changesAccess = (body.clerkUserId !== undefined && nextClerkUserId !== before.clerkUserId)
+    || (body.role !== undefined && body.role !== before.role)
+  const mutation = changesAccess
     ? await acquireOwnerMutationLock(drizzle)
     : { denied: null, release: async () => {} }
   if (mutation.denied) return mutation.denied
   try {
-    const current = body.clerkUserId !== undefined || body.role !== undefined
+    const current = changesAccess
       ? await revalidateOwnerMutationAccess(drizzle, auth, 'team')
       : { denied: null, access }
     if (current.denied) return current.denied
     const currentAccess = current.access
-    // Verify team member exists
-    const [existing] = await drizzle
-      .select({ id: schema.teamMembers.id, clerkUserId: schema.teamMembers.clerkUserId, role: schema.teamMembers.role })
-      .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.id, id))
-      .limit(1)
+    // Re-read access fields after acquiring the lock, since another worker may
+    // have changed the member while this request was waiting.
+    const [existing] = changesAccess
+      ? await drizzle
+        .select({ id: schema.teamMembers.id, clerkUserId: schema.teamMembers.clerkUserId, role: schema.teamMembers.role })
+        .from(schema.teamMembers)
+        .where(eq(schema.teamMembers.id, id))
+        .limit(1)
+      : [before]
 
     if (!existing) {
       return NextResponse.json({ error: 'Team member not found' }, { status: 404 })
     }
 
-    const nextClerkUserId = body.clerkUserId?.trim() || null
-    const changesLogin = body.clerkUserId !== undefined && nextClerkUserId !== existing.clerkUserId
-    const changesLegacyRole = body.role !== undefined && body.role !== existing.role
+    const changesLogin = changesAccess && body.clerkUserId !== undefined && nextClerkUserId !== existing.clerkUserId
+    const changesLegacyRole = changesAccess && body.role !== undefined && body.role !== existing.role
     if ((changesLogin || changesLegacyRole) && !currentAccess.isSuperAdmin) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
@@ -85,12 +99,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
     if (body.name !== undefined) updates.name = body.name.trim()
     if (body.email !== undefined) updates.email = body.email.trim()
     if (body.title !== undefined) updates.title = body.title?.trim() ?? null
-    if (body.role !== undefined) updates.role = body.role
+    // Omit unchanged access fields so a profile-only edit cannot overwrite a
+    // concurrent login or role change without holding the mutation lock.
+    if (changesLegacyRole) updates.role = body.role
     if (body.skills !== undefined) updates.skills = JSON.stringify(body.skills)
     if (body.avatarUrl !== undefined) updates.avatarUrl = body.avatarUrl
     if (body.weeklyCapacityHours !== undefined) updates.weeklyCapacityHours = body.weeklyCapacityHours
     if (body.isContractor !== undefined) updates.isContractor = body.isContractor
-    if (body.clerkUserId !== undefined) updates.clerkUserId = nextClerkUserId
+    if (changesLogin) updates.clerkUserId = nextClerkUserId
     if (body.department !== undefined) updates.department = body.department
     if (body.reportsToId !== undefined) updates.reportsToId = body.reportsToId
     if (body.roles !== undefined) updates.roles = JSON.stringify(body.roles)

@@ -227,6 +227,25 @@ describe('computeBrief permission and organisation scope', () => {
   })
 })
 
+describe('overview brief client and title copy', () => {
+  it('separates client, title and overdue timing clearly', async () => {
+    const { handle } = makeDb(new Map([[schema.requests, [
+      { title: 'Title', orgName: 'Acme', dueDate: '2026-10-07', updatedAt: NOW.toISOString() },
+    ]]]))
+    const result = await computeBrief(handle, AUTH, { access: access(['requests']), allowedOrgs: null })
+    expect(result.week.map(row => row.text)).toEqual(['Acme: Title, 3 days overdue'])
+    expect(result.slept.map(row => row.text)).toEqual(['Acme: Title delivered'])
+  })
+
+  it('separates client and unsigned contract name clearly', async () => {
+    const { handle } = makeDb(new Map([[schema.contractDocuments, [
+      { name: 'Agreement', orgName: 'Acme', expiresAt: '2026-10-13T01:00:00.000Z' },
+    ]]]))
+    const result = await computeBrief(handle, AUTH, { access: access(['contracts']), allowedOrgs: null })
+    expect(result.week.map(row => row.text)).toEqual(['Acme: Agreement unsigned, expires in 3 days'])
+  })
+})
+
 describe('GET overview brief after the helper move', () => {
   const request = () => new NextRequest('https://portal.tahi.studio/api/admin/overview/brief')
 

@@ -252,12 +252,12 @@ export async function computeBrief(
         .slice(0, 3)
 
       for (const r of overdue) {
-        const lead = r.orgName ? `${r.orgName}. ` : ''
+        const lead = r.orgName ? `${r.orgName}: ` : ''
         week.push({
           tone: 'warn',
           verb: 'Open',
           to: 'requests',
-          text: `${lead}${r.title} ${r.days} ${plural(r.days, 'day', 'days')} overdue`,
+          text: `${lead}${r.title}, ${r.days} ${plural(r.days, 'day', 'days')} overdue`,
         })
       }
     } catch {
@@ -314,7 +314,7 @@ export async function computeBrief(
         .limit(4)
 
       for (const r of rows) {
-        const lead = r.orgName ? `${r.orgName}. ` : ''
+        const lead = r.orgName ? `${r.orgName}: ` : ''
         slept.push({
           tone: '',
           verb: null,
@@ -449,7 +449,7 @@ function urgentContractText(
   name: string,
   days: number,
 ): void {
-  const lead = orgName ? `${orgName}. ` : ''
+  const lead = orgName ? `${orgName}: ` : ''
   const when = days === 0 ? 'expires today' : `expires in ${days} ${plural(days, 'day', 'days')}`
   target.push({
     tone: 'warn',

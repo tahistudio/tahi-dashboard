@@ -8,7 +8,7 @@ import { requireFeature } from '@/lib/require-feature'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
-const MUTATION_LOCK_KEY = 'permissions.ownerMutationLock'
+export const OWNER_MUTATION_LOCK_KEY = 'permissions.ownerMutationLock'
 const MUTATION_LOCK_TTL_MS = 5 * 60 * 1000
 
 /** Recheck actual caller authorization after the mutation lock is acquired. */
@@ -34,9 +34,10 @@ export async function acquireOwnerMutationLock(database: D1): Promise<{
     token: crypto.randomUUID(), expiresAt: new Date(Date.now() + MUTATION_LOCK_TTL_MS).toISOString(),
   })
   const rows = await database.all<{ value: string }>(sql`
-    INSERT INTO settings (key, value, updated_at) VALUES (${MUTATION_LOCK_KEY}, ${claim}, ${now})
+    INSERT INTO settings (key, value, updated_at) VALUES (${OWNER_MUTATION_LOCK_KEY}, ${claim}, ${now})
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    WHERE json_extract(settings.value, '$.expiresAt') < ${now}
+    WHERE json_valid(settings.value) = 0
+      OR coalesce(json_extract(settings.value, '$.expiresAt'), '') < ${now}
     RETURNING value
   `)
   if (rows.length === 0) {
@@ -48,7 +49,7 @@ export async function acquireOwnerMutationLock(database: D1): Promise<{
   return {
     denied: null,
     release: async () => {
-      await database.run(sql`DELETE FROM settings WHERE key = ${MUTATION_LOCK_KEY} AND value = ${claim}`)
+      await database.run(sql`DELETE FROM settings WHERE key = ${OWNER_MUTATION_LOCK_KEY} AND value = ${claim}`)
     },
   }
 }
