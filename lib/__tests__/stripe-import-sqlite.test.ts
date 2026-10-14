@@ -4,6 +4,7 @@ import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { schema } from '@/db/d1'
 import { importStripeInvoice, type StripeInvoiceLike } from '@/lib/stripe-import'
+import { importStripeInvoices } from '@/lib/stripe-sync'
 
 type Row = Record<string, SQLInputValue>
 type Result = { results: Row[]; success: boolean; meta: { changes: number } }
@@ -19,6 +20,7 @@ interface Statement {
 const databases: DatabaseSync[] = []
 afterEach(() => {
   databases.splice(0).forEach(database => database.close())
+  vi.unstubAllGlobals()
 })
 
 // Use the real schema's columns, nullability, defaults, indexes and foreign
@@ -125,6 +127,49 @@ function invoice(overrides: Partial<StripeInvoiceLike> = {}): StripeInvoiceLike 
     ...overrides,
   }
 }
+
+describe('importStripeInvoices default client linking with real SQLite', () => {
+  it.each(['QA client', 'Unknown client'])('skips an unlinked customer named %s without creating or matching a client', async customerName => {
+    const db = setup()
+    const beforeOrgs = db.sqlite.prepare('SELECT * FROM organisations ORDER BY id').all()
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({
+      data: [invoice({ customer: 'cus_unlinked', customer_name: customerName })], has_more: false,
+    }))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    // Omit options: the unattended bulk sync must use the safe default.
+    const result = await importStripeInvoices(db.database, 'sk_test_isolated')
+
+    expect(result).toMatchObject({
+      ok: true, status: 200, count: 0,
+      body: {
+        imported: 0, updated: 0, skipped: 1, total: 1,
+        results: [{ number: 'STRIPE-QA-001', status: 'no_client_linked', orgMatch: expect.stringContaining(`Stripe customer cus_unlinked (${customerName})`) }],
+      },
+    })
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
+      'https://api.stripe.com/v1/invoices?limit=100&expand[]=data.lines',
+      { headers: { Authorization: 'Bearer sk_test_isolated' } },
+    )
+    expect(db.sqlite.prepare('SELECT * FROM organisations ORDER BY id').all()).toEqual(beforeOrgs)
+    expect(db.invoices()).toEqual([])
+    expect(db.items()).toEqual([])
+    expect(db.write).not.toHaveBeenCalled()
+    expect(db.batch).not.toHaveBeenCalled()
+  })
+
+  it('still imports a customer linked by Stripe id when options are omitted', async () => {
+    const db = setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: [invoice()], has_more: false })))
+
+    expect(await importStripeInvoices(db.database, 'sk_test_isolated')).toMatchObject({
+      ok: true, count: 1, body: { imported: 1, updated: 0, skipped: 0 },
+    })
+    expect(db.invoices()).toEqual([expect.objectContaining({ org_id: 'org-a', status: 'paid' })])
+    expect(db.items()).toHaveLength(2)
+    expect(db.sqlite.prepare('SELECT id FROM organisations').all()).toEqual([{ id: 'org-a' }])
+  })
+})
 
 describe('importStripeInvoice with real SQLite behind the D1 driver', () => {
   it('refuses an existing invoice at a different expected client before status or payment metadata writes', async () => {

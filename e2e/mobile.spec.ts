@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { primePage } from './helpers'
 
 /**
  * T164 - Mobile viewport (375px) smoke tests.
@@ -9,6 +10,8 @@ test.describe('Mobile viewport', () => {
   test.skip(true, 'Requires Clerk auth setup for CI')
 
   test.use({ viewport: { width: 375, height: 812 } })
+
+  test.beforeEach(async ({ page }) => { await primePage(page) })
 
   test('sidebar is hidden on mobile', async ({ page }) => {
     await page.goto('/overview')
@@ -21,15 +24,28 @@ test.describe('Mobile viewport', () => {
 
   test('bottom navigation is visible', async ({ page }) => {
     await page.goto('/overview')
-    const bottomNav = page.locator('nav.fixed.bottom-0')
+    const bottomNav = page.getByRole('navigation', { name: 'Primary', exact: true })
+      .filter({ has: page.getByRole('button', { name: 'Open full navigation menu' }) })
     await expect(bottomNav).toBeVisible()
   })
 
-  test('client bottom nav has overview and requests, with Messages hidden by default', async ({ page }) => {
+  test('client bottom nav has overview, requests and files, with Messages hidden by default', async ({ page }) => {
     await page.goto('/overview')
-    await expect(page.locator('nav.fixed.bottom-0 a[href="/overview"]')).toBeVisible()
-    await expect(page.locator('nav.fixed.bottom-0 a[href="/requests"]')).toBeVisible()
-    await expect(page.locator('nav.fixed.bottom-0 a[href="/messages"]')).toHaveCount(0)
+    const bottomNav = page.getByRole('navigation', { name: 'Primary', exact: true })
+      .filter({ has: page.getByRole('button', { name: 'Open full navigation menu' }) })
+    await expect(bottomNav.getByRole('link', { name: 'Overview', exact: true })).toBeVisible()
+    await expect(bottomNav.getByRole('link', { name: 'Requests', exact: true })).toBeVisible()
+    await expect(bottomNav.getByRole('link', { name: 'Files', exact: true })).toBeVisible()
+    await expect(bottomNav.locator('a[href="/messages"]')).toHaveCount(0)
+
+    await bottomNav.getByRole('button', { name: 'Open full navigation menu' }).click()
+    const moreMenu = page.getByRole('dialog', { name: 'More navigation' })
+    await expect(moreMenu).toBeVisible()
+    await expect(moreMenu.getByRole('link', { name: 'Notifications', exact: true })).toBeVisible()
+    await expect(moreMenu.getByRole('link', { name: 'How this works', exact: true })).toBeVisible()
+    await expect(moreMenu.getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
+    await expect(moreMenu.locator('a[href="/messages"]')).toHaveCount(0)
+    await expect(moreMenu.locator('a[href="/services"]')).toHaveCount(0)
   })
 
   test('requests page renders at 375px without horizontal overflow', async ({ page }) => {

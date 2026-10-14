@@ -25,6 +25,7 @@ import * as React from 'react'
 import useSWR from 'swr'
 import { Check, ChevronDown, Clock, Leaf, Pencil, X } from 'lucide-react'
 import { apiPath } from '@/lib/api'
+import { clientChoicesFromProposal } from '@/lib/slack/note-quality'
 import { useToast } from '@/components/tahi/toast'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Menu } from '@/components/tahi/menu'
@@ -88,6 +89,7 @@ import type {
 } from '@/app/(dashboard)/tasks/suggestions-types'
 
 const SUGGESTIONS_KEY = '/api/admin/task-suggestions?status=pending'
+const CLIENT_REQUIRED_LINE = 'Choose the client in Slack (Tweak)'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 const NO_TEMPLATES: readonly TaskTemplateOption[] = []
@@ -635,10 +637,12 @@ function SuggestionRow({
   // Only create rows carry a duplicate note (contract section 5); a match
   // this close needs a confirm before Approve is allowed to fire at all.
   const isCreateKind = suggestion.kind === 'create_task' || suggestion.kind === 'create_request'
+  const needsClientPick = isCreateKind && !suggestion.orgId && clientChoicesFromProposal(suggestion.proposal).length > 0
   const rowSimilar = isCreateKind ? similar : NO_SIMILAR
   const needsConfirm = needsApproveConfirm(rowSimilar)
 
   function handleApproveClick() {
+    if (needsClientPick) return
     if (needsConfirm) {
       setConfirmingForce(true)
       return
@@ -647,11 +651,13 @@ function SuggestionRow({
   }
 
   function handleConfirmForce() {
+    if (needsClientPick) return
     setConfirmingForce(false)
     onApproveForce(assigneeOverrideProposal())
   }
 
   function handleTweak() {
+    if (needsClientPick) return
     if (suggestion.kind === 'create_task') {
       onTweakCreate(assigneeOverrideProposal())
       return
@@ -682,7 +688,7 @@ function SuggestionRow({
           // contact cannot be approved until someone is picked, and a match at
           // or above SIMILAR_BLOCK needs the same inline confirm the button
           // itself requires rather than firing straight through.
-          if (!busy && !needsContactPick) handleApproveClick()
+          if (!busy && !needsContactPick && !needsClientPick) handleApproveClick()
         }
         else if (action === 'reject') { e.preventDefault(); onReject() }
       }}
@@ -728,6 +734,12 @@ function SuggestionRow({
       </div>
 
       <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-text)', fontWeight: 500 }}>{summary}</p>
+
+      {needsClientPick && (
+        <p role="status" style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+          {CLIENT_REQUIRED_LINE}
+        </p>
+      )}
 
       {isAssigneeKind && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -790,12 +802,12 @@ function SuggestionRow({
           iconLeft={<Check size={14} />}
           onClick={handleApproveClick}
           loading={busy}
-          disabled={busy || needsContactPick}
-          title={needsContactPick ? 'Pick a contact first' : undefined}
+          disabled={busy || needsContactPick || needsClientPick}
+          title={needsClientPick ? CLIENT_REQUIRED_LINE : needsContactPick ? 'Pick a contact first' : undefined}
         >
           {needsConfirm ? 'Approve anyway' : 'Approve'}
         </TahiButton>
-        <TahiButton variant="secondary" size="sm" iconLeft={<Pencil size={14} />} onClick={handleTweak} disabled={busy}>
+        <TahiButton variant="secondary" size="sm" iconLeft={<Pencil size={14} />} onClick={handleTweak} disabled={busy || needsClientPick} title={needsClientPick ? CLIENT_REQUIRED_LINE : undefined}>
           Tweak
         </TahiButton>
         <Menu
@@ -1048,6 +1060,10 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
         showToast('This looks like something that already exists', 'warning')
         return
       }
+      if (result.error === 'client_required') {
+        showToast(CLIENT_REQUIRED_LINE, 'warning')
+        return
+      }
       clearDuplicateWarning(suggestion.id)
       await mutate(
         current => current
@@ -1143,10 +1159,16 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
   }
 
   async function handleApproveAll(ids: string[]) {
-    setBusyIds(current => new Set([...current, ...ids]))
+    const readyIds = ids.filter(id => {
+      const suggestion = items.find(item => item.id === id)
+      return suggestion && (suggestion.orgId || clientChoicesFromProposal(suggestion.proposal).length === 0)
+    })
+    if (readyIds.length < ids.length) showToast(CLIENT_REQUIRED_LINE, 'warning')
+    if (readyIds.length === 0) return
+    setBusyIds(current => new Set([...current, ...readyIds]))
     try {
-      await removeOptimistically(ids, async () => {
-        const result = await decideBulk(ids, 'approve')
+      await removeOptimistically(readyIds, async () => {
+        const result = await decideBulk(readyIds, 'approve')
         const failed = result.results.filter(r => r.error)
         if (failed.length > 0) {
           showToast(`${result.results.length - failed.length} approved, ${failed.length} failed`, 'warning')
@@ -1159,7 +1181,7 @@ export function TasksSuggestions({ clients, peopleList, requests, onTaskCreated,
     } finally {
       setBusyIds(current => {
         const next = new Set(current)
-        for (const id of ids) next.delete(id)
+        for (const id of readyIds) next.delete(id)
         return next
       })
     }

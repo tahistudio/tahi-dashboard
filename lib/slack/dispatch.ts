@@ -57,6 +57,7 @@ import {
 import { DENIAL_LINE, resolveSlackIdentity, type SlackIdentity, type SlackLevel } from './identity'
 import { dispatchSlackDm, type SlackDmEvent } from './dm-hook'
 import { resolveBlockActionHandler, resolveViewSubmissionHandler } from './action-registry'
+import { slackHelpLine } from './intents'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -116,9 +117,9 @@ export const VIEW_SUBMISSION_ACK = { response_action: 'clear' } as const
 
 /** The one line a fresh assistant thread opens with, per level. */
 const WELCOME_LINES: Record<SlackLevel, string> = {
-  founder: 'Tell me what happened, typed or recorded, and I will draft the tasks and requests it should become. Nothing is created until you press a button.',
-  member: 'Tell me what happened, typed or recorded, and I will draft the work it should become for you to approve.',
-  client: 'Tell me what you need and I will draft the request. You confirm it before it reaches the studio.',
+  founder: slackHelpLine('founder'),
+  member: slackHelpLine('member'),
+  client: slackHelpLine('client'),
   unknown: DENIAL_LINE,
 }
 
@@ -132,6 +133,16 @@ export const ASSISTANT_PROMPTS: readonly SlackSuggestedPrompt[] = [
   { title: 'New request for a client', message: 'Request for ' },
   { title: 'What is waiting on me', message: 'What is waiting on me?' },
 ]
+
+/** Client welcomes make no filing promise before the request gate is checked. */
+export function promptsForLevel(level: SlackLevel): readonly SlackSuggestedPrompt[] {
+  if (level === 'unknown') return []
+  if (level === 'client') return [
+    { title: 'My requests', message: 'What is waiting on me?' },
+    { title: 'Due this week', message: 'What is due this week?' },
+  ]
+  return ASSISTANT_PROMPTS
+}
 
 /**
  * The fields of a Slack event this phase reads. Slack sends plenty more, and
@@ -151,6 +162,8 @@ export interface SlackEventLike {
   ts?: string
   event_ts?: string
   thread_ts?: string
+  /** app_home_opened identifies which app tab the person opened. */
+  tab?: string
   /** Present on anything the bot itself posted. */
   bot_id?: string
   bot_profile?: unknown
@@ -245,6 +258,12 @@ export function isHandledEvent(event: SlackEventLike | null | undefined): boolea
   // a file_shared naming no channel is ignored too, because where it was
   // shared cannot be told.
   if (event.type === 'file_shared') return isDmChannel(eventChannelId(event))
+
+  // New agent_view opens in Messages. Setting prompts spends no note/model
+  // work and posting no greeting avoids filling the DM on every tab open.
+  if (event.type === 'app_home_opened') {
+    return event.tab === 'messages' && isDmChannel(eventChannelId(event))
+  }
 
   // A fresh assistant thread: the welcome line and the suggested prompts.
   if (event.type === 'assistant_thread_started') return true
@@ -651,7 +670,17 @@ export async function handleAssistantThreadStarted(
   await postMessage({ channel, text: WELCOME_LINES[identity.level], threadTs })
 
   if (identity.level === 'unknown') return
-  await setSuggestedPrompts({ channelId: channel, threadTs, prompts: ASSISTANT_PROMPTS })
+  await setSuggestedPrompts({ channelId: channel, threadTs, prompts: promptsForLevel(identity.level) })
+}
+
+/** New agent_view prompts are channel-level: thread_ts must be omitted. */
+export async function handleAppHomeOpened(
+  identity: SlackIdentity,
+  event: SlackEventLike,
+): Promise<void> {
+  const channel = eventChannelId(event)
+  if (event.tab !== 'messages' || !isDmChannel(channel) || !channel || identity.level === 'unknown') return
+  await setSuggestedPrompts({ channelId: channel, prompts: promptsForLevel(identity.level) })
 }
 
 // ── What the routes call ─────────────────────────────────────────────────────
@@ -692,6 +721,11 @@ export async function handleSlackEvent(
 
   if (event.type === 'assistant_thread_started') {
     await handleAssistantThreadStarted(identity, event)
+    return
+  }
+
+  if (event.type === 'app_home_opened') {
+    await handleAppHomeOpened(identity, event)
     return
   }
 
