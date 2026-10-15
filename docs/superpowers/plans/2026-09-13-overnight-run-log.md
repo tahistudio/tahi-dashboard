@@ -1853,3 +1853,41 @@ file/line evidence are in docs/superpowers/audits/2026-10-14-t1-6-route-audit.md
 No commit, push, deploy, migration, production-data or secret operation.
 TASKS.md and STATUS.md are unchanged; HEAD remains a0273a34. No live,
 browser-rendered, mobile or dark-mode visual proof is claimed.
+
+## 2026-10-15, T1.6 batch D after batch B merge repairs (Codex)
+
+Started clean on chore/next20-n20d at 2061b8be, as requested. All six
+failure groups were stale tests, mocks or reviewed guard proofs (category a);
+no lost production guard or scope filter was found. Updated the real SQLite
+fixtures for custom_mrr_currency and capacity org columns, feature/admin
+mocks and FX freshness propagation. Added denial and SQL isolation assertions.
+
+The exact walk findings were the exchange-rates POST identity gap and three
+feature-proof gaps: exchange-rates POST, overview brief GET and brief refresh
+POST. Registered the deliberate exchange cron identity through an exact
+reviewed proof of the shared secret helper and checked session guards.
+Generic walk analysis is unchanged. Brief proofs validate the shared helper
+body and prepared context provenance, with negative guard/context cases.
+
+Brief GET now explicitly resolves permissions/scope and reuses them for its
+overview guard, canonical context, key and computation. Refresh uses the same
+resolved access for its overview guard and context. Removed the unused
+resolveBriefCacheKey resolver; canonical scoped key remains
+overview_brief_latest:df515f7f. Strict call/message filters and the scoped
+contactOrgIds author lookup in lib/messages-store.ts remain unchanged.
+Escaped one existing JSX apostrophe in webhook settings to clear lint,
+without changing the rendered text. Independent QA reviews passed.
+
+Final gates: npm run type-check, MCP worker tsc and cron worker tsc exit 0.
+CI=true npm run lint exits 0 with existing warnings. Standard targeted/full
+npm run test commands fail before collection with esbuild spawn EPERM.
+The tracked scripts/run-vitest-sandbox.mjs runs the same assertions through
+worker threads and TypeScript transforms: six files / 345 tests passed in
+5.35s; full suite 502 files / 9625 tests passed in 135.91s. Raw logs are in
+.claude/n20d-merge-gates/ (gitignored). git diff --check and added-code rule
+checks pass. The fallback runner uses a separate transform from normal Vite;
+its pass is reported distinctly from the blocked standard command.
+
+No commit, push, deploy, migration, production data or secret operation.
+TASKS.md, STATUS.md and DECISIONS.md are unchanged. HEAD remains 2061b8be.
+No live QA or visual proof is claimed for this explicitly local repair task.

@@ -11,7 +11,7 @@
  *      handler self-gates: it only regenerates when the NZ local hour is 7 or 8
  *      AND the cache is stale (> 3h old). The off-cycle fire is a no-op, so the
  *      brief is produced exactly once each morning. Mirrors the AI briefing cron.
- *   2. A live admin (session, or ?force=1), which ALWAYS regenerates on demand —
+ *   2. A live admin (session, or ?force=1), which ALWAYS regenerates on demand;
  *      this is what the card's manual "Refresh" control posts.
  *
  * Auth: admin session OR cron secret (same pattern as the other cron routes).
@@ -53,8 +53,6 @@ export async function POST(req: NextRequest) {
   if (!hasCronAuth) {
     const auth = await getRequestAuth(req)
     if (!isTahiAdmin(auth.orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const denied = await requireFeature(auth, 'overview')
-    if (denied) return denied
     sessionAuth = auth
   }
 
@@ -93,6 +91,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const context = await resolveBriefContext(database, computeAuth)
+    if (sessionAuth) {
+      const denied = await requireFeature(sessionAuth, 'overview', context.access)
+      if (denied) return denied
+    }
     const result = await computeBrief(database, computeAuth, context)
     const generatedAt = new Date().toISOString()
     // Cache under the scope that produced it. The cron's unrestricted owner

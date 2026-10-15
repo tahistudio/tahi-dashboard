@@ -2,6 +2,8 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireFeature } from '@/lib/require-feature'
+import { resolvePermissions } from '@/lib/permissions'
+import { resolveAccessScoping } from '@/lib/access-scoping'
 import { computeBrief, readBriefCache, writeBriefCache, isBriefFresh, sweepStaleBriefCache, resolveBriefContext, type D1 } from '@/lib/overview-brief'
 
 export const dynamic = 'force-dynamic'
@@ -11,17 +13,18 @@ export async function GET(req: NextRequest) {
   if (!isTahiAdmin(auth.orgId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  const denied = await requireFeature(auth, 'overview')
-  if (denied) return denied
-
   const database = await db()
   const drizzle = database as D1
+  const access = await resolvePermissions(drizzle, auth)
+  const denied = await requireFeature(auth, 'overview', access)
+  if (denied) return denied
+  const allowedOrgs = await resolveAccessScoping(drizzle, auth.userId)
   const now = new Date()
 
   // One resolve of the caller's permissions and org scope, used for both the
   // cache key and (on a miss) computeBrief itself. Resolving twice put a
   // handful of D1 queries on the previously pure cache-read path.
-  const context = await resolveBriefContext(drizzle, auth)
+  const context = await resolveBriefContext(drizzle, auth, { access, allowedOrgs })
   const { cacheKey } = context
 
   const cached = await readBriefCache(drizzle, cacheKey)

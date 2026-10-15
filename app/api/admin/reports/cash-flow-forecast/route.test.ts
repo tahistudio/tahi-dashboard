@@ -6,7 +6,10 @@ import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getRequestAuth } from '@/lib/server-auth'
+import { requireAdmin } from '@/lib/require-admin'
 import { requireFeature } from '@/lib/require-feature'
+import { computeCashPosition } from '@/lib/cash-position'
+import type { FxFreshness } from '@/lib/fx-freshness'
 import { GET } from './route'
 
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
@@ -15,9 +18,13 @@ vi.mock('@/lib/server-auth', () => ({
   isTahiAdmin: (orgId: string | null) => orgId === 'org-tahi',
 }))
 vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn() }))
+vi.mock('@/lib/require-admin', () => ({ requireAdmin: vi.fn() }))
 vi.mock('@/lib/cash-position', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/cash-position')>(),
-  computeCashPosition: vi.fn().mockResolvedValue({ projectRunRateNzd: 700 }),
+  computeCashPosition: vi.fn().mockImplementation((_database: unknown, options: { rateFreshness?: FxFreshness }) => Promise.resolve({
+    projectRunRateNzd: 700,
+    fxFreshness: options.rateFreshness,
+  })),
 }))
 
 let sqlite: DatabaseSync
@@ -26,11 +33,12 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-10-14T00:00:00.000Z'))
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'owner', orgId: 'org-tahi', sessionId: null })
+  vi.mocked(requireAdmin).mockResolvedValue(null)
   vi.mocked(requireFeature).mockResolvedValue(null)
   sqlite = new DatabaseSync(':memory:')
   sqlite.exec(`
     CREATE TABLE exchange_rates (currency TEXT, rate_to_usd REAL, updated_at TEXT);
-    INSERT INTO exchange_rates VALUES ('NZD', 2, 'now'), ('USD', 1, 'now');
+    INSERT INTO exchange_rates VALUES ('NZD', 2, '2026-10-14T00:00:00.000Z'), ('USD', 1, '2026-10-14T00:00:00.000Z');
     CREATE TABLE organisations (custom_mrr REAL, custom_mrr_currency TEXT, preferred_currency TEXT, status TEXT, retainer_start_date TEXT, retainer_end_date TEXT);
     INSERT INTO organisations VALUES
       (1000, 'NZD', 'USD', 'active', NULL, '2026-11-30'),
@@ -69,6 +77,7 @@ describe('GET cash-flow forecast with real SQLite', () => {
     const response = await GET(request())
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({
+      fxFreshness: { updatedAt: '2026-10-14T00:00:00.000Z', ageDays: 0, stale: false, warning: null },
       months: [
         { month: '2026-10', revenueRetainer: 2000, revenueProject: 700, revenuePipeline: 500, revenue: 3200 },
         { month: '2026-11', revenueRetainer: 2200, revenueProject: 700, revenuePipeline: 550, revenue: 3450 },
@@ -86,6 +95,27 @@ describe('GET cash-flow forecast with real SQLite', () => {
     vi.mocked(requireFeature).mockResolvedValue(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
     expect((await GET(request())).status).toBe(403)
     expect(db).not.toHaveBeenCalled()
+    expect(requireFeature).toHaveBeenCalledWith({ userId: 'owner', orgId: 'org-tahi' }, 'financial_reports')
+  })
+
+  it('refuses non-admin team members before checking financial reports permission or reading money', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
+    expect((await GET(request())).status).toBe(403)
+    expect(requireAdmin).toHaveBeenCalledWith({ userId: 'owner', orgId: 'org-tahi' })
+    expect(requireFeature).not.toHaveBeenCalled()
+    expect(db).not.toHaveBeenCalled()
+  })
+
+  it('passes stale exchange-rate warnings through the cash position to the forecast response', async () => {
+    sqlite.exec("UPDATE exchange_rates SET updated_at = '2026-10-01T00:00:00.000Z'")
+    const response = await GET(request())
+    expect(response.status).toBe(200)
+    const expectedFreshness = {
+      updatedAt: '2026-10-01T00:00:00.000Z', ageDays: 13, stale: true,
+      warning: expect.stringContaining('Exchange rates were last refreshed 13 days ago'),
+    }
+    expect(computeCashPosition).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ rateFreshness: expectedFreshness }))
+    expect(await response.json()).toMatchObject({ fxFreshness: expectedFreshness })
   })
 
   it('keeps overdue open deals in the current month while respecting delayed recurring starts and future closes', async () => {
@@ -112,6 +142,7 @@ describe('GET cash-flow forecast with real SQLite', () => {
     vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'client', orgId: 'org-client', sessionId: null })
     expect((await GET(request())).status).toBe(403)
     expect(db).not.toHaveBeenCalled()
+    expect(requireAdmin).not.toHaveBeenCalled()
     expect(requireFeature).not.toHaveBeenCalled()
   })
 })

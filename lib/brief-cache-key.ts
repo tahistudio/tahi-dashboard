@@ -17,11 +17,6 @@
  * never overwrite each other.
  */
 
-import { resolveAccessScoping } from '@/lib/access-scoping'
-import { resolvePermissions, can } from '@/lib/permissions'
-
-type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
-
 /** The feature gates computeBrief reads. A brief is only the same brief when
  *  the same set of these was granted. */
 export const BRIEF_FEATURES: readonly string[] = [
@@ -86,19 +81,4 @@ export function briefCacheKeyForFingerprint(baseKey: string, fingerprint: string
   return fingerprint === unrestrictedFingerprint()
     ? baseKey
     : `${baseKey}:${hashScope(fingerprint)}`
-}
-
-/**
- * Resolve the cache key for a live caller. Runs the same two resolvers
- * computeBrief runs, so the key and the brief always describe the same scope.
- */
-export async function resolveBriefCacheKey(
-  drizzle: D1,
-  auth: { userId: string | null; orgId: string | null },
-  baseKey: string,
-): Promise<string> {
-  const access = await resolvePermissions(drizzle, auth)
-  const features = BRIEF_FEATURES.filter((feature) => can(access, feature))
-  const allowedOrgs = await resolveAccessScoping(drizzle, auth.userId)
-  return briefCacheKeyForFingerprint(baseKey, briefScopeFingerprint(allowedOrgs, features))
 }

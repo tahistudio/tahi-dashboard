@@ -327,6 +327,7 @@ beforeEach(() => {
   vi.stubEnv('CRON_SECRET', '')
   fixture = permissionSqlite(TABLES, [
     'ALTER TABLE organisations ADD COLUMN custom_mrr integer',
+    "ALTER TABLE organisations ADD COLUMN custom_mrr_currency text DEFAULT 'NZD'",
     'ALTER TABLE organisations ADD COLUMN billing_model text',
     'ALTER TABLE organisations ADD COLUMN retainer_start_date text',
     'ALTER TABLE organisations ADD COLUMN retainer_end_date text',

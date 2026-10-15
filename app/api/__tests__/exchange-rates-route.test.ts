@@ -1,19 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { drizzle, type AnyD1Database } from 'drizzle-orm/d1'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 vi.mock('@/lib/server-auth', () => ({
   getRequestAuth: vi.fn().mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' }),
   isTahiAdmin: vi.fn((orgId: string | null) => orgId === 'org_tahi'),
 }))
 vi.mock('@/lib/db', () => ({ db: vi.fn() }))
+vi.mock('@/lib/require-feature', () => ({ requireFeature: vi.fn() }))
 vi.mock('@/lib/cron-runs', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/cron-runs')>()), logCronRun: vi.fn(),
 }))
 
 import { db } from '@/lib/db'
 import { getRequestAuth } from '@/lib/server-auth'
+import { requireFeature } from '@/lib/require-feature'
 import { logCronRun } from '@/lib/cron-runs'
 import { GET, POST } from '@/app/api/admin/exchange-rates/route'
 
@@ -92,6 +94,7 @@ beforeEach(() => {
   vi.stubEnv('TAHI_CRON_SECRET', 'fixture-cron-secret')
   vi.stubEnv('CRON_SECRET', '')
   vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi' } as never)
+  vi.mocked(requireFeature).mockResolvedValue(null)
   fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(provider()))
   vi.stubGlobal('fetch', fetchMock)
   seed()
@@ -115,6 +118,7 @@ describe('exchange rate refresh authorization and scheduling', () => {
 
     expect(response.status).toBe(200)
     expect(getRequestAuth).toHaveBeenCalledTimes(1)
+    expect(requireFeature).toHaveBeenCalledWith({ userId: 'user_admin', orgId: 'org_tahi' }, 'financial_reports')
     expect(batch).toHaveBeenCalledTimes(1)
     expect(batch.mock.calls[0][0]).toHaveLength(10)
     expect(cachedRates()).toEqual(Object.entries(RATES).sort(([a], [b]) => a.localeCompare(b)).map(([currency, rate]) => ({
@@ -134,6 +138,19 @@ describe('exchange rate refresh authorization and scheduling', () => {
     vi.mocked(getRequestAuth).mockRejectedValue(new Error('No browser session'))
     expect((await POST(request(headers))).status).toBe(200)
     expect(getRequestAuth).not.toHaveBeenCalled()
+    expect(requireFeature).not.toHaveBeenCalled()
+  })
+
+  it.each([GET, POST])('propagates financial-report denial before reading or refreshing rates', async handler => {
+    const denied = NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    vi.mocked(requireFeature).mockResolvedValue(denied)
+
+    expect(await handler(request())).toBe(denied)
+    expect(requireFeature).toHaveBeenCalledWith({ userId: 'user_admin', orgId: 'org_tahi' }, 'financial_reports')
+    expect(db).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(batch).not.toHaveBeenCalled()
+    expect(logCronRun).not.toHaveBeenCalled()
   })
 
   it('rejects a client with an incorrect cron secret before fetching or writing', async () => {

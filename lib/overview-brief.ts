@@ -46,9 +46,10 @@ export interface BriefSnapshot extends BriefResult {
 export async function resolveBriefContext(
   drizzle: D1,
   auth: { userId: string | null; orgId: string | null },
+  prepared?: { access: ResolvedAccess; allowedOrgs: string[] | null },
 ): Promise<{ access: ResolvedAccess; allowedOrgs: string[] | null; cacheKey: string }> {
-  const access = await resolvePermissions(drizzle, auth)
-  const allowedOrgs = await resolveAccessScoping(drizzle, auth.userId)
+  const access = prepared?.access ?? await resolvePermissions(drizzle, auth)
+  const allowedOrgs = prepared ? prepared.allowedOrgs : await resolveAccessScoping(drizzle, auth.userId)
   const features = BRIEF_FEATURES.filter(feature => can(access, feature))
   const cacheKey = briefCacheKeyForFingerprint(BRIEF_CACHE_KEY, briefScopeFingerprint(allowedOrgs, features))
   return { access, allowedOrgs, cacheKey }
@@ -80,10 +81,8 @@ function plural(n: number, one: string, many: string): string {
 export async function computeBrief(
   drizzle: D1,
   auth: { userId: string | null; orgId: string | null },
-  // The GET resolves both of these to build the cache key, so it hands them
-  // back rather than paying for a second resolvePermissions +
-  // resolveAccessScoping round on every cache miss. Omitted by the cron and
-  // the refresh endpoint, which resolve nothing up front.
+  // GET and refresh pass their shared context so the computation and cache key
+  // use one permission and scope snapshot.
   prepared?: { access: ResolvedAccess; allowedOrgs: string[] | null },
 ): Promise<BriefResult> {
   const access = prepared?.access ?? await resolvePermissions(drizzle, auth)

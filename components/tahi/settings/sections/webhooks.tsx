@@ -140,7 +140,7 @@ function AddEndpointDialog({
           {secret ? (
             <>
               <p className="dlg-warn" style={{ marginTop: 0 }}>
-                Copy this signing secret now and store it securely. You won't see this again after closing this dialog.
+                Copy this signing secret now and store it securely. You won&apos;t see this again after closing this dialog.
                 Use it to verify webhook signatures at your endpoint.
               </p>
               <div className="set-field">

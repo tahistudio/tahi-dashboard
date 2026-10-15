@@ -773,6 +773,7 @@ function querySourcesGuarded(index: SourceIndex, declaration: Declaration, trust
 
 function reviewedMixedSources(index: SourceIndex, declaration: Declaration, key: string): boolean {
   if (key === 'GET /api/admin/health') return reviewedLiveness(index, declaration)
+  if (key === 'POST /api/admin/exchange-rates') return reviewedAlternateIdentity(index, declaration, key)
   const messaging = reviewedMessagingSources(index, declaration, key)
   if (messaging) return true
   if (['GET /api/admin/overview', 'GET /api/admin/overview/me', 'GET /api/admin/overview/replies-waiting', 'GET /api/admin/overview/wire'].includes(key)) {
@@ -782,11 +783,70 @@ function reviewedMixedSources(index: SourceIndex, declaration: Declaration, key:
     const brief = readSource(join(ROOT, 'lib/overview-brief.ts'))
     const compute = brief.exports.get('computeBrief')
     if (!compute || !querySourcesGuarded(brief, compute, ['auth'])) return false
-    if (!callsNamed(index, declaration, 'computeBrief', '@/lib/overview-brief').length) return false
-    return key.startsWith('GET')
-      ? callsNamed(index, declaration, 'briefScopeFingerprint', '@/lib/brief-cache-key').length === 1
+    const resolver = brief.exports.get('resolveBriefContext')
+    if (!resolver) return false
+    const fingerprint = callsNamed(brief, resolver, 'briefScopeFingerprint', '@/lib/brief-cache-key')
+    const keys = callsNamed(brief, resolver, 'briefCacheKeyForFingerprint', '@/lib/brief-cache-key')
+    const featureFilter = callsNamed(brief, resolver, 'can', '@/lib/permissions')
+    const featureBinding = nodesWhere(resolver, ts.isVariableDeclaration).find(binding => ts.isIdentifier(binding.name) && binding.name.text === 'features')
+    const featureList = featureBinding?.initializer ? unwrap(featureBinding.initializer) : undefined
+    if (fingerprint.length !== 1 || keys.length !== 1 || featureFilter.length !== 1
+      || expressionKey(fingerprint[0].arguments[0]) !== 'allowedOrgs' || expressionKey(fingerprint[0].arguments[1]) !== 'features'
+      || expressionKey(keys[0].arguments[0]) !== 'BRIEF_CACHE_KEY' || keys[0].arguments[1] !== fingerprint[0]
+      || expressionKey(featureFilter[0].arguments[0]) !== 'access' || expressionKey(featureFilter[0].arguments[1]) !== 'feature'
+      || !featureList || !ts.isCallExpression(featureList) || expressionKey(featureList.expression) !== 'BRIEF_FEATURES.filter'
+      || !featureList.arguments[0] || !ts.isArrowFunction(featureList.arguments[0]) || featureList.arguments[0].body !== featureFilter[0]
+      || !nodesWhere(resolver, ts.isVariableDeclaration).some(binding => ts.isIdentifier(binding.name) && binding.name.text === 'cacheKey'
+        && binding.initializer && unwrap(binding.initializer) === keys[0])
+      || !callsNamed(brief, resolver, 'resolvePermissions', '@/lib/permissions').some(call => expressionKey(call.arguments[1]) === 'auth')
+      || !callsNamed(brief, resolver, 'resolveAccessScoping', '@/lib/access-scoping').some(call => expressionKey(call.arguments[1]) === 'auth.userId')
+      || !nodesWhere(resolver, ts.isReturnStatement).some(result => result.expression && ts.isObjectLiteralExpression(result.expression)
+        && ['access', 'allowedOrgs', 'cacheKey'].every(name => result.expression && ts.isObjectLiteralExpression(result.expression)
+          && result.expression.properties.some(property => ts.isShorthandPropertyAssignment(property) && property.name.text === name)))) return false
+    const contexts = callsNamed(index, declaration, 'resolveBriefContext', '@/lib/overview-brief')
+    const computations = callsNamed(index, declaration, 'computeBrief', '@/lib/overview-brief')
+    if (contexts.length !== 1 || computations.length !== 1 || expressionKey(computations[0].arguments[2]) !== 'context'
+      || expressionKey(contexts[0].arguments[1]) !== expressionKey(computations[0].arguments[1])
+      || !nodesWhere(declaration, ts.isVariableDeclaration).some(binding => ts.isIdentifier(binding.name) && binding.name.text === 'context'
+        && binding.initializer && unwrap(binding.initializer) === contexts[0])
+      || !nodesWhere(declaration, ts.isVariableDeclaration).some(binding => ts.isObjectBindingPattern(binding.name)
+        && expressionKey(binding.initializer ?? ts.factory.createNull()) === 'context'
+        && binding.name.elements.some(element => ts.isIdentifier(element.name) && element.name.text === 'cacheKey'))
+      || !callsNamed(index, declaration, 'writeBriefCache', '@/lib/overview-brief').every(call => expressionKey(call.arguments[3]) === 'cacheKey')) return false
+    if (key.startsWith('GET')) {
+      const prepared = contexts[0].arguments[2]
+      const denial = nodesWhere(declaration, ts.isIfStatement).find(branch => expressionKey(branch.expression) === 'denied'
+        && returns(branch.thenStatement).some(result => expressionKey(result.expression ?? ts.factory.createNull()) === 'denied'))
+      return identityGuarded(index, declaration) && expressionKey(contexts[0].arguments[1]) === 'auth'
+        && nodesWhere(declaration, ts.isVariableDeclaration).some(binding => ts.isIdentifier(binding.name) && binding.name.text === 'access'
+          && binding.initializer && callsNamed(index, binding, 'resolvePermissions', '@/lib/permissions').some(call => unwrap(binding.initializer!) === call
+            && expressionKey(call.arguments[1]) === 'auth'))
+        && nodesWhere(declaration, ts.isVariableDeclaration).some(binding => ts.isIdentifier(binding.name) && binding.name.text === 'allowedOrgs'
+          && binding.initializer && callsNamed(index, binding, 'resolveAccessScoping', '@/lib/access-scoping').some(call => unwrap(binding.initializer!) === call
+            && expressionKey(call.arguments[1]) === 'auth.userId'))
+        && !!prepared && ts.isObjectLiteralExpression(prepared)
+        && ['access', 'allowedOrgs'].every(name => prepared.properties.some(property => ts.isShorthandPropertyAssignment(property) && property.name.text === name))
+        && checkedNamedCalls(index, declaration, 'requireFeature') === 1
+        && callsNamed(index, declaration, 'requireFeature', '@/lib/require-feature').some(call => expressionKey(call.arguments[0]) === 'auth'
+          && ts.isStringLiteral(call.arguments[1]) && call.arguments[1].text === 'overview' && expressionKey(call.arguments[2]) === 'access')
+        && !!denial && ['readBriefCache', 'computeBrief', 'writeBriefCache'].every(name =>
+          callsNamed(index, declaration, name, '@/lib/overview-brief').every(call => call.pos > denial.end))
         && callsNamed(index, declaration, 'readBriefCache', '@/lib/overview-brief').some(call => expressionKey(call.arguments[1]) === 'cacheKey')
-      : callsNamed(index, declaration, 'resolveBriefCacheKey', '@/lib/brief-cache-key').length === 1
+    }
+    const session = nodesWhere(declaration, ts.isIfStatement).find(branch => expressionKey(branch.expression) === 'sessionAuth')
+    const computeAuth = nodesWhere(declaration, ts.isVariableDeclaration).find(binding => ts.isIdentifier(binding.name) && binding.name.text === 'computeAuth')
+    const identity = computeAuth?.initializer ? unwrap(computeAuth.initializer) : undefined
+    return identityGuarded(index, declaration) && expressionKey(contexts[0].arguments[1]) === 'computeAuth'
+      && !!identity && ts.isBinaryExpression(identity) && identity.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+      && expressionKey(identity.left) === 'sessionAuth' && ts.isObjectLiteralExpression(identity.right)
+      && identity.right.properties.some(property => ts.isPropertyAssignment(property) && property.name.getText() === 'userId'
+        && ts.isStringLiteral(property.initializer) && property.initializer.text === 'api-service')
+      && identity.right.properties.some(property => ts.isPropertyAssignment(property) && property.name.getText() === 'orgId'
+        && ts.isBinaryExpression(property.initializer) && property.initializer.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+        && expressionKey(property.initializer.left) === 'process.env.NEXT_PUBLIC_TAHI_ORG_ID' && property.initializer.right.kind === ts.SyntaxKind.NullKeyword)
+      && contexts[0].arguments.length === 2 && !!session && checkedNamedCalls(index, session, 'requireFeature') === 1
+      && callsNamed(index, session, 'requireFeature', '@/lib/require-feature').some(call => expressionKey(call.arguments[0]) === 'sessionAuth'
+        && ts.isStringLiteral(call.arguments[1]) && call.arguments[1].text === 'overview' && expressionKey(call.arguments[2]) === 'context.access')
   }
   if (key === 'GET /api/admin/guide') {
     return [...index.imports.values()].every(value => ['@/lib/require-feature', '@/lib/server-auth', 'next/server', '@/lib/dashboard-guide'].includes(value.module))
@@ -898,6 +958,24 @@ function reviewedAlternateIdentity(index: SourceIndex, declaration: Declaration,
   if (key === 'GET /api/admin/health') return reviewedLiveness(index, declaration)
   const calls = nodesWhere(declaration, ts.isCallExpression)
   const branches = nodesWhere(declaration, ts.isIfStatement)
+  if (key === 'POST /api/admin/exchange-rates') {
+    const browser = branches.find(branch => {
+      const condition = unwrap(branch.expression)
+      if (!ts.isPrefixUnaryExpression(condition) || condition.operator !== ts.SyntaxKind.ExclamationToken) return false
+      const call = unwrap(condition.operand)
+      if (!ts.isCallExpression(call)) return false
+      const imported = importedCall(index, call)
+      return imported?.module === '@/lib/cron-runs' && imported.name === 'hasCronSecretAuth'
+        && call.arguments.length === 1 && expressionKey(call.arguments[0]) === 'req'
+    })
+    if (!browser || !ts.isBlock(browser.thenStatement) || !ts.isFunctionDeclaration(declaration)
+      || declaration.body?.statements[0] !== browser) return false
+    const browserFunction = ts.factory.createArrowFunction(undefined, undefined, [], undefined, undefined, browser.thenStatement)
+    return identityGuarded(index, browserFunction) && guarded(index, browserFunction)
+      && checkedNamedCalls(index, browserFunction, 'requireFeature') === 1
+      && callsNamed(index, browserFunction, 'requireFeature', '@/lib/require-feature').some(call =>
+        ts.isStringLiteral(call.arguments[1]) && call.arguments[1].text === 'financial_reports')
+  }
   if (['GET /api/admin/cron/draft-approved-ideas', 'POST /api/admin/cron/draft-approved-ideas'].includes(key)) {
     return returnedStatus(declaration, '410') && calls.length === 1 && [...index.imports.values()].every(value => value.module === 'next/server')
   }
@@ -1145,6 +1223,48 @@ function sample(text: string): SourceIndex {
 }
 
 describe('admin HTTP method guard walk', () => {
+  it.each([
+    { name: 'checked session guards', studio: true, feature: 'checked', key: 'financial_reports', early: false, accepted: true },
+    { name: 'missing studio identity', studio: false, feature: 'checked', key: 'financial_reports', early: false, accepted: false },
+    { name: 'unchecked feature denial', studio: true, feature: 'unchecked', key: 'financial_reports', early: false, accepted: false },
+    { name: 'missing feature guard', studio: true, feature: 'missing', key: 'financial_reports', early: false, accepted: false },
+    { name: 'an unrelated feature guard', studio: true, feature: 'checked', key: 'tasks', early: false, accepted: false },
+    { name: 'an early successful return', studio: true, feature: 'checked', key: 'financial_reports', early: true, accepted: false },
+  ])('reviews the exchange-rate cron identity with $name', ({ studio, feature, key, early, accepted }) => {
+    const index = sample(`
+      import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
+      import { hasCronSecretAuth } from '@/lib/cron-runs'
+      import { requireFeature } from '@/lib/require-feature'
+      export async function POST(req: Request) {
+        ${early ? 'return Response.json({ secret: true })' : ''}
+        if (!hasCronSecretAuth(req)) {
+          const auth = await getRequestAuth(req)
+          ${studio ? "if (!isTahiAdmin(auth.orgId)) return Response.json({}, { status: 403 })" : ''}
+          ${feature === 'missing' ? '' : `const denied = await requireFeature(auth, '${key}')`}
+          ${feature === 'checked' ? 'if (denied) return denied' : ''}
+        }
+        return Response.json({ ok: true })
+      }
+    `)
+    const declaration = index.exports.get('POST')!
+    expect(reviewedAlternateIdentity(index, declaration, 'POST /api/admin/exchange-rates')).toBe(accepted)
+    expect(reviewedMixedSources(index, declaration, 'POST /api/admin/exchange-rates')).toBe(accepted)
+  })
+
+  it.each([
+    { name: 'the shared prepared context', before: '', after: '', accepted: true },
+    { name: 'missing prepared context', before: 'auth, { access, allowedOrgs }', after: 'auth', accepted: false },
+    { name: 'forged prepared permissions', before: 'auth, { access, allowedOrgs }', after: 'auth, { access: {}, allowedOrgs }', accepted: false },
+    { name: 'missing compute context', before: 'computeBrief(drizzle, auth, context)', after: 'computeBrief(drizzle, auth)', accepted: false },
+    { name: 'a mismatched compute context', before: 'computeBrief(drizzle, auth, context)', after: 'computeBrief(drizzle, auth, otherContext)', accepted: false },
+    { name: 'an unscoped cache read', before: 'readBriefCache(drizzle, cacheKey)', after: 'readBriefCache(drizzle)', accepted: false },
+    { name: 'an early cache read', before: "const denied = await requireFeature(auth, 'overview', access)", after: "await readBriefCache(drizzle, cacheKey)\n  const denied = await requireFeature(auth, 'overview', access)", accepted: false },
+  ])('reviews the brief with $name', ({ before, after, accepted }) => {
+    const source = readFileSync(join(ROOT, 'app/api/admin/overview/brief/route.ts'), 'utf8')
+    const index = sample(before ? source.replace(before, after) : source)
+    expect(reviewedMixedSources(index, index.exports.get('GET')!, 'GET /api/admin/overview/brief')).toBe(accepted)
+  })
+
   it.each([
     { name: 'mutated service identity after a real studio check', identity: true, body: `
       const auth = await getRequestAuth(req)

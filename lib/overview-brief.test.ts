@@ -10,6 +10,7 @@ import {
   computeBrief,
   isBriefFresh,
   readBriefCache,
+  resolveBriefContext,
   sweepStaleBriefCache,
   writeBriefCache,
   type BriefResult,
@@ -135,6 +136,32 @@ describe('overview brief freshness after the helper move', () => {
 })
 
 describe('overview brief cache helpers', () => {
+  it('resolves one canonical context and keeps the scoped fingerprint stable', async () => {
+    const { handle } = makeDb()
+    const resolved = access(['requests'])
+    vi.mocked(resolvePermissions).mockResolvedValue(resolved)
+    vi.mocked(resolveAccessScoping).mockResolvedValue(['org-a'])
+
+    expect(await resolveBriefContext(handle, AUTH)).toEqual({
+      access: resolved,
+      allowedOrgs: ['org-a'],
+      cacheKey: 'overview_brief_latest:df515f7f',
+    })
+    expect(resolvePermissions).toHaveBeenCalledExactlyOnceWith(handle, AUTH)
+    expect(resolveAccessScoping).toHaveBeenCalledExactlyOnceWith(handle, AUTH.userId)
+  })
+
+  it('uses the explicit route snapshot without resolving permissions or scope again', async () => {
+    const { handle } = makeDb()
+    const prepared = { access: access(['requests']), allowedOrgs: ['org-a'] }
+    expect(await resolveBriefContext(handle, AUTH, prepared)).toEqual({
+      ...prepared,
+      cacheKey: 'overview_brief_latest:df515f7f',
+    })
+    expect(resolvePermissions).not.toHaveBeenCalled()
+    expect(resolveAccessScoping).not.toHaveBeenCalled()
+  })
+
   it('keeps the owner key and scoped key separate on both reads and atomic upserts', async () => {
     const { handle, queries, writes } = makeDb()
     const scopedKey = briefCacheKeyForFingerprint(BRIEF_CACHE_KEY, briefScopeFingerprint(['org-a'], ['requests']))
@@ -206,8 +233,22 @@ describe('computeBrief permission and organisation scope', () => {
     expect(queries.filter(query => query.table !== schema.exchangeRates).map(query => query.table)).toEqual(Array(count).fill(table))
     for (const query of queries.filter(query => query.table === table)) {
       const predicate = dialect.sqlToQuery(query.condition!)
-      expect(predicate.sql).toContain('"org_id" in (?)')
-      expect(predicate.params).toContain('org-a')
+      if (feature === 'calls') {
+        for (const parent of ['discovery_calls', 'deals', 'requests', 'tasks']) {
+          expect(predicate.sql).toContain(`"${parent}"."org_id" IN ('org-a')`)
+        }
+        expect(predicate.params).not.toContain('org-a')
+      } else if (feature === 'messages') {
+        // Request-linked replies also require the requests feature. A messages
+        // grant alone cannot expose their stored org or their parent request.
+        expect(predicate.sql).toContain('0 = 1 AND (')
+        expect(predicate.sql).toContain('message_request.id = "messages"."request_id"')
+        expect(predicate.sql).toContain('AND 0 = 1')
+        expect(predicate.params).not.toContain('org-a')
+      } else {
+        expect(predicate.sql).toContain('"org_id" in (?)')
+        expect(predicate.params).toContain('org-a')
+      }
     }
   })
 
@@ -220,14 +261,26 @@ describe('computeBrief permission and organisation scope', () => {
 
   it('filters calls and overnight client replies to the same allowed organisations', async () => {
     const { handle, queries } = makeDb()
-    await computeBrief(handle, AUTH, { access: access(['calls', 'messages']), allowedOrgs: ['org-a', 'org-b'] })
+    await computeBrief(handle, AUTH, { access: access(['calls', 'messages', 'requests']), allowedOrgs: ['org-a', 'org-b'] })
 
     for (const table of [schema.discoveryCalls, schema.messages]) {
       const query = queries.find(query => query.table === table)
       expect(query).toBeDefined()
       const predicate = dialect.sqlToQuery(query!.condition!)
-      expect(predicate.sql).toContain('"org_id" in (?, ?)')
-      expect(predicate.params.slice(-2)).toEqual(['org-a', 'org-b'])
+      if (table === schema.discoveryCalls) {
+        for (const parent of ['discovery_calls', 'deals', 'requests', 'tasks']) {
+          expect(predicate.sql).toContain(`"${parent}"."org_id" IN ('org-a','org-b')`)
+        }
+        for (const parent of ['deal_id', 'request_id', 'task_id']) {
+          expect(predicate.sql).toContain(`"discovery_calls"."${parent}" is null or`)
+        }
+      } else {
+        expect(predicate.sql).toContain('"messages"."org_id" IN (\'org-a\',\'org-b\')')
+        expect(predicate.sql).toContain('"messages"."request_id" IS NULL OR EXISTS (')
+        expect(predicate.sql).toContain('message_request.id = "messages"."request_id" AND message_request.org_id IN (\'org-a\',\'org-b\')')
+      }
+      expect(predicate.params).not.toContain('org-a')
+      expect(predicate.params).not.toContain('org-b')
     }
   })
 
@@ -276,7 +329,7 @@ describe('GET overview brief after the helper move', () => {
     expect(dialect.sqlToQuery(queries[0].condition!).params).toEqual([BRIEF_CACHE_KEY])
     expect(writes).toEqual([])
     expect(deletes).toEqual([])
-    expect(resolvePermissions).toHaveBeenCalledTimes(2)
+    expect(resolvePermissions).toHaveBeenCalledTimes(1)
     expect(resolveAccessScoping).toHaveBeenCalledTimes(1)
   })
 
@@ -294,7 +347,7 @@ describe('GET overview brief after the helper move', () => {
     expect(dialect.sqlToQuery(queries[0].condition!).params).toEqual([scopedKey])
     expect(writes.map(write => write.row.key)).toEqual([scopedKey])
     expect(cache.get(BRIEF_CACHE_KEY)).toEqual(ownerRow)
-    expect(resolvePermissions).toHaveBeenCalledTimes(2)
+    expect(resolvePermissions).toHaveBeenCalledTimes(1)
     expect(resolveAccessScoping).toHaveBeenCalledTimes(1)
   })
 
@@ -320,6 +373,21 @@ describe('GET overview brief after the helper move', () => {
     expect(db).not.toHaveBeenCalled()
     expect(resolvePermissions).not.toHaveBeenCalled()
     expect(resolveAccessScoping).not.toHaveBeenCalled()
+  })
+
+  it('returns an overview feature denial before resolving scope or accessing any brief data', async () => {
+    const { handle, queries, writes, deletes } = makeDb()
+    const denied = access(BRIEF_FEATURES)
+    denied.overrides.set('overview', 'deny')
+    vi.mocked(db).mockResolvedValue(handle)
+    vi.mocked(resolvePermissions).mockResolvedValue(denied)
+
+    expect((await GET(request())).status).toBe(403)
+    expect(resolvePermissions).toHaveBeenCalledExactlyOnceWith(handle, AUTH)
+    expect(resolveAccessScoping).not.toHaveBeenCalled()
+    expect(queries).toEqual([])
+    expect(writes).toEqual([])
+    expect(deletes).toEqual([])
   })
 })
 
@@ -385,6 +453,20 @@ describe('shared daily brief refresh', () => {
     expect(response.status).toBe(403)
     expect(db).not.toHaveBeenCalled()
     expect(resolvePermissions).not.toHaveBeenCalled()
+  })
+
+  it('returns an overview feature denial before reading, computing or writing any brief data', async () => {
+    const { handle, queries, writes } = makeDb()
+    const denied = access(BRIEF_FEATURES)
+    denied.overrides.set('overview', 'deny')
+    vi.mocked(db).mockResolvedValue(handle)
+    vi.mocked(resolvePermissions).mockResolvedValue(denied)
+
+    expect((await POST(request())).status).toBe(403)
+    expect(resolvePermissions).toHaveBeenCalledExactlyOnceWith(handle, AUTH)
+    expect(queries).toEqual([])
+    expect(writes).toEqual([])
+    expect(logCronRun).not.toHaveBeenCalled()
   })
 
   it('reports refresh failures instead of returning an invented empty success', async () => {
