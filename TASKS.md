@@ -473,6 +473,28 @@ seen on production.
   contacts); the dashboard gate and the wizard both consult it and stamp the
   user.
 
+## Parked by Liam, 2026-10-15 (backlog, do not start without his go)
+
+### Proposal building (PB)
+
+Liam's brief: shift proposals to the buyer's situation (Intellisense leaned to a pricier agency whose proposal was "more comprehensive"). Planned and decided, then parked ("we don't need to build this stuff right now"). Codex builds, Opus reviews, phases in order, no deal deadline. The brief cites proposal-advice.md (Giant Group critique), not yet in the repo; ask Liam for it at kickoff.
+
+- [ ] PB.1 Seven buyer sections. New section types situation, recommendation, success_measures, client_needs, next_steps; per-variant included, not included and assumptions lists (migration on proposal_variants); wire proposal_variants.timeline_schedule_id (exists, never set or rendered) with dated milestones and a first visible win inside two weeks; MCP parity.
+- [ ] PB.2 Situation draft from the deal's call transcripts (discovery_calls.deal_id to call_transcripts; extend the Sonnet extract route), a person edits before sharing. Pre-share check: one currency (the client's), no unattributed testimonials, no placeholder text or images, no em or en dashes, expiry set, timeline linked, every proof item permitted. Hard block; a super admin can override with a logged note. Templates by deal size: small (under NZD 10,000), standard, large (over about NZD 20,000, opens with a paid discovery credited against the build).
+- [ ] PB.3 Proof library. One record per result or testimonial with source, timeframe, named person, publication permission, tags (industry, problem, platform, region); the proposal suggests the two most relevant; proposals and case studies read the same record. Dashboard is the source of truth first; a tahi.studio website feed is a later follow-up.
+- [ ] PB.4 Win/loss and engagement. Record reason, competitor and price on accept, decline or expiry (deals already has lost_reason and won_source); feed reporting. Engagement prompts from share_view_events (repeat opens, new viewers, five days unopened) alert Liam in-app and in Slack with a drafted follow-up he sends; never auto-send.
+
+### Monthly wins report (MW)
+
+Liam, 2026-10-15: a "Monthly wins" summary that goes out with the month-end invoice, so the client sees the value delivered next to what they pay.
+
+- [ ] MW.1 Draft. On the last business day of each month (NZ), for every client with an active retainer or project, auto-draft from that client's data: requests completed that month (titles and dates); work delivered early or under its estimate; each agreed success measure with baseline, current value and change since last month; notable results (launches, speed or conversion improvements); proactive work done without being asked; the top two or three priorities proposed for next month. Saved as a draft for Liam or Staci to edit and approve. Never sent automatically.
+- [ ] MW.2 Send with the invoice. Once approved, send it in the same email as the month-end invoice, or immediately before it. Store each sent report on the client record. Subject to the client email allowlist (email.deliveryMode); nothing reaches a client until Liam opens it for that client.
+- [ ] MW.3 No-work flag. A client with no completed work that month gets no report; instead Liam is alerted (in-app and Slack) as a retention risk.
+- [ ] MW.4 Into the proof library. Approved results feed PB.3, tagged with client, metric, date and publication permission, so wins can become case-study material.
+
+Dependencies: success measures come from PB.1, the proof library from PB.3. MW.1 to MW.3 can ship first by drafting without success measures; MW.4 waits for PB.3. Open questions for kickoff: where "proactive" work is marked (a request or task flag), how notable results are captured (manual entry on the draft or a metrics source), and whether Xero-sent invoices can carry the report or it goes as the immediately preceding email.
+
 ## Call notes to tasks with an approval gate (Liam, 2026-09-19; scope in docs/superpowers/plans/2026-09-19-call-notes-to-tasks-scope.md)
 
 One table, task_suggestions, sits between "something was said" and "a task changed"; every source feeds it, the dashboard inbox and Slack read it, applying is one server function, approved updates post as "Tahi bot". Decisions taken 2026-09-19: #founders channel for call suggestions (first founder to click decides); notes are approved by their sender (Staci hers, a client their own request draft); Gemini transcripts through Google Drive (full transcript plus wrap-up), the inbox branch dropped; task threads as proposed; snooze minimal. Phase 0 building as workflow call-notes-foundations (F1 transcripts, F2 Tahi bot and task threads).
