@@ -428,7 +428,7 @@ describe('shared daily brief refresh', () => {
     expect(resolveAccessScoping).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the unrestricted cron identity and returns its computed snapshot', async () => {
+  it('uses the unrestricted cron identity and returns only counts, never the brief', async () => {
     const { handle, writes } = makeDb()
     vi.mocked(db).mockResolvedValue(handle)
     vi.mocked(hasCronSecretAuth).mockReturnValue(true)
@@ -436,7 +436,7 @@ describe('shared daily brief refresh', () => {
     try {
       const response = await POST(request())
 
-      expect(await response.json()).toEqual({ ok: true, ...EMPTY, generatedAt: NOW.toISOString() })
+      expect(await response.json()).toEqual({ ok: true, generatedAt: NOW.toISOString(), counts: { urgent: 0, week: 0, slept: 0 } })
       expect(getRequestAuth).not.toHaveBeenCalled()
       expect(resolvePermissions).toHaveBeenCalledExactlyOnceWith(handle, { userId: 'api-service', orgId: 'tahi-org' })
       expect(writes.map(write => write.row.key)).toEqual([BRIEF_CACHE_KEY])

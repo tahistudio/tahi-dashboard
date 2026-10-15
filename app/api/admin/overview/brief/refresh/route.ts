@@ -109,7 +109,9 @@ export async function POST(req: NextRequest) {
       counts: { urgent: result.urgent.length, week: result.week.length, slept: result.slept.length },
     }
     await logCronRun(database, 'overview-brief', 'success', Date.now() - t0, summary, null)
-    return NextResponse.json({ ok: true, ...result, generatedAt })
+    // The cron caller only needs counts; the brief itself (client names, amounts)
+    // would otherwise land in the GitHub Actions log of a manual run.
+    return NextResponse.json(sessionAuth ? { ok: true, ...result, generatedAt } : summary)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await logCronRun(database, 'overview-brief', 'error', Date.now() - t0, null, message)
