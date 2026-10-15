@@ -61,6 +61,36 @@ internal static class ProcessTree
         return browser;
     }
 
+    public static (int RootId, IReadOnlyCollection<int> ProcessIds) ResolveMeetingTree(
+        int processId, string platform, IReadOnlyDictionary<int, ObservedProcess> processes)
+    {
+        var root = processId;
+        var visited = new HashSet<int>();
+        for (var current = processId; current > 0 && visited.Add(current)
+            && processes.TryGetValue(current, out var process); current = process.ParentId)
+        {
+            var matches = platform switch
+            {
+                "zoom" => process.Name == "zoom",
+                "teams" => process.Name is "teams" or "ms-teams",
+                "meet" => process.Name is "chrome" or "msedge" or "vivaldi" or "firefox",
+                _ => false
+            };
+            if (matches)
+                root = current;
+        }
+        var ids = new HashSet<int> { root, processId };
+        var added = true;
+        while (added)
+        {
+            added = false;
+            foreach (var process in processes.Values)
+                if (process.Id != Environment.ProcessId && ids.Contains(process.ParentId) && ids.Add(process.Id))
+                    added = true;
+        }
+        return (root, ids.ToArray());
+    }
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern SafeFileHandle CreateToolhelp32Snapshot(uint flags, uint processId);
 

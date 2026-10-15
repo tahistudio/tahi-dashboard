@@ -72,8 +72,33 @@ public sealed class WindowsNotifications : IDisposable
     internal void RemoveRecording()
     {
         if (!_available) return;
-        try { ToastNotificationManager.History.Remove("recording", "capture", AppUserModelId); }
+        try
+        {
+            ToastNotificationManager.History.Remove("recording", "capture", AppUserModelId);
+            ToastNotificationManager.History.Remove("silent-system-audio", "capture", AppUserModelId);
+        }
         catch (Exception error) { HostLog.Error("Notification removal failed", error); }
+    }
+
+    internal void SilentSystemAudio(RecordingPlan plan)
+    {
+        if (!_available) return;
+        try
+        {
+            var content = new ToastContentBuilder()
+                .AddArgument("action", "open")
+                .AddArgument("clientRef", plan.ClientRef.ToString("D"))
+                .AddText("Call audio is silent. Check Audio devices in the tray menu.")
+                .GetToastContent();
+            var toast = new ToastNotification(content.GetXml())
+            {
+                Tag = "silent-system-audio",
+                Group = "capture",
+                ExpirationTime = DateTimeOffset.Now.AddHours(12)
+            };
+            ToastNotificationManager.CreateToastNotifier(AppUserModelId).Show(toast);
+        }
+        catch (Exception error) { HostLog.Error("Silent call audio notification failed", error); }
     }
 
     public void Dispose()

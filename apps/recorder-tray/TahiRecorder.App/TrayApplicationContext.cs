@@ -31,6 +31,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly TouchMenuItem _windows = new("Start with Windows");
     private readonly TouchMenuItem _signOut = new("Sign out this device");
     private readonly TouchMenuItem _localRecordings = new("Local recordings (0)");
+    private readonly TouchMenuItem _audioDevices = new("Audio devices");
+    private readonly TouchMenuItem _automaticAudioDevices = new("Automatic (follow meeting app)");
+    private readonly TouchMenuItem _callAudioDevices = new("Call audio");
+    private readonly TouchMenuItem _microphoneDevices = new("Microphone");
+    private readonly TouchMenuItem _lastRecording = new("Last recording: system audio level unknown");
     private DateTimeOffset _nextRetentionUtc;
     private HostSettings _settings = new();
     private RecorderAutomation _automation = new();
@@ -57,12 +62,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _api = new RecorderApiClient(_tokens);
         _dispatcher.CreateControl();
         _ = _dispatcher.Handle;
-        var menu = new ContextMenuStrip();
+        var menu = new ContextMenuStrip { ShowItemToolTips = true };
         menu.Items.Add(_status);
         menu.Items.Add(_start);
         menu.Items.Add(_stop);
         menu.Items.Add(new TouchMenuItem("Open recordings", null, (_, _) => OpenRecordings()));
         menu.Items.Add(_localRecordings);
+        menu.Items.Add(_audioDevices);
+        menu.Items.Add(_lastRecording);
         menu.Items.Add(_pause);
         menu.Items.Add(_windows);
         menu.Items.Add(_signOut);
@@ -104,6 +111,22 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
         _signOut.Click += async (_, _) => await SignOutAsync();
         _localRecordings.Click += (_, _) => OpenLocalRecordings();
+        _lastRecording.Click += (_, _) =>
+        {
+            RefreshAudioLevels();
+            MessageBox.Show(_lastRecording.ToolTipText, "Last recording audio levels",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        };
+        _audioDevices.DropDownItems.Add(_automaticAudioDevices);
+        _audioDevices.DropDownItems.Add(_callAudioDevices);
+        _audioDevices.DropDownItems.Add(_microphoneDevices);
+        _automaticAudioDevices.Click += async (_, _) => await SetAudioDevicesAsync(settings => settings with
+        {
+            AudioDevices = new AudioDevicePreferences(), RenderEndpointName = null, CaptureEndpointName = null
+        });
+        _audioDevices.DropDownOpening += (_, _) => RefreshAudioDevices();
+        foreach (var item in _audioDevices.DropDownItems.OfType<ToolStripMenuItem>())
+            item.Padding = new Padding(8, 12, 8, 12);
         menu.Opening += (_, _) => RefreshLocalRecordings();
         // SystemEvents remembers the subscribing synchronization context. Subscribe
         // off the UI thread so suspend can wait for disk flush while the UI stays free.
@@ -201,6 +224,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
             // Polling and device callbacks share the Core capture failure decision.
             await TickAsync();
         });
+        var currentCapture = _capture;
+        _capture.SilentSystemAudio += (_, args) =>
+        {
+            Post(() =>
+            {
+                if (!ReferenceEquals(_capture, currentCapture) || !currentCapture.IsRecording) return;
+                RecordingPlan? plan;
+                lock (_automationGate) plan = _automation.Current;
+                if (plan is not null && plan.ClientRef == args.ClientRef) _notifications.SilentSystemAudio(plan);
+                RefreshTray();
+            });
+        };
         _pump.CreateSending += clientRef =>
         {
             lock (_automationGate)
@@ -269,6 +304,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 var meeting = _detector.Poll();
                 _meetingActive = meeting.IsActive;
                 _platform = meeting.Platform;
+                _capture?.UpdateAudioContext(meeting, _settings.AudioDevices ?? new AudioDevicePreferences());
                 IReadOnlyList<RecordingAction> actions;
                 lock (_automationGate)
                 {
@@ -329,7 +365,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 _settings = _settings with { ActiveCaptureRef = action.Plan.ClientRef };
                 PersistState();
                 _notifications.Recording(action.Plan);
-                try { await _capture.StartAsync(action.Plan.ClientRef.ToString("D"), _lifetime.Token); }
+                try
+                {
+                    _capture.UpdateAudioContext(_detector.Poll(), _settings.AudioDevices ?? new AudioDevicePreferences());
+                    await _capture.StartAsync(action.Plan.ClientRef.ToString("D"), _lifetime.Token);
+                }
                 catch
                 {
                     try { await _capture.StopAsync(_lifetime.Token); }
@@ -404,6 +444,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_capture is null || _store is null) return;
         // Physical capture stops before any fallible settings/outbox write.
         await _capture.StopAsync(_lifetime.Token).ConfigureAwait(false);
+        var levels = _capture.AudioLevels;
+        if (levels.HasRecording)
+        {
+            lock (_automationGate) _settings = _settings with { LastAudioLevels = levels };
+        }
         _notifications.RemoveRecording();
         _pending = true;
         // Outbox draining may wait on a network operation. Show the physical stop immediately.
@@ -619,6 +664,101 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _pause.Enabled = _paired && !_exiting;
         _signOut.Enabled = _settings.DeviceId is not null && !_exiting;
         _windows.Checked = WindowsStartup.Enabled;
+        _audioDevices.Enabled = !_exiting;
+        RefreshAudioLevels();
+    }
+
+    private Task SetAudioDevicesAsync(Func<HostSettings, HostSettings> change) =>
+        InOperationAsync(() =>
+        {
+            var previous = _settings;
+            lock (_automationGate)
+            {
+                _settings = change(_settings);
+                if (!TryPersistState())
+                {
+                    _settings = previous;
+                    RefreshTray();
+                    return Task.CompletedTask;
+                }
+            }
+            _capture?.UpdateAudioContext(_detector.Poll(), _settings.AudioDevices ?? new AudioDevicePreferences());
+            _detail = "Audio device choice saved.";
+            RefreshTray();
+            return Task.CompletedTask;
+        });
+
+    private void RefreshAudioDevices()
+    {
+        var preferences = _settings.AudioDevices ?? new AudioDevicePreferences();
+        _automaticAudioDevices.Checked = preferences.RenderEndpointId is null && preferences.CaptureEndpointId is null;
+        try
+        {
+            var endpoints = WindowsAudioDevices.Enumerate();
+            PopulateAudioDeviceMenu(_callAudioDevices, endpoints.Where(endpoint => endpoint.Flow == AudioEndpointFlow.Render),
+                preferences.RenderEndpointId, _settings.RenderEndpointName, render: true);
+            PopulateAudioDeviceMenu(_microphoneDevices, endpoints.Where(endpoint => endpoint.Flow == AudioEndpointFlow.Capture),
+                preferences.CaptureEndpointId, _settings.CaptureEndpointName, render: false);
+        }
+        catch (Exception error)
+        {
+            HostLog.Error("Audio device menu refresh failed", error);
+            PopulateAudioDeviceMenu(_callAudioDevices, [], preferences.RenderEndpointId, _settings.RenderEndpointName, render: true);
+            PopulateAudioDeviceMenu(_microphoneDevices, [], preferences.CaptureEndpointId, _settings.CaptureEndpointName, render: false);
+        }
+    }
+
+    private void PopulateAudioDeviceMenu(TouchMenuItem menu, IEnumerable<AudioEndpointSnapshot> endpoints,
+        string? selectedId, string? selectedName, bool render)
+    {
+        foreach (var item in menu.DropDownItems.OfType<ToolStripItem>().ToArray()) item.Dispose();
+        menu.DropDownItems.Clear();
+        var automatic = new TouchMenuItem("Automatic (follow meeting app)") { Checked = selectedId is null };
+        automatic.Click += async (_, _) => await SelectAudioDeviceAsync(render, null, null);
+        menu.DropDownItems.Add(automatic);
+        var devices = endpoints.OrderBy(endpoint => endpoint.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        foreach (var device in devices)
+        {
+            var item = new TouchMenuItem(device.Name.Replace("&", "&&"))
+            {
+                Checked = string.Equals(selectedId, device.Id, StringComparison.Ordinal),
+                ToolTipText = device.Name
+            };
+            item.Click += async (_, _) => await SelectAudioDeviceAsync(render, device.Id, device.Name);
+            menu.DropDownItems.Add(item);
+        }
+        if (selectedId is not null && devices.All(device => !string.Equals(device.Id, selectedId, StringComparison.Ordinal)))
+        {
+            menu.DropDownItems.Add(new TouchMenuItem((selectedName ?? "Selected device").Replace("&", "&&") + " (disconnected)")
+            {
+                Checked = true,
+                Enabled = false,
+                ToolTipText = "Reconnect this device, choose another, or select Automatic. This track stays silent while the selected device is unavailable."
+            });
+        }
+        if (devices.Length == 0)
+            menu.DropDownItems.Add(new TouchMenuItem("No active devices") { Enabled = false });
+        foreach (var item in menu.DropDownItems.OfType<ToolStripMenuItem>())
+            item.Padding = new Padding(8, 12, 8, 12);
+    }
+
+    private Task SelectAudioDeviceAsync(bool render, string? endpointId, string? endpointName) =>
+        SetAudioDevicesAsync(settings =>
+        {
+            var preferences = settings.AudioDevices ?? new AudioDevicePreferences();
+            return render
+                ? settings with { AudioDevices = preferences with { RenderEndpointId = endpointId }, RenderEndpointName = endpointName }
+                : settings with { AudioDevices = preferences with { CaptureEndpointId = endpointId }, CaptureEndpointName = endpointName };
+        });
+
+    private void RefreshAudioLevels()
+    {
+        var captured = _capture?.AudioLevels;
+        var levels = captured?.HasRecording == true ? captured : _settings.LastAudioLevels;
+        _lastRecording.Text = levels?.HasRecording != true ? "Last recording: system audio level unknown"
+            : "Last recording: system audio level " + (levels.SystemAudioOk ? "OK" : "silent");
+        _lastRecording.ToolTipText = levels?.HasRecording != true ? "Record a call to measure both audio tracks."
+            : $"System peak: {levels.SystemPeak:P2}. Microphone peak: {levels.MicrophonePeak:P2}. Microphone level: {(levels.MicrophoneAudioOk ? "OK" : "silent")}.";
     }
 
     private void OpenRecordings()

@@ -2,6 +2,8 @@ namespace TahiRecorder.App.Capture;
 
 public sealed record MeetingObservation(bool IsActive, string Platform, int? ProcessId)
 {
+    public int? ProcessTreeRootId { get; init; }
+    public IReadOnlyCollection<int> ProcessTreeIds { get; init; } = Array.Empty<int>();
     public static MeetingObservation Inactive { get; } = new(false, "unknown", null);
 }
 
@@ -31,4 +33,9 @@ public sealed class CaptureErrorEventArgs(string track, string message, bool isF
     public string Track { get; } = track;
     public string Message { get; } = message;
     public bool IsFatal { get; } = isFatal;
+}
+
+public sealed class SilentSystemAudioEventArgs(Guid clientRef) : EventArgs
+{
+    public Guid ClientRef { get; } = clientRef;
 }
