@@ -73,6 +73,7 @@ describe('targetToPath', () => {
     expect(targetToPath['sync-drive-transcripts']).toBe('integrations/google/sync-drive-transcripts')
     expect(targetToPath['suggest-from-transcripts']).toBe('crons/suggest-from-transcripts')
     expect(targetToPath['sync-airwallex']).toBe('integrations/airwallex/sync')
+    expect(targetToPath['refresh-exchange-rates']).toBe('exchange-rates')
     expect(targetToPath['ai-briefing']).toBe('ai/briefing/cron')
     expect(targetToPath['overview-brief']).toBe('overview/brief/refresh')
   })
@@ -83,6 +84,19 @@ describe('targetToPath', () => {
     expect(targetToPath['sync-xero']).toBe('cron/sync-xero')
     expect(targetToPath['finance-anomaly-scan']).toBe('cron/finance-anomaly-scan')
     expect(targetToPath['suggestion-digest']).toBe('cron/suggestion-digest')
+  })
+})
+
+describe('daily financial refresh order', () => {
+  it('refreshes FX before balances and snapshots at 18:00 UTC', () => {
+    expect(cronToTargets['0 18 * * *']).toEqual(['refresh-exchange-rates', 'sync-airwallex', 'snapshot-metrics'])
+  })
+
+  it('keeps the manual workflow able to call the same FX refresh endpoint', () => {
+    const workflow = readFileSync(join(__dirname, '../../../.github/workflows/dashboard-crons.yml'), 'utf8')
+    expect(workflow).toContain('          - refresh-exchange-rates')
+    expect(workflow).toMatch(/refresh-exchange-rates\)\s+url="\$root\/exchange-rates"/)
+    expect(workflow).toContain('targets="refresh-exchange-rates sync-airwallex snapshot-metrics"')
   })
 })
 

@@ -50,6 +50,15 @@ export function briefScopeFingerprint(
   return `${orgs}|${features}`
 }
 
+/** Browser cache identity changes when either feature grants or client scope changes. */
+export function briefViewerKey(
+  auth: { userId: string; orgId: string | null },
+  allowedOrgIds: string[] | null,
+  allowedFeatures: readonly string[],
+): string {
+  return JSON.stringify([auth.userId, auth.orgId, briefScopeFingerprint(allowedOrgIds, allowedFeatures)])
+}
+
 /** The fingerprint of a caller who sees everything: the owner, and the cron. */
 export function unrestrictedFingerprint(): string {
   return briefScopeFingerprint(null, BRIEF_FEATURES)

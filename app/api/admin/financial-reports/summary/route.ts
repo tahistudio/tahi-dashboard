@@ -5,7 +5,7 @@ import { requireAdmin } from '@/lib/require-admin'
  * The "am I on track?" payload for /financial-reports. One round-trip
  * returns everything the top half of the page needs:
  *
- * - bankBalances: sum across Airwallex + Xero accounts, currency-grouped
+ * - bankBalances: Airwallex wallet plus documented yield, currency-grouped
  * - reserves: total accrued + per-pot breakdown
  * - disposableCash: total cash in NZD minus the larger of the IRD balance owed
  *   and the tax pot, minus the other reserve pots (lib/cash-position.ts)
@@ -21,10 +21,13 @@ import { requireFeature } from '@/lib/require-feature'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { and, eq, gte, inArray, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { buildRateMap, toNzd as toNzdHelper } from '@/lib/currency'
 import { draftStatusList, issuedStatusList, owedStatusList } from '@/lib/invoice-status'
 import { derivePosition } from '@/lib/cash-position'
+import { readYieldFreshness } from '@/lib/yield-holdings'
+import { computeWalletForex } from '@/lib/wallet-forex'
+import { fxFreshness } from '@/lib/fx-freshness'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -73,7 +76,7 @@ export async function GET(req: NextRequest) {
   const [
     settingsRows,
     airwallexBalances,
-    xeroBankBalances,
+    yieldFreshness,
     reserves,
     retainerRowsByClient,
     fxRows,
@@ -122,7 +125,7 @@ export async function GET(req: NextRequest) {
     `),
     // bank balances
     database.select().from(schema.airwallexBalances),
-    database.select().from(schema.xeroBankBalances),
+    readYieldFreshness(database),
     // reserves
     database.select().from(schema.reserves).where(eq(schema.reserves.active, true)),
     // retainer MRR rows
@@ -135,8 +138,8 @@ export async function GET(req: NextRequest) {
         AND custom_mrr > 0
     `),
     // FX rates
-    database.all<{ currency: string; rateToUsd: number }>(sql`
-      SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates
+    database.all<{ currency: string; rateToUsd: number; updatedAt: string | null }>(sql`
+      SELECT currency, rate_to_usd AS rateToUsd, updated_at AS updatedAt FROM exchange_rates
     `),
     // active projects
     database
@@ -442,7 +445,7 @@ export async function GET(req: NextRequest) {
   const staciTakeHome = parseFloat(settingsMap.get('finance.staciTakeHomeAnnual') ?? '52000') || 52000
   const takeHomeTargetEach = parseFloat(settingsMap.get('finance.takeHomeTargetEach') ?? '74000') || 74000
 
-  // ── Bank balances aggregation (Airwallex first, Xero fallback) ────
+  // Cash balances from Airwallex wallet and materialised AWX Yield only.
 
   const balancesByCurrency = new Map<string, { available: number; total: number; sources: string[] }>()
   for (const b of airwallexBalances) {
@@ -450,16 +453,8 @@ export async function GET(req: NextRequest) {
     const e = balancesByCurrency.get(cur) ?? { available: 0, total: 0, sources: [] }
     e.available += b.availableBalance
     e.total += b.balance
-    if (!e.sources.includes('airwallex')) e.sources.push('airwallex')
-    balancesByCurrency.set(cur, e)
-  }
-  // Xero balances only count when Airwallex hasn't reported the
-  // currency — otherwise we'd double-count the same cash. Airwallex is
-  // the truth-of-truths.
-  for (const b of xeroBankBalances) {
-    const cur = b.currency ?? 'NZD'
-    if (balancesByCurrency.has(cur)) continue
-    const e = { available: b.balance, total: b.balance, sources: ['xero'] }
+    const source = b.accountId.startsWith('yield:') ? 'AWX Yield' : 'airwallex'
+    if (!e.sources.includes(source)) e.sources.push(source)
     balancesByCurrency.set(cur, e)
   }
 
@@ -469,6 +464,7 @@ export async function GET(req: NextRequest) {
   // tints warning/danger past 24h/7d. Null when no rows exist.
   let bankSyncedAt: string | null = null
   for (const b of airwallexBalances) {
+    if (b.accountId.startsWith('yield:')) continue
     if (!bankSyncedAt || (b.updatedAt && b.updatedAt > bankSyncedAt)) {
       bankSyncedAt = b.updatedAt ?? bankSyncedAt
     }
@@ -837,8 +833,10 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
+    fxFreshness: fxFreshness(fxRows),
     asOf: nowIso,
     bankSyncedAt,
+    yieldFreshness,
     primaryCurrency,
     bankBalances: Array.from(balancesByCurrency.entries()).map(([currency, v]) => ({
       currency,
@@ -979,18 +977,7 @@ export async function GET(req: NextRequest) {
       projection: ytdRevenue + (effectiveMonthlyRevenue * monthsRemaining),
       monthsRemaining,
     },
-    forex: (() => {
-      // Forex exposure = % of total cash held in non-NZD currencies.
-      // Pulled from balancesByCurrency. We use the Xero+Airwallex
-      // numbers we already aggregated.
-      const totals = Array.from(balancesByCurrency.entries()).map(([cur, v]) => ({ currency: cur, available: v.available }))
-      const nzd = totals.find(t => t.currency === 'NZD')?.available ?? 0
-      const totalAll = totals.reduce((s, t) => s + t.available, 0)
-      return {
-        items: totals,
-        nzdShare: totalAll > 0 ? nzd / totalAll : 1,
-      }
-    })(),
+    forex: computeWalletForex(airwallexBalances, toNzd),
     monthlyRevenueHistory: monthlyRevenueRows.map(r => ({ ym: r.ym, total: Number(r.total ?? 0) })),
     costMix: costMixRows.map(r => ({ category: r.category, monthly: Number(r.monthly ?? 0) })),
     spendSplit: { discretionary: discretionaryMonthly, essential: essentialMonthly },

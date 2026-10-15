@@ -7,9 +7,9 @@
  * One source of truth: this reads the deterministic brief cached to
  * settings.overview_brief_latest (GET /api/admin/overview/brief) that the home
  * "Daily brief" card renders. The nav popover is the glance (summary + top
- * rows + open-full-brief link); the home card is the expanded view. They can
- * never disagree because they read the same cache. "Refresh" POSTs the shared
- * refresh route and both surfaces pick up the new cache.
+ * rows + open-full-brief link); the home card is the expanded view. Both share
+ * one provider, including its read, refresh, loading and error states.
+ * "Refresh" publishes the returned snapshot to both surfaces together.
  *
  * The trigger shows a subtle unread dot when the cached brief is newer than the
  * last time this viewer opened it (a localStorage timestamp). Opening the
@@ -19,8 +19,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles, RefreshCw } from 'lucide-react'
-import { apiPath } from '@/lib/api'
 import { Popover } from '@/components/tahi/popover'
+import { useDailyBrief } from '@/components/tahi/daily-brief-provider'
+import type { BriefRow } from '@/lib/overview-brief'
 
 const SEEN_KEY = 'tahi-briefing-seen'
 
@@ -31,20 +32,6 @@ const ROUTE_MAP: Record<string, string> = {
   'financial-reports': '/financial-reports',
   plan: '/billing',
   billing: '/billing',
-}
-
-interface BriefRow {
-  tone: 'risk' | 'warn' | 'ok' | ''
-  verb: string | null
-  to: string
-  text: string
-}
-
-interface BriefData {
-  urgent: BriefRow[]
-  week: BriefRow[]
-  slept: BriefRow[]
-  generatedAt?: string
 }
 
 const dotColor = (tone: BriefRow['tone']): string => {
@@ -66,9 +53,7 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
   const sheet = variant === 'sheet'
   const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [data, setData] = useState<BriefData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
+  const { data, summary, isLoading: loading, isRefreshing: generating, canRefresh, error, refresh } = useDailyBrief()
   const [hasNew, setHasNew] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
@@ -81,23 +66,6 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
     setHasNew(!seen || new Date(generatedAt).getTime() > new Date(seen).getTime())
   }, [])
 
-  const fetchBrief = useCallback(async () => {
-    try {
-      const res = await fetch(apiPath('/api/admin/overview/brief'))
-      if (!res.ok) throw new Error('Failed')
-      const json = (await res.json()) as BriefData
-      setData(json)
-      evaluateNew(json.generatedAt)
-    } catch {
-      setData(null)
-      setHasNew(false)
-    } finally {
-      setLoading(false)
-    }
-  }, [evaluateNew])
-
-  useEffect(() => { void fetchBrief() }, [fetchBrief])
-
   const markSeen = useCallback((generatedAt: string | undefined) => {
     if (typeof window !== 'undefined' && generatedAt) {
       window.localStorage.setItem(SEEN_KEY, generatedAt)
@@ -105,33 +73,23 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
     setHasNew(false)
   }, [])
 
+  useEffect(() => {
+    if (open) markSeen(data?.generatedAt)
+    else evaluateNew(data?.generatedAt)
+  }, [data?.generatedAt, open, evaluateNew, markSeen])
+
   const handleToggle = useCallback(() => {
     if (!open) {
-      void fetchBrief()
       markSeen(data?.generatedAt)
     }
     setOpen(prev => !prev)
-  }, [open, fetchBrief, markSeen, data])
+  }, [open, markSeen, data])
 
   const go = useCallback((id: string) => {
     const path = ROUTE_MAP[id] ?? '/' + id.replace(/^\/+/, '')
     setOpen(false)
     router.push(path)
   }, [router])
-
-  const refresh = useCallback(async () => {
-    setGenerating(true)
-    try {
-      const res = await fetch(apiPath('/api/admin/overview/brief/refresh?force=1'), { method: 'POST' })
-      if (!res.ok) throw new Error('Failed')
-      await fetchBrief()
-      markSeen(data?.generatedAt)
-    } catch {
-      // silent: transient / offline, leave the existing brief in place
-    } finally {
-      setGenerating(false)
-    }
-  }, [fetchBrief, markSeen, data])
 
   const formatTime = (iso: string) => {
     try {
@@ -143,9 +101,6 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
   const week = data?.week ?? []
   const slept = data?.slept ?? []
   const total = urgent.length + week.length
-  const lede = total === 0
-    ? 'All clear. Nothing is waiting on you right now.'
-    : `${urgent.length} ${urgent.length === 1 ? 'thing needs' : 'things need'} you today, ${week.length} this week.`
 
   const sections: { key: string; label: string; rows: BriefRow[] }[] = [
     { key: 'urgent', label: 'Urgent today', rows: urgent },
@@ -178,6 +133,7 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
           ref={buttonRef}
           type="button"
           className={'tb-bell' + (hasNew ? ' has-unread' : '')}
+          style={{ minWidth: '2.75rem', minHeight: '2.75rem' }}
           onClick={handleToggle}
           aria-label={`Daily brief${hasNew ? ' (new)' : ''}`}
           aria-expanded={open}
@@ -203,7 +159,6 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
             className="flex items-center justify-between"
             style={{
               padding: 'var(--space-4) var(--space-5)',
-              borderBottom: '1px solid var(--color-border-subtle)',
               flexShrink: 0,
             }}
           >
@@ -228,12 +183,18 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
             </div>
           )}
 
+          {error && (
+            <p role="alert" style={{ padding: 'var(--space-3) var(--space-5)', fontSize: 'var(--text-sm)', color: 'var(--color-danger-ink)' }}>
+              {error}{data ? ' Showing the previous brief.' : ''}
+            </p>
+          )}
+
           {/* Body */}
           {data && (
             <>
               <div style={{ padding: 'var(--space-3) var(--space-5)', background: 'var(--color-brand-50)', flexShrink: 0 }}>
-                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-brand-dark)', fontWeight: 500 }}>
-                  {lede}
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-brand-on-tint)', fontWeight: 500 }}>
+                  {summary}
                 </p>
               </div>
 
@@ -264,7 +225,6 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
                           style={{
                             gap: 'var(--space-2-5)',
                             padding: 'var(--space-2) var(--space-5)',
-                            borderBottom: '1px solid var(--color-border-subtle)',
                           }}
                         >
                           <span style={{
@@ -281,14 +241,15 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
                             <button
                               type="button"
                               onClick={() => go(r.to)}
+                              className="tahi-focus-ring bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-tertiary)]"
                               style={{
                                 flexShrink: 0,
+                                minHeight: '2.75rem',
                                 padding: 'var(--space-1) var(--space-2-5)',
                                 fontSize: 'var(--text-xs)',
                                 fontWeight: 600,
-                                color: 'var(--color-brand-dark)',
-                                background: 'var(--color-bg-secondary)',
-                                border: '1px solid var(--color-border)',
+                                color: 'var(--color-link)',
+                                border: '0.0625rem solid var(--color-border)',
                                 borderRadius: 'var(--radius-leaf-sm)',
                                 cursor: 'pointer',
                               }}
@@ -310,18 +271,19 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
             className="flex items-center justify-between"
             style={{
               padding: 'var(--space-3) var(--space-5)',
-              borderTop: '1px solid var(--color-border-subtle)',
               flexShrink: 0,
             }}
           >
             <button
               type="button"
               onClick={() => go('overview')}
+              className="tahi-focus-ring hover:underline"
               style={{
+                minHeight: '2.75rem',
                 padding: 'var(--space-2) 0',
                 background: 'transparent',
                 border: 'none',
-                color: 'var(--color-brand-dark)',
+                color: 'var(--color-link)',
                 fontSize: 'var(--text-sm)',
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -332,19 +294,19 @@ export function BriefingTrigger({ variant = 'bar' }: BriefingTriggerProps) {
             <button
               type="button"
               onClick={() => void refresh()}
-              disabled={generating}
-              className="flex items-center justify-center"
+              disabled={generating || !canRefresh}
+              className="flex items-center justify-center tahi-focus-ring bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-tertiary)]"
               style={{
+                minHeight: '2.75rem',
                 padding: 'var(--space-2) var(--space-3)',
-                background: 'var(--color-bg-secondary)',
                 color: 'var(--color-text)',
-                border: '1px solid var(--color-border)',
+                border: '0.0625rem solid var(--color-border)',
                 borderRadius: 'var(--radius-leaf-sm)',
                 fontSize: 'var(--text-sm)',
                 fontWeight: 600,
                 gap: 'var(--space-1-5)',
-                cursor: generating ? 'not-allowed' : 'pointer',
-                opacity: generating ? 0.7 : 1,
+                cursor: generating || !canRefresh ? 'not-allowed' : 'pointer',
+                opacity: generating || !canRefresh ? 0.7 : 1,
                 transition: 'background-color 150ms ease',
               }}
             >

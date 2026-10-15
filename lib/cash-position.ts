@@ -17,14 +17,17 @@
  *     describe about a third of what Tahi actually invoices, which is what made
  *     every forecast month negative.
  *
- * Airwallex is cash truth; Xero's BankSummary books invoiced-but-unsettled
- * money as if it had landed, so it only fills currencies Airwallex misses.
+ * Airwallex wallets are cash truth. The sync materialises only the documented
+ * Xero AWX Yield account balances as yield rows. No Xero wallet ledger figure
+ * fills a currency that Airwallex has not reported.
  * See lib/overview-aggregates.ts aggregateCashNzd.
  */
 import { schema } from '@/db/d1'
 import { sql } from 'drizzle-orm'
 import { buildRateMap, toNzd, type RateMap } from '@/lib/currency'
 import { aggregateCashNzd } from '@/lib/overview-aggregates'
+import { readYieldFreshness, type YieldFreshness } from '@/lib/yield-holdings'
+import { fxFreshness, type FxFreshness } from '@/lib/fx-freshness'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -127,37 +130,13 @@ export function cadenceToMonthlyNzd(cadence: string, amountNzd: number): number 
   }
 }
 
-/**
- * Compact NZD for card subtitles and server-rendered basis text, e.g.
- * NZ$10.3k. Mirrors the moneyCompact rule in components/tahi/overview/ov-kit.
- */
-export function formatCompactNzd(nzd: number): string {
-  const sign = nzd < 0 ? '-' : ''
-  const abs = Math.abs(nzd)
-  if (abs >= 1000) {
-    const k = abs / 1000
-    const num = k >= 100 ? String(Math.round(k)) : k.toFixed(1).replace(/\.0$/, '')
-    return `${sign}NZ$${num}k`
-  }
-  return `${sign}NZ$${Math.round(abs)}`
-}
-
-/**
- * The one-line answer to "where do the ribbon's numbers come from?". Rendered
- * under the Cash-flow ribbon and as summary.basis on the forecast route, so the
- * card and the finance page never describe the projection differently.
- */
-export function cashFlowBasisLine(
-  parts: { retainerNzd: number; projectRunRateNzd: number },
-  format: (nzd: number) => string = formatCompactNzd,
-): string {
-  return `Retainers ${format(parts.retainerNzd)} + project run-rate ${format(parts.projectRunRateNzd)}`
-    + ' + weighted pipeline, minus commitments'
-}
-
+// Pure captions are re-exported for server callers and unit tests.
+export { formatCompactNzd, cashFlowBasisLine } from '@/lib/cash-flow-basis'
 export interface CashPositionOptions {
   /** Reuse an already-built FX rate map instead of re-reading exchange_rates. */
   rateMap?: RateMap
+  /** Freshness of the same rows used to build the supplied map. */
+  rateFreshness?: FxFreshness
 }
 
 /**
@@ -170,28 +149,32 @@ export interface CashPositionOptions {
 export async function computeCashPosition(
   database: D1,
   options: CashPositionOptions = {},
-): Promise<CashPosition> {
+): Promise<CashPosition & { yieldFreshness: YieldFreshness; fxFreshness: FxFreshness }> {
   let rateMap = options.rateMap
-  if (!rateMap) {
+  let rateFreshness = options.rateFreshness
+  if (!rateMap || !rateFreshness) {
     try {
-      const rates = await database.all<{ currency: string; rateToUsd: number }>(
-        sql`SELECT currency, rate_to_usd AS rateToUsd FROM exchange_rates`
+      const rates = await database.all<{ currency: string; rateToUsd: number; updatedAt: string | null }>(
+        sql`SELECT currency, rate_to_usd AS rateToUsd, updated_at AS updatedAt FROM exchange_rates`
       )
-      rateMap = buildRateMap((rates ?? []).map(r => ({ currency: r.currency, rateToUsd: Number(r.rateToUsd) })))
+      rateMap ??= buildRateMap((rates ?? []).map(r => ({ currency: r.currency, rateToUsd: Number(r.rateToUsd) })))
+      rateFreshness = fxFreshness(rates ?? [])
     } catch {
-      rateMap = buildRateMap([])
+      rateMap ??= buildRateMap([])
+      rateFreshness = fxFreshness([])
     }
   }
   const rates = rateMap
   const nzd = (amount: number, currency: string | null): number => toNzd(amount, currency ?? 'NZD', rates)
 
-  const [cashRow, settingsRow, reservesRow, burnRow, projectRow, mrrRow] = await Promise.all([
+  const [cashRow, settingsRow, reservesRow, burnRow, projectRow, mrrRow, yieldFreshness] = await Promise.all([
     readCash(database, nzd),
     readSettings(database),
     readReserves(database, nzd),
     readCommitmentBurn(database, nzd),
     readProjectRunRate(database, nzd),
     readRetainerMrr(database, nzd),
+    readYieldFreshness(database),
   ])
 
   // Burn precedence, identical to the finance page's reserve card:
@@ -206,7 +189,7 @@ export async function computeCashPosition(
       ? burnRow
       : (effectiveRevenueNzd > 0 ? effectiveRevenueNzd * 0.5 : 0)
 
-  return derivePosition({
+  return { ...derivePosition({
     totalCashNzd: cashRow,
     taxOwedNzd: settingsRow.taxOwedNzd,
     taxPotNzd: reservesRow.taxPotNzd,
@@ -214,7 +197,7 @@ export async function computeCashPosition(
     recurringBurnNzd,
     projectRunRateNzd: projectRow,
     retainerMrrNzd: mrrRow,
-  })
+  }), yieldFreshness, fxFreshness: rateFreshness }
 }
 
 type ToNzd = (amount: number, currency: string | null) => number
@@ -225,15 +208,9 @@ async function readCash(database: D1, nzd: ToNzd): Promise<number> {
     try {
       airwallex = await database.select().from(schema.airwallexBalances)
     } catch {
-      // Airwallex table not migrated here; Xero fills every currency instead.
+      // No Airwallex cash is available in this database.
     }
-    let xero: Array<{ currency: string | null; balance: number }> = []
-    try {
-      xero = await database.select().from(schema.xeroBankBalances)
-    } catch {
-      // No Xero balances either; total stays at whatever Airwallex reported.
-    }
-    return aggregateCashNzd(airwallex, xero, (amount, currency) => nzd(amount, currency))
+    return aggregateCashNzd(airwallex, (amount, currency) => nzd(amount, currency))
   } catch {
     return 0
   }

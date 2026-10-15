@@ -35,7 +35,7 @@ export type ToolAccess = 'read' | 'write' | 'confirm' | 'blocked'
 /** Reads: no side effect beyond reading (AI drafting tools that never write count here). */
 export const DESIGNER_READ_TOOLS: ReadonlySet<string> = new Set([
   // Overview, guide, reports
-  'get_overview', 'get_dashboard_guide', 'get_reports', 'get_billing_summary', 'get_response_time',
+  'get_overview', 'get_daily_brief', 'get_dashboard_guide', 'get_reports', 'get_billing_summary', 'get_response_time',
   'get_exchange_rates',
   // Clients and contacts
   'list_clients', 'get_client', 'list_client_contacts', 'list_contact_references',
@@ -121,6 +121,10 @@ export const CONDITIONAL_CONFIRM_TOOLS: ReadonlySet<string> = new Set(['update_r
 
 /** Explicit restricted writes, in addition to default deny for all unlisted tools. */
 export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
+  // Finance sync writes stay with the full profile.
+  'sync_airwallex',
+  // Shared brief cache regeneration stays with the full profile.
+  'refresh_daily_brief',
   'link_stripe_customer', 'confirm_xero_contact',
   // Recorder devices can capture calls, so their management stays with admins.
   'list_recorder_devices', 'revoke_recorder_device',

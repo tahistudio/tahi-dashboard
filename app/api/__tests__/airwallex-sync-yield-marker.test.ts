@@ -38,10 +38,15 @@ vi.mock('@/lib/airwallex', () => ({
   ]),
   listTransactions: vi.fn().mockResolvedValue([]),
 }))
+vi.mock('@/lib/xero', () => ({ callXeroAPIOrThrow: vi.fn().mockRejectedValue(new Error('Xero unavailable')) }))
 
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { callXeroAPIOrThrow } from '@/lib/xero'
 import { POST as syncAirwallex } from '@/app/api/admin/integrations/airwallex/sync/route'
+import {
+  LIVE_YIELD_AUD_ID, LIVE_YIELD_USD_ID, liveXeroYieldAccounts, liveXeroYieldOrganisation, liveXeroYieldSummary,
+} from '@/lib/__tests__/fixtures/xero-yield'
 
 interface BoundStatement {
   all(): Promise<{ results: unknown[] }>
@@ -51,6 +56,18 @@ interface BoundStatement {
 
 function d1Adapter(sqlite: DatabaseSync) {
   return {
+    async batch(statements: BoundStatement[]) {
+      sqlite.exec('BEGIN')
+      try {
+        const results = []
+        for (const statement of statements) results.push(await statement.all())
+        sqlite.exec('COMMIT')
+        return results
+      } catch (error) {
+        sqlite.exec('ROLLBACK')
+        throw error
+      }
+    },
     prepare(query: string) {
       const stmt = sqlite.prepare(query)
       const bind = (...params: unknown[]): BoundStatement => ({
@@ -94,6 +111,8 @@ interface SeedOptions {
   yieldRows?: Array<[string, number]>
   /** The finance.yieldFirstHeldAt value (default: no row). */
   marker?: string
+  /** Optional finance.yieldAccountIds JSON setting. */
+  accountIds?: string
 }
 
 function seed(options: SeedOptions = {}) {
@@ -102,6 +121,7 @@ function seed(options: SeedOptions = {}) {
   const setting = sqlite.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)')
   if (options.holdings !== undefined) setting.run('finance.yieldHoldings', options.holdings, '2026-08-18T00:00:00.000Z')
   if (options.marker !== undefined) setting.run('finance.yieldFirstHeldAt', options.marker, '2026-09-01T00:00:00.000Z')
+  if (options.accountIds !== undefined) setting.run('finance.yieldAccountIds', options.accountIds, '2026-10-14T00:00:00.000Z')
   for (const [currency, amount] of options.yieldRows ?? []) {
     sqlite.prepare('INSERT INTO airwallex_balances (account_id, account_name, currency, balance, available_balance, as_of, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(`yield:${currency}`, `Airwallex ${currency} Yield`, currency, amount, amount, '2026-09-25T18:00:00.000Z', '2026-09-25T18:00:00.000Z')
@@ -127,6 +147,7 @@ async function sync() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(callXeroAPIOrThrow).mockReset().mockRejectedValue(new Error('Xero unavailable'))
 })
 
 describe('the Airwallex sync records that yield has been held', () => {
@@ -172,5 +193,117 @@ describe('the Airwallex sync records that yield has been held', () => {
       expect(await sync()).toMatchObject({ yieldMarked: false })
       expect(marker(sqlite)).toBeUndefined()
     }
+  })
+})
+
+describe('the Airwallex sync refreshes only documented Xero yield accounts', () => {
+  function xeroRead(usd = '44689.56', aud = '666.77', accountsData = liveXeroYieldAccounts) {
+    vi.mocked(callXeroAPIOrThrow)
+      .mockResolvedValueOnce(accountsData)
+      .mockResolvedValueOnce(liveXeroYieldOrganisation)
+      .mockResolvedValueOnce(liveXeroYieldSummary(usd, aud))
+  }
+
+  it('updates holdings and materialises their exact base-currency total on each sync', async () => {
+    const sqlite = seed({ holdings: '[{"currency":"USD","amount":20014.13}]', yieldRows: [['USD', 20014.13]] })
+    xeroRead()
+    const response = await sync()
+    expect(response).toMatchObject({ yieldRows: 1, yieldRefresh: { refreshed: true, currencyBasis: 'NZD' } })
+    expect(vi.mocked(callXeroAPIOrThrow).mock.calls.map(call => call[1])).toEqual([
+      '/Accounts?where=Type%3D%3D%22BANK%22', '/Organisation',
+      expect.stringMatching(/^\/Reports\/BankSummary\?fromDate=\d{4}-\d{2}-01&toDate=\d{4}-\d{2}-\d{2}$/),
+    ])
+    const setting = sqlite.prepare("SELECT value, updated_at FROM settings WHERE key = 'finance.yieldHoldings'").get() as { value: string; updated_at: string }
+    expect(JSON.parse(setting.value)).toEqual([
+      { currency: 'NZD', amount: 44689.56, sourceAccountId: LIVE_YIELD_USD_ID, sourceAccountCurrency: 'USD' },
+      { currency: 'NZD', amount: 666.77, sourceAccountId: LIVE_YIELD_AUD_ID, sourceAccountCurrency: 'AUD' },
+    ])
+    expect(setting.updated_at).not.toBe('2026-08-18T00:00:00.000Z')
+    expect(yieldAccounts(sqlite)).toEqual(['yield:NZD'])
+    const balance = sqlite.prepare("SELECT balance FROM airwallex_balances WHERE account_id = 'yield:NZD'").get() as { balance: number }
+    expect(balance.balance).toBeCloseTo(45356.33, 2)
+    const wallet = sqlite.prepare("SELECT balance FROM airwallex_balances WHERE account_name = 'Airwallex NZD'").get() as { balance: number }
+    expect(wallet.balance).toBe(50000)
+
+    xeroRead('31000.00', '700.00')
+    expect(await sync()).toMatchObject({ yieldRefresh: { refreshed: true } })
+    const next = sqlite.prepare("SELECT balance FROM airwallex_balances WHERE account_id = 'yield:NZD'").get() as { balance: number }
+    expect(next.balance).toBe(31700)
+  })
+
+  it('uses pinned settings IDs to resolve otherwise ambiguous yield names', async () => {
+    const sqlite = seed({ accountIds: JSON.stringify({ USD: LIVE_YIELD_USD_ID, AUD: LIVE_YIELD_AUD_ID }) })
+    xeroRead(undefined, undefined, { Accounts: [...liveXeroYieldAccounts.Accounts,
+      { ...liveXeroYieldAccounts.Accounts[0], AccountID: 'another-usd-yield' },
+    ] })
+    expect(await sync()).toMatchObject({ yieldRows: 1, yieldRefresh: { refreshed: true, currencyBasis: 'NZD' } })
+    expect(yieldAccounts(sqlite)).toEqual(['yield:NZD'])
+    const balance = sqlite.prepare("SELECT currency, balance FROM airwallex_balances WHERE account_id = 'yield:NZD'").get()
+    expect(balance).toMatchObject({ currency: 'NZD', balance: expect.closeTo(45356.33, 2) })
+  })
+
+  it('retains saved holdings and timestamps when a configured override is malformed', async () => {
+    const sqlite = seed({ holdings: '[{"currency":"NZD","amount":25100}]', yieldRows: [['NZD', 25100]], accountIds: '{"USD":""}' })
+    const beforeSetting = sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()
+    const beforeRows = sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()
+    expect(await sync()).toMatchObject({ yieldRefresh: { refreshed: false, warning: expect.stringContaining('override is invalid') } })
+    expect(sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()).toEqual(beforeSetting)
+    expect(sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()).toEqual(beforeRows)
+    expect(callXeroAPIOrThrow).not.toHaveBeenCalled()
+  })
+
+  it('retains saved holdings, their age and matching row timestamps when Xero fails', async () => {
+    const sqlite = seed({ holdings: '[{"currency":"USD","amount":25100}]', yieldRows: [['USD', 25100]] })
+    const beforeSetting = sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()
+    const beforeRows = sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()
+    expect(await sync()).toMatchObject({ yieldRefresh: { refreshed: false, source: 'saved_holdings' } })
+    expect(sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()).toEqual(beforeSetting)
+    expect(sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()).toEqual(beforeRows)
+  })
+
+  it('retains saved holdings and timestamps when one Xero balance is unreadable', async () => {
+    const sqlite = seed({ holdings: '[{"currency":"USD","amount":25100}]', yieldRows: [['USD', 25100]] })
+    const before = sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()
+    xeroRead('31234.56', '')
+    expect(await sync()).toMatchObject({ yieldRefresh: { refreshed: false } })
+    expect(sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()).toEqual(before)
+    expect(yieldAccounts(sqlite)).toEqual(['yield:USD'])
+  })
+
+  it('retains entire rows and source age when a saved amount has an invalid JSON type', async () => {
+    for (const amount of [null, '', ' ', false, [], {}, '25100']) {
+      const sqlite = seed({ holdings: JSON.stringify([{ currency: 'USD', amount }]), yieldRows: [['USD', 25100]] })
+      const beforeSetting = sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()
+      const beforeRows = sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()
+      expect(await sync()).toMatchObject({ yieldMalformed: true, yieldRefresh: { refreshed: false } })
+      expect(sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()).toEqual(beforeSetting)
+      expect(sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()).toEqual(beforeRows)
+    }
+  })
+
+  it('does not delete known yield rows when no saved setting or Xero balance can be read', async () => {
+    const sqlite = seed({ yieldRows: [['USD', 25100]] })
+    expect(await sync()).toMatchObject({ yieldRefresh: { refreshed: false } })
+    expect(yieldAccounts(sqlite)).toEqual(['yield:USD'])
+  })
+
+  it('records withdrawn saved holdings before replacing them with zero balances', async () => {
+    const sqlite = seed({ holdings: '[{"currency":"USD","amount":25100}]' })
+    xeroRead('0.00', '0.00')
+    expect(await sync()).toMatchObject({ yieldMarked: true })
+    expect(marker(sqlite)).toEqual({ value: 'unknown' })
+  })
+
+  it('rolls back row replacement and source timestamp together when the D1 write fails', async () => {
+    const sqlite = seed({ holdings: '[{"currency":"USD","amount":25100}]', yieldRows: [['USD', 25100]] })
+    const beforeSetting = sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()
+    const beforeRows = sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()
+    sqlite.exec(`CREATE TRIGGER fail_yield_refresh BEFORE UPDATE ON settings
+      WHEN new.key = 'finance.yieldHoldings' BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END;`)
+    xeroRead()
+    const response = await syncAirwallex(new NextRequest('http://localhost/api/admin/integrations/airwallex/sync', { method: 'POST' }))
+    expect(response.status).toBe(500)
+    expect(sqlite.prepare("SELECT * FROM settings WHERE key = 'finance.yieldHoldings'").get()).toEqual(beforeSetting)
+    expect(sqlite.prepare("SELECT * FROM airwallex_balances WHERE account_id LIKE 'yield:%'").all()).toEqual(beforeRows)
   })
 })

@@ -325,6 +325,8 @@ const mrListProps = {
 export const TOOLS: ToolDef[] = [
   // ── Read: Overview & Reports ──────────────────────────────────────────
   tool('get_overview', 'Get dashboard overview: KPIs, recent requests, revenue summary'),
+  tool('get_daily_brief', 'Read the same daily brief as the home card and nav: urgent today, this week and overnight changes, with the generatedAt timestamp. Uses the caller\'s feature permissions and client scope, and the shared once-daily cache.'),
+  tool('refresh_daily_brief', 'Recompute the shared daily brief on demand and return the exact snapshot written to its cache. Respects the caller\'s feature permissions and client scope. Changes the brief cache only, never tasks, requests or invoices.'),
   tool('get_dashboard_guide', 'Read the short "how this works" guide: what the dashboard is for, requests versus tasks, request statuses, tracks and plans, hand-offs, blockers, participants and roles, comments, invoices, and what this MCP server can do. Returns every section, or one section when topic names its key.', {
     topic: prop('string', 'One section key (e.g. "hand-offs", "request-statuses"). Omit for every section'),
   }),
@@ -1913,6 +1915,7 @@ export const TOOLS: ToolDef[] = [
     months: prop('number', 'Trailing months to sync (default 12, max 24)'),
   }),
   tool('sync_xero_balances', 'Pull current bank account balances from Xero and store snapshot'),
+  tool('sync_airwallex', 'Sync the cash source from Airwallex: current wallet balances and the default bounded 14-day transaction window. Refreshes documented AWX Yield USD/AUD holdings from Xero when readable, retaining prior yield holdings and their age on failure. Never treats other Xero ledger balances as cash.'),
   tool('get_expenses', 'Categorised monthly expenses + P&L trend from synced Xero data (NZD)', {
     months: prop('number', 'Trailing months to include (default 12)'),
   }),
@@ -2255,6 +2258,10 @@ export async function executeTool(
     // ── Overview & Reports ────────────────────────────────────────────
     case 'get_overview':
       return json(await apiGet('/api/admin/overview', token))
+    case 'get_daily_brief':
+      return json(await apiGet('/api/admin/overview/brief', token))
+    case 'refresh_daily_brief':
+      return json(await apiWrite('/api/admin/overview/brief/refresh?force=1', token, 'POST'))
     case 'get_dashboard_guide':
       return json(await apiGet('/api/admin/guide', token, s('topic') ? { key: s('topic')! } : undefined))
     case 'get_reports':
@@ -3338,6 +3345,8 @@ export async function executeTool(
       return json(await apiWrite('/api/admin/integrations/xero/sync-pnl', token, 'POST', args as Record<string, unknown>))
     case 'sync_xero_balances':
       return json(await apiWrite('/api/admin/integrations/xero/sync-balances', token, 'POST'))
+    case 'sync_airwallex':
+      return json(await apiWrite('/api/admin/integrations/airwallex/sync', token, 'POST'))
     case 'get_expenses': {
       const m = args.months ? String(args.months) : '12'
       return json(await apiGet(`/api/admin/reports/expenses`, token, { months: m }))

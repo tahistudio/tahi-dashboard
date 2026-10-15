@@ -24,6 +24,7 @@ import { eq, inArray, like, sql } from 'drizzle-orm'
 import { listBalances, listTransactions, AirwallexNotConfiguredError, getAirwallexToken } from '@/lib/airwallex'
 import { logCronRun, hasCronSecretAuth } from '@/lib/cron-runs'
 import { recordYieldHeld, YIELD_HOLDINGS_KEY } from '@/lib/yield-history'
+import { readXeroYieldHoldings, YIELD_ACCOUNT_IDS_KEY, type YieldReadResult } from '@/lib/yield-holdings'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,6 +93,7 @@ export async function POST(req: NextRequest) {
   let yieldRows = 0
   let yieldMalformed = false
   let yieldMarked = false
+  let yieldRefresh: YieldReadResult | null = null
   try {
     // Balances: one row per currency, keyed on accountId. Bulk upsert in
     // chunks; on conflict refresh the amounts + timestamps from the new row.
@@ -177,9 +179,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Yield holdings (Airwallex Capital). The public Airwallex API only
-    // exposes wallet balances, so yield positions are operator-maintained
-    // via the settings key finance.yieldHoldings, a JSON array like
-    // [{"currency":"USD","amount":20014.13}]. Each sync materialises them
+    // exposes wallet balances. Read the documented Xero AWX Yield USD/AUD
+    // accounts every sync and retain the saved setting when either cannot
+    // be read. Xero BankSummary reports base-currency amounts, never native
+    // USD/AUD amounts. Each sync materialises the setting's currency/amount
     // as extra airwallex_balances rows (accountId 'yield:CUR') so every
     // reader (overview cash, financial-reports summary, bank-balances,
     // forward snapshots) includes them with no special cases. Rows for
@@ -187,11 +190,18 @@ export async function POST(req: NextRequest) {
     // BACKFILL and the Xero drift check both exclude 'yield:' rows by key,
     // and the first holding any sync sees is recorded in
     // finance.yieldFirstHeldAt, which nothing clears.
-    const [yieldSetting] = await database
-      .select({ value: schema.settings.value })
+    const yieldSettings = await database
+      .select({ key: schema.settings.key, value: schema.settings.value, updatedAt: schema.settings.updatedAt })
       .from(schema.settings)
-      .where(eq(schema.settings.key, YIELD_HOLDINGS_KEY))
-      .limit(1)
+      .where(inArray(schema.settings.key, [YIELD_HOLDINGS_KEY, YIELD_ACCOUNT_IDS_KEY]))
+    const savedYieldSetting = yieldSettings.find(setting => setting.key === YIELD_HOLDINGS_KEY)
+    // finance.yieldAccountIds may pin USD and/or AUD IDs when account names change.
+    // A malformed pin retains the last good holdings rather than selecting another account.
+    const pinnedAccounts = yieldSettings.find(setting => setting.key === YIELD_ACCOUNT_IDS_KEY)
+    yieldRefresh = await readXeroYieldHoldings(nowIso, pinnedAccounts?.value)
+    const yieldSetting = yieldRefresh.ok
+      ? { value: JSON.stringify(yieldRefresh.holdings), updatedAt: nowIso }
+      : savedYieldSetting
     // A missing setting or an empty array means "no yield held" and clears
     // the materialised rows. A document that fails to parse, or contains
     // ANY invalid entry, means "don't touch anything": the last good
@@ -208,13 +218,18 @@ export async function POST(req: NextRequest) {
             const rec = entry && typeof entry === 'object'
               ? entry as { currency?: unknown; amount?: unknown }
               : null
-            const cur = String(rec?.currency ?? '').toUpperCase()
-            const amt = Number(rec?.amount)
+            const cur = typeof rec?.currency === 'string' ? rec.currency.trim().toUpperCase() : ''
+            const amt = typeof rec?.amount === 'number' ? rec.amount : Number.NaN
             if (!rec || !/^[A-Z]{3}$/.test(cur) || !Number.isFinite(amt) || amt < 0) {
               holdingsReadable = false
               break
             }
-            holdingsByCurrency.set(cur, (holdingsByCurrency.get(cur) ?? 0) + amt)
+            const combined = (holdingsByCurrency.get(cur) ?? 0) + amt
+            if (!Number.isFinite(combined)) {
+              holdingsReadable = false
+              break
+            }
+            holdingsByCurrency.set(cur, combined)
           }
         } else {
           holdingsReadable = false
@@ -225,39 +240,61 @@ export async function POST(req: NextRequest) {
     }
     yieldMalformed = !holdingsReadable
     const existingYield = await database
-      .select({ accountId: schema.airwallexBalances.accountId, balance: schema.airwallexBalances.balance })
+      .select({ accountId: schema.airwallexBalances.accountId, balance: schema.airwallexBalances.balance,
+        asOf: schema.airwallexBalances.asOf, updatedAt: schema.airwallexBalances.updatedAt })
       .from(schema.airwallexBalances)
       .where(like(schema.airwallexBalances.accountId, 'yield:%'))
+    if (!yieldSetting?.value && existingYield.length > 0) {
+      holdingsReadable = false
+      yieldMalformed = true
+    }
     // Before any yield row is written or deleted: a holding seen here, in
     // the rows or in the setting, is recorded for good in
     // finance.yieldFirstHeldAt, so the month-end cash rebuild still knows
     // yield was held after the setting is emptied and the rows go
     // (lib/yield-history.ts).
+    // A saved holding may already have been withdrawn in Xero before any
+    // sync wrote its durable history marker. Preserve that evidence too.
+    const previouslyHeld: number[] = []
+    if (yieldRefresh.ok && savedYieldSetting?.value) {
+      try {
+        const previous = JSON.parse(savedYieldSetting.value) as unknown
+        if (Array.isArray(previous)) {
+          for (const entry of previous) {
+            const amount = entry && typeof entry === 'object'
+              ? (entry as { amount?: unknown }).amount
+              : null
+            if (typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) previouslyHeld.push(amount)
+          }
+        }
+      } catch { /* Materialised rows still preserve the last known holding. */ }
+    }
     yieldMarked = await recordYieldHeld(
       database,
-      [...existingYield.map(r => r.balance), ...(holdingsReadable ? holdingsByCurrency.values() : [])],
+      [...existingYield.map(r => r.balance), ...previouslyHeld, ...(holdingsReadable ? holdingsByCurrency.values() : [])],
       nowIso,
     )
     if (holdingsReadable) {
       const wanted = new Set([...holdingsByCurrency.keys()].map(cur => `yield:${cur}`))
       const stale = existingYield.map(r => r.accountId).filter(id => !wanted.has(id))
-      for (let i = 0; i < stale.length; i += PARAM_BUDGET) {
-        await database
-          .delete(schema.airwallexBalances)
-          .where(inArray(schema.airwallexBalances.accountId, stale.slice(i, i + PARAM_BUDGET)))
-      }
-      const yieldRowValues = [...holdingsByCurrency.entries()].map(([cur, amount]) => ({
-        accountId: `yield:${cur}`,
-        accountName: `Airwallex ${cur} Yield`,
-        currency: cur,
-        balance: amount,
-        availableBalance: amount,
-        asOf: nowIso,
-        updatedAt: nowIso,
-      }))
-      for (let i = 0; i < yieldRowValues.length; i += balChunk) {
-        const slice = yieldRowValues.slice(i, i + balChunk)
-        await database.insert(schema.airwallexBalances).values(slice).onConflictDoUpdate({
+      const deletes = Array.from({ length: Math.ceil(stale.length / PARAM_BUDGET) }, (_, index) => database
+        .delete(schema.airwallexBalances)
+        .where(inArray(schema.airwallexBalances.accountId, stale.slice(index * PARAM_BUDGET, (index + 1) * PARAM_BUDGET))))
+      const yieldRowValues = [...holdingsByCurrency.entries()].map(([cur, amount]) => {
+        const existing = existingYield.find(row => row.accountId === `yield:${cur}`)
+        const unchanged = !yieldRefresh?.ok && existing?.balance === amount
+        return {
+          accountId: `yield:${cur}`,
+          accountName: `Airwallex ${cur} Yield`,
+          currency: cur,
+          balance: amount,
+          availableBalance: amount,
+          asOf: unchanged ? existing.asOf : yieldSetting?.updatedAt ?? nowIso,
+          updatedAt: unchanged ? existing.updatedAt : yieldSetting?.updatedAt ?? nowIso,
+        }
+      })
+      const upserts = Array.from({ length: Math.ceil(yieldRowValues.length / balChunk) }, (_, index) => database
+        .insert(schema.airwallexBalances).values(yieldRowValues.slice(index * balChunk, (index + 1) * balChunk)).onConflictDoUpdate({
           target: schema.airwallexBalances.accountId,
           set: {
             accountName: sql`excluded.account_name`,
@@ -267,8 +304,16 @@ export async function POST(req: NextRequest) {
             asOf: sql`excluded.as_of`,
             updatedAt: sql`excluded.updated_at`,
           },
-        })
-      }
+        }))
+      const value = yieldSetting?.value ?? '[]'
+      const settingWrites = yieldRefresh.ok
+        ? [database.insert(schema.settings).values({ key: YIELD_HOLDINGS_KEY, value, updatedAt: nowIso })
+          .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: nowIso } })]
+        : []
+      const writes = [...deletes, ...upserts, ...settingWrites]
+      // D1 batch is transactional: a failed currency-row replacement cannot
+      // remove cash or stamp an unmaterialised holding as freshly read.
+      if (writes.length > 0) await database.batch([writes[0], ...writes.slice(1)])
       yieldRows = yieldRowValues.length
     }
 
@@ -302,6 +347,9 @@ export async function POST(req: NextRequest) {
     yieldRows,
     yieldMalformed,
     yieldMarked,
+    yieldRefresh: yieldRefresh?.ok
+      ? { refreshed: true, source: 'xero_awx_yield', currencyBasis: yieldRefresh.currencyBasis }
+      : { refreshed: false, source: 'saved_holdings', warning: yieldRefresh?.warning },
   }
   await logCronRun(database, 'sync-airwallex', 'success', Date.now() - t0, summary, null)
   return NextResponse.json(summary)

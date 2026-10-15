@@ -1609,6 +1609,64 @@ handlers. Raw checks and exact test selection are under .claude/t1-6-review.
 
 No commit, push, deploy, build, migration, production-data operation, TASKS.md
 or STATUS.md edit. HEAD remains 67594c29. No live QA is claimed.
+
+## 2026-10-14, Next-20 batch B Opus review repairs from 35b9396b
+
+First command confirmed a clean chore/next20-n20b worktree at 35b9396b.
+Liam requested only the four review findings, no commit, push or deploy, and
+no TASKS.md or STATUS.md edits. Those files remain untouched. All repairs are
+uncommitted; no production sync, figure change, migration or secret change.
+The batch audit is docs/superpowers/audits/2026-10-14-next20-batch-b.md.
+
+Yield selection now requires ACTIVE BANK status, matching CurrencyCode and
+the normalised YIELD_USD or YIELD_AUD name suffix, exactly one account per
+currency. Optional finance.yieldAccountIds pins either currency to its
+AccountID, with the same type/status/currency checks and fail-closed handling.
+The fixture copies Liam's live names/IDs and the Header/Section/Cells[0]
+accountID shape with Closing Balance at index 5. Parser and SQLite sync tests
+keep NZD 44,689.56 plus NZD 666.77 as one yield:NZD row of NZD 45,356.33,
+without FX conversion. Live verification remains pending until a sync returns
+yieldRefresh.refreshed: true. The audit now states that the source is automatic.
+
+FX root cause in source/history: the April 4 refresh route (df0a8efb) was
+manual only and never appeared in the recurring scheduler; it also lacked
+cron-secret auth. The existing refresh_exchange_rates MCP tool already calls
+the correct POST. Daily 18:00 UTC now refreshes FX before Airwallex and
+snapshot-metrics, with the manual workflow mapped to the same endpoint.
+The exact middleware path permits the request to reach the handler's own
+cron-secret/admin guard; GET still needs an admin session. Provider timeout,
+complete positive quotes, USD parity/base, source date validation and atomic
+D1 batching preserve the old cache on failure. cron_runs records outcomes.
+Production OPEN_EXCHANGE_RATES_APP_ID configuration remains unverified.
+
+Shared freshness warns after more than seven days or unknown timestamps,
+using the oldest rate including NZD. Cash APIs/MCP carry metadata; home,
+finance and forecast displays warn on stale server rates and on the browser
+rates actually used, including native balances converted into NZD. Pipeline
+overdue expected closes now place upfront receipts in the current month,
+retaining recurring start dates without arrears and future horizon limits.
+
+Independent QA found and verified fixes for the missing middleware allowance
+and native-to-NZD warning coverage. UIUX found and verified block wrapping in
+compact vitals plus the rates-loading guard. Both source reviews pass. Static
+render tests cover the warning behavior; Playwright launch was denied with
+spawn EPERM, so no rendered viewport, hydrated or deployed proof is claimed.
+
+Final sequential fail-closed gate, exit 0:
+    CI=1 npm run type-check: passed, zero errors
+    CI=1 npm run lint: passed, zero errors, existing repository warnings
+    tsc --noEmit --project workers/mcp-server/tsconfig.json: passed
+    tsc --noEmit --project workers/cron-trigger/tsconfig.json: passed
+    sandbox Vitest: Test Files 14 passed (14), Tests 186 passed (186)
+    git diff --check: passed
+The first type-check caught a test-only inferred optional header type, fixed
+with an explicit fixture type before the successful chain. Vitest used the
+existing .wrangler/vitest-sandbox.config.mjs and --configLoader native because
+standard esbuild config startup is denied with spawn EPERM. The gate includes
+all touched tests, middleware schedule coverage, currency/shared cash and
+overview regressions. Output: .wrangler/batch-b-review-gates.log. Live yield
+sync, runtime secret confirmation and deployed UI checks remain pending.
+
 ## 2026-10-14, REC.0 tray live-call audio device repair (uncommitted)
 
 First command confirmed clean git status on feat/rec0-tray-app at 749b56b4.

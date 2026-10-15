@@ -23,7 +23,7 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
  * the week ahead is). Booked hours are the sum of:
  *   - open tasks (status != 'done') assigned to the member, due this week or
  *     already overdue, by estimatedHours
- *   - open requests (status not delivered/archived) assigned to the member
+ *   - open requests (status not delivered/archived/cancelled) assigned to the member
  *     with an estimatedHours set
  * Hours already logged this week stay a separate figure, `loggedHours`,
  * rather than being folded into "booked".
@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
       .where(and(
         inArray(schema.requests.assigneeId, memberIds),
         scope.kind === 'none' ? sql`0 = 1` : scope.kind === 'some' ? orgColumnInScope(schema.requests.orgId, scope.orgIds) : undefined,
-        sql`${schema.requests.status} NOT IN ('delivered', 'archived')`,
+        sql`${schema.requests.status} NOT IN ('delivered', 'archived', 'cancelled')`,
         sql`${schema.requests.estimatedHours} IS NOT NULL AND ${schema.requests.estimatedHours} > 0`,
       ))
       .groupBy(schema.requests.assigneeId),

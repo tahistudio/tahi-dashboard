@@ -23,6 +23,10 @@ describe('mrrDeltaLabel', () => {
     expect(mrrDeltaLabel('2026-08', NOW)).toBe('vs Aug')
   })
 
+  it('labels the September snapshot in October without claiming an August gap', () => {
+    expect(mrrDeltaLabel('2026-09', new Date('2026-10-14T00:00:00.000Z'))).toBe('vs Sept')
+  })
+
   it('calls out a month with no MRR when the basis is more than one month back', () => {
     // Basis is July; August has no MRR on record (its snapshot never landed,
     // or it was backfilled, and a backfilled row never carries MRR).

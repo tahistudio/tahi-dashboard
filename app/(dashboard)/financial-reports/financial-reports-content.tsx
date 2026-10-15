@@ -36,6 +36,9 @@ import { Input, Select, Textarea } from '@/components/tahi/input'
 import { apiPath } from '@/lib/api'
 import { useDisplayCurrency } from '@/lib/display-currency-context'
 import { convertToNzd } from '@/lib/currency'
+import type { YieldFreshness } from '@/lib/yield-holdings'
+import type { FxFreshness } from '@/lib/fx-freshness'
+import { FxFreshnessWarning } from '@/components/tahi/fx-freshness-warning'
 
 interface SummaryResponse {
   asOf: string
@@ -43,6 +46,8 @@ interface SummaryResponse {
    *  never synced. Surfaced on the cash hero as "Synced X ago" + the
    *  Watchlist strip when older than 7 days. */
   bankSyncedAt: string | null
+  yieldFreshness?: YieldFreshness
+  fxFreshness?: FxFreshness
   primaryCurrency: string
   bankBalances: Array<{ currency: string; available: number; total: number; sources: string[] }>
   reserves: {
@@ -123,7 +128,7 @@ interface SummaryResponse {
   yoy: { thisMonth: number; lastYearSameMonth: number; deltaPct: number | null }
   quarterly: { target: number; actual: number; projection: number; daysElapsed: number; daysTotal: number; pctElapsed: number; onPace: boolean | null }
   yearEnd: { projection: number; monthsRemaining: number }
-  forex: { items: Array<{ currency: string; available: number }>; nzdShare: number }
+  forex: { items: Array<{ currency: string; available: number; share: number }>; nzdShare: number }
   monthlyRevenueHistory: Array<{ ym: string; total: number }>
   costMix: Array<{ category: string; monthly: number }>
   pipelineFunnel: Array<{ stage: string; position: number; isClosedWon: boolean; count: number; value: number }>
@@ -353,6 +358,8 @@ export function FinancialReportsContent() {
         </TahiButton>
       </PageHeader>
 
+      <FxFreshnessWarning freshness={data.fxFreshness} convertsNative />
+
       {/* ── Hero band: Where you stand right now ─────────────────────
           Two side-by-side FeatureCards. Left summarises cash and the
           two runway flavours; right summarises the revenue engine. */}
@@ -399,15 +406,23 @@ export function FinancialReportsContent() {
           <Card>
             <div className="p-4 sm:p-6">
               <SubSectionHeader title="Bank balances" meta={`${fundedBanks.length} funded ${fundedBanks.length === 1 ? 'account' : 'accounts'}`} />
+              <p className="text-xs text-[var(--color-text-muted)]" style={{ margin: '0.75rem 0', overflowWrap: 'anywhere' }}>
+                Wallet: Airwallex account currency. Yield: saved holding currency, or Xero&apos;s base currency after an AWX Yield sync.
+              </p>
+              {data.yieldFreshness?.warning && (
+                <p role="status" className="text-sm" style={{ color: 'var(--badge-warning-text)', margin: '0.75rem 0', overflowWrap: 'anywhere' }}>
+                  {data.yieldFreshness.warning}
+                </p>
+              )}
               {fundedBanks.length === 0 ? (
-                <EmptyHint>No funded bank accounts. Sync Airwallex or Xero to populate.</EmptyHint>
+                <EmptyHint>No funded bank accounts. Sync Airwallex to populate.</EmptyHint>
               ) : (
                 <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                   <table style={{ width: '100%', minWidth: '20rem', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
                         <TableTh align="left">Account</TableTh>
-                        <TableTh align="right">Native</TableTh>
+                        <TableTh align="right">Reported</TableTh>
                         <TableTh align="right">{`= ${cur}`}</TableTh>
                         <TableTh align="right">Source</TableTh>
                       </tr>
@@ -417,7 +432,7 @@ export function FinancialReportsContent() {
                         <tr key={b.currency}>
                           <td className="text-sm font-medium text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem' }}>{b.currency}</td>
                           <td data-private className="text-sm text-[var(--color-text)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatNativeRaw(b.available, b.currency)}</td>
-                          <td data-private className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? 'native' : toCur(b.available, b.currency)}</td>
+                          <td data-private className="text-sm text-[var(--color-text-muted)]" style={{ padding: '0.5rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{b.currency === cur ? 'same currency' : toCur(b.available, b.currency)}</td>
                           <td style={{ padding: '0.5rem 0.5rem', textAlign: 'right' }}>
                             {b.sources.map(s => (
                               <Badge key={s} tone="neutral" variant="soft" size="sm">{s}</Badge>
@@ -1751,7 +1766,7 @@ function QuarterAndProjectionCard({ quarterly, yearEnd, ytdRevenue, effectiveMon
 }
 
 function ForexCard({ forex, formatNative }: {
-  forex: { items: Array<{ currency: string; available: number }>; nzdShare: number }
+  forex: { items: Array<{ currency: string; available: number; share: number }>; nzdShare: number }
   formatNative: (n: number, currency: string) => string
 }) {
   if (forex.items.length === 0) return null
@@ -1760,20 +1775,19 @@ function ForexCard({ forex, formatNative }: {
       <div className="p-4 sm:p-6">
         <div className="flex items-baseline justify-between" style={{ marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--color-text-subtle)]">
-            Forex exposure
+            Wallet forex exposure
           </div>
           <div className="text-[0.6875rem] text-[var(--color-text-subtle)]">
-            {Math.round(forex.nzdShare * 100)}% held in NZD
+            {Math.round(forex.nzdShare * 100)}% of wallet held in NZD
           </div>
         </div>
         <div className="grid" style={{ gap: '0.375rem' }}>
           {forex.items.filter(b => Math.abs(b.available) > 0.01).map(b => {
-            const totalAll = forex.items.reduce((s, x) => s + Math.max(0, x.available), 0)
-            const pct = totalAll > 0 ? b.available / totalAll : 0
+            const pct = b.share
             return (
               <div key={b.currency} className="flex items-center" style={{ gap: '0.75rem' }}>
                 <span className="text-sm text-[var(--color-text)]" style={{ minWidth: '3rem', fontVariantNumeric: 'tabular-nums' }}>{b.currency}</span>
-                <div style={{ flex: 1, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999px', overflow: 'hidden' }}>
+                <div style={{ flex: 1, height: '0.5rem', background: 'var(--color-bg-secondary)', borderRadius: '999rem', overflow: 'hidden' }}>
                   <div style={{ width: `${Math.max(2, pct * 100)}%`, height: '100%', background: b.currency === 'NZD' ? 'var(--color-brand)' : 'var(--color-brand-light)' }} />
                 </div>
                 <span data-private className="text-xs text-[var(--color-text-muted)]" style={{ width: '7rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
@@ -1787,7 +1801,7 @@ function ForexCard({ forex, formatNative }: {
           })}
         </div>
         <p className="text-xs text-[var(--color-text-muted)] mt-3" style={{ lineHeight: 1.5 }}>
-          Costs are denominated in NZD. {forex.nzdShare < 0.7 ? 'A NZD strengthening would dent the non-NZD pots\' purchasing power for your domestic burn.' : 'Forex exposure is low. Most cash is already in operating currency.'}
+          Wallet shares use converted values. Yield holdings are included in total cash separately. {forex.nzdShare < 0.7 ? 'A NZD strengthening would dent the non-NZD wallet pots\' purchasing power for your domestic burn.' : 'Wallet exposure is low. Most wallet cash is already in operating currency.'}
         </p>
       </div>
     </Card>

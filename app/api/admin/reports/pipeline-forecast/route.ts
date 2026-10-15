@@ -30,6 +30,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { asc, sql, and } from 'drizzle-orm'
+import { splitClosingDeals } from '@/lib/pipeline-stage-chart'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,6 +57,7 @@ export async function GET(req: NextRequest) {
         stageId: schema.deals.stageId,
         upfrontValueNzd: schema.deals.upfrontValueNzd,
         monthlyValueNzd: schema.deals.monthlyValueNzd,
+        expectedCloseDate: schema.deals.expectedCloseDate,
       })
       .from(schema.deals)
       // Archived (soft-deleted) deals are hidden from the pipeline list; the
@@ -128,6 +130,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const stagesById = new Map(stages.map(stage => [stage.id, stage]))
+  const closingSplit = splitClosingDeals(dealRows.map(deal => {
+    const stage = stagesById.get(deal.stageId)
+    return {
+      expectedCloseDate: deal.expectedCloseDate,
+      stageIsClosedWon: stage?.isClosedWon ?? 1,
+      stageIsClosedLost: stage?.isClosedLost ?? 1,
+    }
+  }))
+
   return NextResponse.json({
     totalDeals,
     unweightedUpfrontNzd,
@@ -135,5 +147,6 @@ export async function GET(req: NextRequest) {
     weightedUpfrontNzd,
     weightedMonthlyNzd,
     byStage,
+    closingSplit,
   })
 }

@@ -43,6 +43,7 @@ on:
           - sync-drive-transcripts
           - suggest-from-transcripts
           - sync-airwallex
+          - refresh-exchange-rates
           - sync-xero
           - sync-stripe
           - snapshot-metrics
@@ -81,7 +82,7 @@ jobs:
               "12,42 * * * *")                   targets="suggest-from-transcripts" ;;
               "0 19 * * *"|"0 20 * * *")         targets="daily-summary ai-briefing overview-brief" ;;
               "0 19 * * MON")                    targets="affiliate-reactivation" ;;
-              "0 18 * * *")                      targets="sync-airwallex snapshot-metrics" ;;
+              "0 18 * * *")                      targets="refresh-exchange-rates sync-airwallex snapshot-metrics" ;;
               "0 21 * * MON"|"0 21 1 * *")       targets="finance-anomaly-scan" ;;
               "0 22 * * SUN")                    targets="content-auto-backfill" ;;
               "30 19 * * SUN")                   targets="content-gap-hunt" ;;
@@ -127,6 +128,7 @@ jobs:
               # branch below cannot quietly 404 it.
               suggest-from-transcripts)             url="$root/crons/$target" ;;
               sync-airwallex)                       url="$root/integrations/airwallex/sync" ;;
+              refresh-exchange-rates)               url="$root/exchange-rates" ;;
               ai-briefing)                          url="$root/ai/briefing/cron" ;;
               overview-brief)                       url="$root/overview/brief/refresh" ;;
               *)                                    url="$root/cron/$target" ;;

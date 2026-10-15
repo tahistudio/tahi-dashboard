@@ -10,6 +10,7 @@ import { formatCurrency } from '@/lib/currency'
 import type { OrgScope } from '@/lib/access-scope'
 import { discoveryCallScopeCondition } from '@/lib/discovery-call-access'
 import { internalMessageFilter } from '@/lib/internal-route-access'
+import { BRIEF_FEATURES, briefCacheKeyForFingerprint, briefScopeFingerprint } from '@/lib/brief-cache-key'
 
 
 export type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -24,7 +25,7 @@ export const BRIEF_CACHE_KEY = 'overview_brief_latest'
 //   verb -> the optional action button label (null = no action)
 //   to   -> the nav id the action routes to (go(to))
 //   text -> the assembled, human-readable line (money baked NZD, wire-style)
-interface BriefRow {
+export interface BriefRow {
   tone: 'risk' | 'warn' | 'ok' | ''
   verb: string | null
   to: string
@@ -37,8 +38,20 @@ export interface BriefResult {
   slept: BriefRow[]
 }
 
-interface CachedBrief extends BriefResult {
+export interface BriefSnapshot extends BriefResult {
   generatedAt: string
+}
+
+/** The cache key and computation always use the same resolved permissions. */
+export async function resolveBriefContext(
+  drizzle: D1,
+  auth: { userId: string | null; orgId: string | null },
+): Promise<{ access: ResolvedAccess; allowedOrgs: string[] | null; cacheKey: string }> {
+  const access = await resolvePermissions(drizzle, auth)
+  const allowedOrgs = await resolveAccessScoping(drizzle, auth.userId)
+  const features = BRIEF_FEATURES.filter(feature => can(access, feature))
+  const cacheKey = briefCacheKeyForFingerprint(BRIEF_CACHE_KEY, briefScopeFingerprint(allowedOrgs, features))
+  return { access, allowedOrgs, cacheKey }
 }
 
 // Server-side NZD formatting. Amounts are already converted to NZD upstream
@@ -359,7 +372,7 @@ export async function computeBrief(
 
 // Read the cached brief from settings. Returns null on a missing / corrupt /
 // shape-mismatched row so the caller safely falls through to a recompute.
-export async function readBriefCache(drizzle: D1, cacheKey: string = BRIEF_CACHE_KEY): Promise<CachedBrief | null> {
+export async function readBriefCache(drizzle: D1, cacheKey: string = BRIEF_CACHE_KEY): Promise<BriefSnapshot | null> {
   try {
     const [row] = await drizzle
       .select({ value: schema.settings.value })
@@ -367,7 +380,7 @@ export async function readBriefCache(drizzle: D1, cacheKey: string = BRIEF_CACHE
       .where(eq(schema.settings.key, cacheKey))
       .limit(1)
     if (!row?.value) return null
-    const parsed = JSON.parse(row.value) as Partial<CachedBrief>
+    const parsed = JSON.parse(row.value) as Partial<BriefSnapshot>
     if (
       typeof parsed.generatedAt !== 'string' ||
       !Array.isArray(parsed.urgent) ||

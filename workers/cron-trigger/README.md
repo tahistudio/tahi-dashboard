@@ -16,6 +16,15 @@ The full schedule -> target -> path mapping lives in `src/schedule.ts`
 `app/api/__tests__/cron-trigger-schedule.test.ts` even though `workers/**`
 is excluded from the app's Vitest run.
 
+At 18:00 UTC each day, `refresh-exchange-rates` runs before `sync-airwallex`
+and `snapshot-metrics`. It POSTs `/api/admin/exchange-rates` with the shared
+cron secret. The dashboard requires its `OPEN_EXCHANGE_RATES_APP_ID` runtime
+secret; the trigger worker does not need that provider credential. A missing
+provider secret, invalid response or failed write preserves the cached rates
+and records an error under `refresh-exchange-rates` in `cron_runs`.
+Successful rows retain the provider's timestamp, so an old response cannot be
+presented as a new quote. The manual GitHub workflow can fire the same target.
+
 Deploy from this directory:
 
 ```bash
