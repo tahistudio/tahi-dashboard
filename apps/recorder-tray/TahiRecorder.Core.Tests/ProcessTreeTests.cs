@@ -35,6 +35,26 @@ public sealed class ProcessTreeTests
     }
 
     [Fact]
+    public void AppNameCollapsesHelpersAndTeamsRenamesButKeepsBrowsersDistinct()
+    {
+        var processes = Snapshot(new(100, 1, "vivaldi"), new(101, 100, "audio-service"),
+            new(200, 1, "chrome"), new(300, 1, "ms-teams"), new(301, 300, "msedgewebview2"),
+            new(400, 1, "teams"));
+
+        string AppOf(int sessionPid, string platform)
+        {
+            var tree = ProcessTree.ResolveMeetingTree(sessionPid, platform, processes);
+            return ProcessTree.AppName(platform, tree.RootId, processes[sessionPid].Name, processes);
+        }
+
+        Assert.Equal("vivaldi", AppOf(101, "meet"));
+        Assert.Equal("chrome", AppOf(200, "meet"));
+        Assert.Equal("teams", AppOf(301, "teams"));
+        Assert.Equal("teams", AppOf(400, "teams"));
+        Assert.NotEqual(AppOf(101, "meet"), AppOf(200, "meet"));
+    }
+
+    [Fact]
     public void TeamsWebViewUsesNativeTeamsRootRatherThanBrowserAncestor()
     {
         var processes = Snapshot(new(100, 1, "chrome"), new(101, 100, "ms-teams"),

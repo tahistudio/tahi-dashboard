@@ -110,18 +110,25 @@ public sealed class RecorderApiClient : IRecorderApi, IDisposable
     private static async Task<RecorderApiException> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         string? code = null;
+        string? message = null;
         bool uploaded = false;
         try
         {
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
             if (json.RootElement.TryGetProperty("code", out var value) && value.ValueKind == JsonValueKind.String) code = value.GetString();
+            if (json.RootElement.TryGetProperty("error", out value) && value.ValueKind == JsonValueKind.String
+                && value.GetString() is { } text)
+                message = text.Length > 200 ? text[..200] : text;
+            if (message is null && json.RootElement.TryGetProperty("message", out value) && value.ValueKind == JsonValueKind.String
+                && value.GetString() is { } alternative)
+                message = alternative.Length > 200 ? alternative[..200] : alternative;
             if (json.RootElement.TryGetProperty("uploaded", out value)) uploaded = value.ValueKind == JsonValueKind.True;
         }
         catch (JsonException) { }
         var retryAfter = response.Headers.RetryAfter?.Delta;
         if (retryAfter is null && response.Headers.RetryAfter?.Date is { } date)
             retryAfter = date - DateTimeOffset.UtcNow;
-        return new RecorderApiException((int)response.StatusCode, code, uploaded, retryAfter);
+        return new RecorderApiException((int)response.StatusCode, code, uploaded, retryAfter, message);
     }
 
     public void Dispose() { if (ownsClient) http.Dispose(); }

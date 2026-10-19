@@ -462,7 +462,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 lock (_automationGate)
                 {
                     actions = _automation.Tick(DateTimeOffset.UtcNow, meeting.IsActive, meeting.Platform,
-                        Volatile.Read(ref _upcoming), meeting.Platform + ":" + meeting.ProcessId, failure);
+                        Volatile.Read(ref _upcoming), meeting.Platform + ":" + meeting.ProcessId, failure, meeting.AppName);
                     PersistState();
                 }
                 await ApplyActionsAsync(actions);
@@ -479,7 +479,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
             // Only a failing disk disables capture, and even that is retried by HealAsync.
             if (error is IOException or UnauthorizedAccessException) MarkFault();
             else ScheduleHeal();
-            lock (_automationGate) _automation.ManualStop(DateTimeOffset.UtcNow);
+            lock (_automationGate)
+            {
+                // A planned recording that never started (its predecessor's stop threw) must not suppress
+                // the call it was planned for. Only a recording that really ran is held until its session ends.
+                if (_automation.Current is { } planned && _settings.ActiveCaptureRef != planned.ClientRef)
+                {
+                    _automation.StopForLifecycle(RecordingStopReason.Shutdown);
+                    // Not suppressed, but a brief hold stops a persistent failure retrying every tick.
+                    _automation.DelayAutoStart(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(30));
+                }
+                else
+                    _automation.ManualStop(DateTimeOffset.UtcNow);
+            }
             TryPersistState();
             // Only act on the recorder this tick started with; a replacement belongs to a newer session.
             try { if (ReferenceEquals(_capture, startedWith)) await StopCaptureAsync(_settings.ActiveCaptureRef); }

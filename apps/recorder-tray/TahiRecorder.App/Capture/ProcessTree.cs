@@ -61,6 +61,15 @@ internal static class ProcessTree
         return browser;
     }
 
+    /// <summary>
+    /// Stable identity of the app that owns a meeting session. Helper processes (WebView2, audio services)
+    /// and renamed executables such as teams and ms-teams collapse to one name. Browsers stay distinct
+    /// because every browser microphone session is labelled "meet".
+    /// </summary>
+    public static string AppName(string platform, int rootId, string sessionProcessName,
+        IReadOnlyDictionary<int, ObservedProcess> processes) =>
+        platform == "meet" ? (processes.TryGetValue(rootId, out var root) ? root.Name : sessionProcessName) : platform;
+
     public static (int RootId, IReadOnlyCollection<int> ProcessIds) ResolveMeetingTree(
         int processId, string platform, IReadOnlyDictionary<int, ObservedProcess> processes)
     {

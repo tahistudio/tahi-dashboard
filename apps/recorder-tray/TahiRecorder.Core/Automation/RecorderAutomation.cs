@@ -34,6 +34,8 @@ public sealed record RecordingAction(
 
 public sealed record SuppressedCall(string Id, string Kind, long EndMs);
 
+internal sealed record RetiredCall(UpcomingCall Call, string App);
+
 public sealed record AutomationSnapshot(
     DateTimeOffset? PausedUntil,
     DateTimeOffset? ManuallyStoppedAt,
@@ -54,6 +56,8 @@ public sealed class RecorderAutomation
     public static readonly TimeSpan UnknownCallDelay = TimeSpan.FromSeconds(20);
     public static readonly TimeSpan InactiveStopDelay = TimeSpan.FromSeconds(60);
     public static readonly TimeSpan OverrunInactiveDelay = TimeSpan.FromSeconds(5);
+    /// <summary>How long a different app must hold the capture session before an automatic recording splits to it.</summary>
+    public static readonly TimeSpan AppSwitchConfirmDelay = TimeSpan.FromSeconds(10);
     public static readonly TimeSpan CaptureGapAutoStartDelay = TimeSpan.FromSeconds(45);
     public static readonly TimeSpan AbandonedStartDelay = TimeSpan.FromMinutes(2);
     public static readonly TimeSpan EarlyJoinWindow = TimeSpan.FromMinutes(10);
@@ -72,6 +76,11 @@ public sealed class RecorderAutomation
     private DateTimeOffset? _autoStartNotBefore;
     private bool _meetingSessionSeen;
     private string? _recordingSessionKey;
+    private string? _observedAppKey;
+    private string? _recordingAppKey;
+    private readonly List<RetiredCall> _retiredCalls = [];
+    private string? _pendingAppKey;
+    private DateTimeOffset _pendingAppSince;
     private UpcomingCall? _currentCalendarContext;
     private IReadOnlyList<UpcomingCall> _currentCalendarCandidates = [];
 
@@ -98,12 +107,14 @@ public sealed class RecorderAutomation
         string platform,
         IReadOnlyList<UpcomingCall> calls,
         string? captureSessionKey = null,
-        CaptureFailureAction captureFailure = CaptureFailureAction.None)
+        CaptureFailureAction captureFailure = CaptureFailureAction.None,
+        string? captureAppKey = null)
     {
         ArgumentNullException.ThrowIfNull(calls);
         var nowMs = now.ToUnixTimeMilliseconds();
         if (_calendarRestartTarget is { } target && target.EndMs + 600_000 < nowMs)
             ClearCalendarRestart();
+        _observedAppKey = active ? captureAppKey : null;
         ObserveActivity(now, active, captureSessionKey ?? platform, calls);
         // Expired calendar ids no longer influence matching, while the session
         // suppression still prevents a long manually stopped call restarting.
@@ -146,6 +157,13 @@ public sealed class RecorderAutomation
             if (!active && _meetingSessionSeen && _inactiveSince is { } inactive && now - inactive >= InactiveStopDelay)
                 return Stop(RecordingStopReason.MeetingInactive);
 
+            if (current.IsAutomatic && TryConfirmAppSwitch(now, active))
+            {
+                var actions = new List<RecordingAction>(Stop(RecordingStopReason.NextCall));
+                actions.AddRange(StartAutomatic(now, nowMs, platform, calls, unknownReady: true, afterSplit: true));
+                return actions;
+            }
+
             var next = current.IsAutomatic && !IsPaused(now) ? FindNextCalls(nowMs, current, calls) : [];
             if (next.Count != 0)
             {
@@ -161,6 +179,7 @@ public sealed class RecorderAutomation
         }
 
         if (!active || IsPaused(now) || now < _autoStartNotBefore) return [];
+        calls = ExcludeRetired(now, calls);
 
         var matchResult = CallMatcher.Match(nowMs, calls);
         if (_suppressCurrentSession)
@@ -176,6 +195,50 @@ public sealed class RecorderAutomation
             ClearCalendarRestart();
         }
 
+        return StartAutomatic(now, nowMs, platform, calls, unknownReady: false);
+    }
+
+    /// <summary>
+    /// A different app that holds the capture session for <see cref="AppSwitchConfirmDelay"/> is the next call.
+    /// The same app returning, an unknown app identity, an inactive session and a pause all clear the
+    /// candidate, so flaps and process id changes of one app never split.
+    /// </summary>
+    private bool TryConfirmAppSwitch(DateTimeOffset now, bool active)
+    {
+        if (!active || _observedAppKey is not { } app || IsPaused(now))
+        {
+            _pendingAppKey = null;
+            return false;
+        }
+        _recordingAppKey ??= app;
+        if (app == _recordingAppKey)
+        {
+            _pendingAppKey = null;
+            return false;
+        }
+        if (_pendingAppKey != app)
+        {
+            _pendingAppKey = app;
+            _pendingAppSince = now;
+            return false;
+        }
+        return now - _pendingAppSince >= AppSwitchConfirmDelay;
+    }
+
+    /// <summary>
+    /// Starts like a normal automatic start: calendar window and suppression rules apply. A confirmed app
+    /// switch has already waited out its own delay, so it needs no further unknown-call qualification.
+    /// A stopped recording's calls never match a different app (see ExcludeRetired). After a split another open
+    /// window links, an upcoming call within the early-join window links at once (waiting would drop audio),
+    /// and otherwise the new recording is unlinked.
+    /// </summary>
+    private IReadOnlyList<RecordingAction> StartAutomatic(
+        DateTimeOffset now, long nowMs, string platform, IReadOnlyList<UpcomingCall> allCalls, bool unknownReady,
+        bool afterSplit = false)
+    {
+        if (IsPaused(now) || now < _autoStartNotBefore) return [];
+        var calls = ExcludeRetired(now, allCalls);
+        var matchResult = CallMatcher.Match(nowMs, calls);
         if (matchResult.HasOpenWindow)
         {
             if (matchResult.Call is { } matched && IsSuppressed(matched))
@@ -189,13 +252,28 @@ public sealed class RecorderAutomation
                 calendarCandidates: matchResult.Call is null ? open : null)];
         }
 
+        if (afterSplit)
+        {
+            var soon = calls.Where(call => call.StartMs - 120_000 > nowMs &&
+                call.StartMs - 120_000 <= nowMs + (long)EarlyJoinWindow.TotalMilliseconds && !IsSuppressed(call))
+                .DistinctBy(call => (call.Kind, call.Id)).ToArray();
+            if (soon.Length != 0)
+            {
+                var earliest = soon.Min(call => call.StartMs);
+                var upcoming = soon.Where(call => call.StartMs == earliest).ToArray();
+                return [Start(now, upcoming.Length == 1 ? upcoming[0] : null, platform, true,
+                    calendarCandidates: upcoming.Length == 1 ? null : upcoming)];
+            }
+            return [Start(now, null, platform, true)];
+        }
+
         // An early join waits for the calendar window instead of producing a
         // short unlinked fragment immediately before a known call.
         if (calls.Any(call => call.StartMs - 120_000 > nowMs &&
             call.StartMs - 120_000 <= nowMs + (long)EarlyJoinWindow.TotalMilliseconds))
             return [];
 
-        if (_activeSince is { } started && now - started >= UnknownCallDelay)
+        if (unknownReady || _activeSince is { } started && now - started >= UnknownCallDelay)
             return [Start(now, null, platform, true)];
 
         return [];
@@ -356,18 +434,53 @@ public sealed class RecorderAutomation
         _currentCalendarCandidates = calendarCandidates ?? (call is null ? [] : [call]);
         _meetingSessionSeen = automatic;
         _recordingSessionKey = _observedSessionKey;
+        _recordingAppKey = _observedAppKey;
+        _pendingAppKey = null;
         Current = new RecordingPlan(Guid.NewGuid(), title ?? call?.Title ?? PlatformTitle(platform), call, now, automatic);
         return new RecordingAction(RecordingActionKind.Start, Current);
+    }
+
+    /// <summary>
+    /// A stopped recording's calendar calls stay open for ten minutes after their end, so a different app
+    /// starting then would be filed under the call that was just left. Remember each call with the app that
+    /// recorded it. Without a known app there is nothing to compare, so nothing is retired.
+    /// </summary>
+    private void RetireCalls(RecordingPlan plan)
+    {
+        if (_recordingAppKey is not { } app) return;
+        var calls = _currentCalendarCandidates.ToList();
+        if (_currentCalendarContext is { } context) calls.Add(context);
+        if (plan.Call is { } linked) calls.Add(linked);
+        foreach (var call in calls)
+            if (!_retiredCalls.Any(item => CallMatcher.SameCall(item.Call, call) && item.App == app))
+                _retiredCalls.Add(new RetiredCall(call, app));
+    }
+
+    /// <summary>
+    /// Retired calls are ignored by matching until their window closes or the app that recorded them is the
+    /// one holding the session again. Pending and unknown sessions leave them excluded.
+    /// </summary>
+    private IReadOnlyList<UpcomingCall> ExcludeRetired(DateTimeOffset now, IReadOnlyList<UpcomingCall> calls)
+    {
+        if (_retiredCalls.Count == 0) return calls;
+        var nowMs = now.ToUnixTimeMilliseconds();
+        _retiredCalls.RemoveAll(item => item.Call.EndMs + 600_000 < nowMs
+            || _observedAppKey is { } observed && observed == item.App);
+        if (_retiredCalls.Count == 0) return calls;
+        return calls.Where(call => !_retiredCalls.Any(item => CallMatcher.SameCall(item.Call, call))).ToArray();
     }
 
     private IReadOnlyList<RecordingAction> Stop(RecordingStopReason reason)
     {
         if (Current is not { } plan) return [];
+        RetireCalls(plan);
         Current = null;
         _currentCalendarContext = null;
         _currentCalendarCandidates = [];
         _meetingSessionSeen = false;
         _recordingSessionKey = null;
+        _recordingAppKey = null;
+        _pendingAppKey = null;
         return [new RecordingAction(RecordingActionKind.Stop, plan, reason)];
     }
 

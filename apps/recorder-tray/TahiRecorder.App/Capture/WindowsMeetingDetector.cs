@@ -112,6 +112,7 @@ public sealed class WindowsMeetingDetector : IDisposable
             var tree = ProcessTree.ResolveMeetingTree(selected.ProcessId, selected.Platform, processes);
             Volatile.Write(ref _latest, new MeetingObservation(true, selected.Platform, selected.ProcessId)
             {
+                AppName = ProcessTree.AppName(selected.Platform, tree.RootId, selected.ProcessName, processes),
                 ProcessTreeRootId = tree.RootId,
                 ProcessTreeIds = tree.ProcessIds
             });

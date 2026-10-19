@@ -112,6 +112,14 @@ recording began and the call is not suppressed. This permits a back-to-back call
 after a late Stop in the same app. That restart qualification expires when the
 target call's window closes or a new recording starts.
 Process ID changes alone never clear suppression.
+An automatic recording also follows the call across apps: when the capture session moves to a
+different app (the platform, or the browser root for Meet, never a helper process or a pid
+change) and that app holds it continuously for ten seconds, the recording stops as next call and
+a new automatic one starts for the new app, under the same pause, calendar and suppression rules.
+A flicker back to the first app inside the window, or a pause, cancels the split.
+Every create asks for speaker separation. If the server rejects it for tray recordings (400
+standard transcription), the create is retried once without it and that choice is saved in the
+outbox entry.
 Until then, manual-stop suppression and the one-hour pause persist across restart.
 
 Calendar limits from #072: fifteen-minute sync, lead/deal/client-matched events

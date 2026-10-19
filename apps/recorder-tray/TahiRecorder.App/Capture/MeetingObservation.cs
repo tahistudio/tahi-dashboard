@@ -2,6 +2,8 @@ namespace TahiRecorder.App.Capture;
 
 public sealed record MeetingObservation(bool IsActive, string Platform, int? ProcessId)
 {
+    /// <summary>The app the session belongs to: the platform, or the browser root for browser meetings.</summary>
+    public string? AppName { get; init; }
     public int? ProcessTreeRootId { get; init; }
     public IReadOnlyCollection<int> ProcessTreeIds { get; init; } = Array.Empty<int>();
     public static MeetingObservation Inactive { get; } = new(false, "unknown", null);

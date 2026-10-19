@@ -26,6 +26,32 @@ public sealed class RecorderApiTests
     }
 
     [Fact]
+    public async Task CreateSendsSeparateSpeakersAndReadsTheRejectionMessage()
+    {
+        var calls = 0;
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            calls++;
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.True(body.RootElement.GetProperty("separateSpeakers").GetBoolean());
+            return Json(HttpStatusCode.BadRequest, "{\"error\":\"Tray recordings use standard transcription.\"}");
+        }));
+        using var api = new RecorderApiClient(new FakeTokens(), http);
+        var error = await Assert.ThrowsAsync<RecorderApiException>(() =>
+            api.CreateAsync(new(Guid.NewGuid(), "Call", ["mic", "system"]), default));
+        Assert.True(error.IsSeparateSpeakersRejection);
+        Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData(400, null, "Separate speakers are not available here.", true)]
+    [InlineData(400, "standard_transcription_only", null, true)]
+    [InlineData(400, null, "Title is required.", false)]
+    [InlineData(422, null, "Tray recordings use standard transcription.", false)]
+    public void SeparateSpeakersRejectionIsRecognisedNarrowly(int status, string? code, string? message, bool expected) =>
+        Assert.Equal(expected, new RecorderApiException(status, code, serverMessage: message).IsSeparateSpeakersRejection);
+
+    [Fact]
     public async Task CreateSuppliesBothCallFieldsOrNeither()
     {
         using var http = new HttpClient(new Handler(async request =>

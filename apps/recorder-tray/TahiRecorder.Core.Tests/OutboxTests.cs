@@ -721,6 +721,72 @@ public sealed class OutboxTests : IDisposable
         Assert.Empty(api.Created);
     }
 
+    [Fact]
+    public async Task CreateAlwaysRequestsSpeakerSeparation()
+    {
+        var (store, id) = await QueuedAsync();
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        var sent = Assert.Single(api.Created);
+        Assert.True(sent.SeparateSpeakers);
+        Assert.True((await store.ReadAsync(id)).Request.SeparateSpeakers);
+    }
+
+    [Fact]
+    public async Task SeparateSpeakersRejectionRetriesOnceWithoutItAndPersistsTheChoice()
+    {
+        var (store, id) = await QueuedAsync();
+        api.RejectSeparateSpeakers = true;
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        Assert.Equal([true, false], api.Created.Select(request => request.SeparateSpeakers));
+        Assert.All(api.Created, request => Assert.Equal(id, request.ClientRef));
+        var saved = await store.ReadAsync(id);
+        Assert.False(saved.Request.SeparateSpeakers);
+        Assert.NotNull(saved.RecordingId);
+        Assert.Null(saved.TerminalState);
+    }
+
+    [Fact]
+    public async Task FallbackChoiceSurvivesAFailedRetryAndARestart()
+    {
+        var (store, id) = await QueuedAsync();
+        api.RejectSeparateSpeakers = true;
+        api.CreateErrorAfterRejection = new HttpRequestException();
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        Assert.False((await store.ReadAsync(id)).Request.SeparateSpeakers);
+        api.CreateErrorAfterRejection = null;
+        api.Created.Clear();
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await new OutboxPump(Store, api, clock).PumpOnceAsync();
+        Assert.False(Assert.Single(api.Created).SeparateSpeakers);
+    }
+
+    [Theory]
+    [InlineData(400, "invalid_request", "Title is required.")]
+    [InlineData(409, null, "Tray recordings use standard transcription.")]
+    [InlineData(500, null, "Tray recordings use standard transcription.")]
+    public async Task UnrelatedCreateErrorsAreNotRetriedWithoutSeparateSpeakers(int status, string? code, string message)
+    {
+        var (store, id) = await QueuedAsync();
+        api.CreateError = new RecorderApiException(status, code, serverMessage: message);
+        await new OutboxPump(store, api, clock).PumpOnceAsync();
+        Assert.All(api.Created, request => Assert.True(request.SeparateSpeakers));
+        Assert.True((await store.ReadAsync(id)).Request.SeparateSpeakers);
+    }
+
+    [Fact]
+    public async Task ManifestWrittenBeforeTheFieldExistedStillLoadsAndRequestsSeparation()
+    {
+        var (store, id) = await QueuedAsync();
+        var manifest = Path.Combine(directory, id.ToString("D"), "recording.json");
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(manifest))!;
+        Assert.True(node["request"]!.AsObject().Remove("separateSpeakers"));
+        File.WriteAllText(manifest, node.ToJsonString());
+        Assert.DoesNotContain("separateSpeakers", File.ReadAllText(manifest));
+        Assert.True((await new FileOutboxStore(directory).ReadAsync(id)).Request.SeparateSpeakers);
+        await new OutboxPump(new FileOutboxStore(directory), api, clock).PumpOnceAsync();
+        Assert.True(Assert.Single(api.Created).SeparateSpeakers);
+    }
+
     private async Task<(FileOutboxStore, Guid)> QueuedAsync(bool includeSystem = false)
     {
         var store = Store;
@@ -743,6 +809,8 @@ public sealed class OutboxTests : IDisposable
     {
         public List<CreateRecordingRequest> Created { get; } = [];
         public Exception? CreateError { get; set; }
+        public bool RejectSeparateSpeakers { get; set; }
+        public Exception? CreateErrorAfterRejection { get; set; }
         public Exception? UploadError { get; set; }
         public Exception? ReserveError { get; set; }
         public Exception? StopError { get; set; }
@@ -759,7 +827,14 @@ public sealed class OutboxTests : IDisposable
         public string TranscribeState { get; set; } = "transcribing";
         public StopRecordingRequest? Stopped { get; private set; }
         public Task<RecordingState> CreateAsync(CreateRecordingRequest request, CancellationToken ct)
-        { Created.Add(request); if (CreateError is not null) throw CreateError; return Task.FromResult(new RecordingState(request.ClientRef.ToString("N"), "recording")); }
+        {
+            Created.Add(request);
+            if (CreateError is not null) throw CreateError;
+            if (RejectSeparateSpeakers && request.SeparateSpeakers)
+                throw new RecorderApiException(400, serverMessage: "Tray recordings use standard transcription.");
+            if (RejectSeparateSpeakers && CreateErrorAfterRejection is not null) throw CreateErrorAfterRejection;
+            return Task.FromResult(new RecordingState(request.ClientRef.ToString("N"), "recording"));
+        }
         public Task<ChunkReservation> ReserveAsync(string id, ChunkMetadata metadata, CancellationToken ct)
         {
             Reserving?.Invoke();

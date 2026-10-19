@@ -179,6 +179,21 @@ public sealed class OutboxPump
             : "Upload delayed. Audio is saved for retry.");
     }
 
+    /// <summary>
+    /// Always asks for speaker separation. A server that rejects it for tray recordings gets one retry
+    /// without it, and the choice is persisted so every later retry of this create stays consistent.
+    /// </summary>
+    private async Task<RecordingState> CreateWithSpeakerFallbackAsync(OutboxRecording recording, CancellationToken cancellationToken)
+    {
+        try { return await api.CreateAsync(recording.Request, cancellationToken); }
+        catch (RecorderApiException error) when (error.IsSeparateSpeakersRejection && recording.Request.SeparateSpeakers)
+        {
+            recording.Request = recording.Request with { SeparateSpeakers = false };
+            await store.SaveUnsafeAsync(recording, cancellationToken);
+            return await api.CreateAsync(recording.Request, cancellationToken);
+        }
+    }
+
     private async Task BestEffortStopAsync(OutboxRecording recording, CancellationToken cancellationToken)
     {
         if (recording.StopConfirmed) return;
@@ -188,7 +203,7 @@ public sealed class OutboxPump
             {
                 if (!recording.CreateSent) return;
                 // A lost create response can still occupy a server slot. Recover its id using the same clientRef.
-                recording.RecordingId = (await api.CreateAsync(recording.Request, cancellationToken)).Id;
+                recording.RecordingId = (await CreateWithSpeakerFallbackAsync(recording, cancellationToken)).Id;
             }
             await api.StopAsync(recording.RecordingId, StopRequest(recording, releaseOpenSlot: true), cancellationToken);
             recording.StopConfirmed = true;
@@ -224,7 +239,7 @@ public sealed class OutboxPump
             recording.CreateSent = true;
             await store.SaveUnsafeAsync(recording, cancellationToken);
             CreateSending?.Invoke(clientRef);
-            recording.RecordingId = (await api.CreateAsync(recording.Request, cancellationToken)).Id;
+            recording.RecordingId = (await CreateWithSpeakerFallbackAsync(recording, cancellationToken)).Id;
             await store.SaveUnsafeAsync(recording, cancellationToken);
         }
         foreach (var chunk in recording.Chunks.OrderBy(c => c.Metadata.Sequence).ThenBy(c => c.Metadata.Track))

@@ -30,6 +30,24 @@ public sealed class CaptureSessionSelectorTests
     }
 
     [Fact]
+    public void HandoverBetweenTwoAppsHoldingTheMicFollowsTheCurrentUntilItLeaves()
+    {
+        var vivaldi = new CaptureProcessSession("meet", "vivaldi", 400);
+        var teams = new CaptureProcessSession("teams", "ms-teams", 100);
+
+        var first = CaptureSessionSelector.Select(null, [vivaldi]);
+        Assert.Equal("vivaldi", first?.ProcessName);
+
+        Assert.Equal("vivaldi", CaptureSessionSelector.Select(first, [teams, vivaldi])?.ProcessName);
+
+        var handover = CaptureSessionSelector.Select(first, [teams]);
+        Assert.Equal("ms-teams", handover?.ProcessName);
+        Assert.Equal("teams", handover?.Platform);
+
+        Assert.Equal("ms-teams", CaptureSessionSelector.Select(handover, [vivaldi, teams])?.ProcessName);
+    }
+
+    [Fact]
     public void CurrentSessionLeavingAllowsTheRemainingPidToBeSelected()
     {
         var current = new CaptureProcessSession("zoom", "zoom", 400);
