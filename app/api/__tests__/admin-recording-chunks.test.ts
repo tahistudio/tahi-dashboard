@@ -140,7 +140,13 @@ beforeEach(() => {
     get: async (key: string) => objects.has(key) ? { size: objects.get(key)!.audio.byteLength, arrayBuffer: async () => objects.get(key)!.audio } : null,
     delete: async (keys: string | string[]) => { for (const key of typeof keys === 'string' ? [keys] : keys) objects.delete(key) },
   }
-  h.ai.run.mockReset().mockResolvedValue({ text: 'Hello', segments: [{ start: 0, end: 1, text: 'Hello' }] })
+  // The microphone and system tracks must say different things here: identical words at the same instant are speaker bleed and are removed.
+  let aiCall = 0
+  h.ai.run.mockReset().mockImplementation(async () => {
+    aiCall += 1
+    const text = aiCall % 2 ? 'Hello' : 'Welcome'
+    return { text, segments: [{ start: 0, end: 1, text }] }
+  })
 })
 
 afterEach(() => { sqlite.close(); vi.restoreAllMocks(); vi.useRealTimers() })
@@ -392,11 +398,11 @@ describe('recording transcription recovery', () => {
     const linked = await linkRecording(req('link', { callKind: 'scheduled', callId: 'call-a' }, 'PATCH'), params)
     expect(linked.status).toBe(200)
     const detail = await linked.json() as MeetingRecordingDetail
-    expect(detail.transcript.text).toBe('[00:00] Liam Miller: Hello\n[00:00] Michael Day: Hello')
+    expect(detail.transcript.text).toBe('[00:00] Liam Miller: Hello\n[00:00] Michael Day: Welcome')
     expect(sqlite.prepare('SELECT text,hash FROM call_transcripts').get()).toEqual({ text: detail.transcript.text, hash: hashTranscript(detail.transcript.text) })
     expect(sqlite.prepare('SELECT text,segments FROM meeting_recording_chunks ORDER BY id').all()).toEqual(raw)
     await linkRecording(req('link', { orgId: 'client-a' }, 'PATCH'), params)
-    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Liam Miller: Hello\n[00:00] Them (Acme): Hello' })
+    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Liam Miller: Hello\n[00:00] Them (Acme): Welcome' })
     expect(h.ai.run).toHaveBeenCalledTimes(2)
   })
 
@@ -407,7 +413,7 @@ describe('recording transcription recovery', () => {
     const second = await transcribe(req('transcribe'), params)
     const once = await first.json() as MeetingRecordingDetail
     const twice = await second.json() as MeetingRecordingDetail
-    expect(once.transcript.text).toBe('[00:00] Liam Miller: Hello\n[00:00] Them (Acme): Hello')
+    expect(once.transcript.text).toBe('[00:00] Liam Miller: Hello\n[00:00] Them (Acme): Welcome')
     expect(twice.transcript).toEqual(once.transcript)
     expect(sqlite.prepare('SELECT * FROM call_transcripts').all()).toHaveLength(1)
     expect(h.ai.run).toHaveBeenCalledTimes(2)
@@ -416,10 +422,10 @@ describe('recording transcription recovery', () => {
   it('names the microphone from its creator rather than the teammate viewing or retrying it', async () => {
     sqlite.prepare("UPDATE meeting_recordings SET created_by_id='staci'").run()
     await stoppedTwoTracks(); await transcribe(req('transcribe'), params); await transcribe(req('transcribe'), params)
-    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Staci Miller: Hello\n[00:00] Them (Acme): Hello' })
+    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Staci Miller: Hello\n[00:00] Them (Acme): Welcome' })
     sqlite.prepare("UPDATE meeting_recordings SET created_by_id='missing-member'").run()
     expect((await transcribe(req('transcribe'), params)).status).toBe(200)
-    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Me: Hello\n[00:00] Them (Acme): Hello' })
+    expect(sqlite.prepare('SELECT text FROM call_transcripts').get()).toEqual({ text: '[00:00] Me: Hello\n[00:00] Them (Acme): Welcome' })
     expect(h.ai.run).toHaveBeenCalledTimes(2)
   })
 
@@ -431,10 +437,10 @@ describe('recording transcription recovery', () => {
     const first = await linkRecording(req('link', body, 'PATCH'), params)
     expect(first.status).toBe(200)
     expect(await first.json()).toMatchObject({ mirrored: true })
-    expect(sqlite.prepare('SELECT transcript FROM discovery_calls').get()).toEqual({ transcript: '[00:00] Liam Miller: Hello\n[00:00] Michael Day: Hello' })
+    expect(sqlite.prepare('SELECT transcript FROM discovery_calls').get()).toEqual({ transcript: '[00:00] Liam Miller: Hello\n[00:00] Michael Day: Welcome' })
     sqlite.prepare('UPDATE discovery_calls SET attendees = ?').run(JSON.stringify([{ name: 'Mark Ramsey', email: 'mark@giant.example' }]))
     expect((await linkRecording(req('link', body, 'PATCH'), params)).status).toBe(200)
-    expect(sqlite.prepare('SELECT transcript FROM discovery_calls').get()).toEqual({ transcript: '[00:00] Liam Miller: Hello\n[00:00] Mark Ramsey: Hello' })
+    expect(sqlite.prepare('SELECT transcript FROM discovery_calls').get()).toEqual({ transcript: '[00:00] Liam Miller: Hello\n[00:00] Mark Ramsey: Welcome' })
     sqlite.prepare("UPDATE discovery_calls SET transcript='Human correction'").run()
     const again = await linkRecording(req('link', body, 'PATCH'), params)
     expect(await again.json()).toMatchObject({ mirrored: false })

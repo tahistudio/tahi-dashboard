@@ -15,6 +15,8 @@ import { listRecordingChunks, removeRecordingChunk, storeRecordingChunk, type Re
 import type { MeetingRecording, MeetingRecordingDetail, RecordingTrack } from '@/lib/meeting-recordings-types'
 import { readRecordingPrefill } from '@/lib/call-recording-reminders'
 import { RECORDING_PCM_HEADER_BYTES, RECORDING_PCM_SAMPLE_RATE } from '@/lib/recording-group-audio'
+import { RecordingSpeakersPanel } from './recording-speakers-panel'
+import { applySavedDetail } from '@/lib/recording-speaker-drafts'
 
 interface PickerCall { kind: 'discovery' | 'scheduled'; id: string; title: string; scheduledAt: string; orgId: string | null; orgName: string | null }
 interface PickerClient { id: string; name: string }
@@ -573,6 +575,7 @@ export function CallRecorderContent({ ownerId, canDeleteAudio }: { ownerId: stri
           {busy && <p role="status" className="text-sm text-[var(--color-text-muted)]">Saving audio or transcribing a chunk. Keep this page open.</p>}
           {detail.recording.error && <p role="alert" className="break-words text-sm text-[var(--color-danger-ink)]">{detail.recording.error}</p>}
           {detail.transcript.text ? <pre data-private className="whitespace-pre-wrap break-words rounded-lg p-4 text-sm leading-relaxed" style={{ fontFamily: 'inherit', background: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>{detail.transcript.text}</pre> : <p className="text-sm text-[var(--color-text-muted)]">The transcript will appear here after the audio is processed.</p>}
+          {detail.recording.state === 'ready' && <RecordingSpeakersPanel key={detail.recording.id} recordingId={detail.recording.id} speakers={detail.speakers ?? []} disabled={disabled} onUpdated={saved => setDetail(current => applySavedDetail(current, saved))} />}
           {failedChunks.length > 0 && <ul className="space-y-2 break-words text-sm text-[var(--color-danger-ink)]" aria-label="Failed audio chunks">{failedChunks.map(chunk => <li key={chunk.id}>{chunk.track === 'mic' ? 'Me' : 'Them'}, {formatElapsed(chunk.startMs)}: {chunk.error ?? 'Transcription failed.'}</li>)}</ul>}
           <div className="flex flex-wrap gap-2">
             {!detail.recording.deletedAt && detail.recording.state === 'recording' && <TahiButton variant="secondary" style={BUTTON_STYLE} disabled={disabled} onClick={() => { if (window.confirm('Finish this interrupted recording using its saved chunks? Audio since the last saved chunk may be missing.')) void recover(detail.recording.id, true) }}>Finish interrupted recording</TahiButton>}

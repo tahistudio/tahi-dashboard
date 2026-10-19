@@ -15,13 +15,13 @@ import { resolvePermissions } from '@/lib/permissions'
 import { readRecordingOptions, writeRecordingOptions } from '@/lib/recording-options'
 import { MAX_RECORDING_GROUP_DURATION_MS, parseRecordingPcmWav, RECORDING_GROUP_LEASE_MS, RECORDING_PCM_HEADER_BYTES, RECORDING_PCM_SAMPLE_RATE, transcribeRecordingGroup, type RecordingGroupAiBinding } from '@/lib/recording-group-audio'
 import { hashTranscript, parseCallKind, resolveCallOrgId } from '@/lib/call-transcripts'
-import { recordingSpeakerNames, type RecordingSpeakerNames } from '@/lib/recording-speaker-names'
+import { applySpeakerRenames, parseSpeakerRenames, recordingSpeakerNames, type RecordingSpeakerNames } from '@/lib/recording-speaker-names'
 import {
   loadRecordingAi, MAX_RECORDING_CHUNK_BYTES, MAX_RECORDING_DURATION_MS,
-  mergeRecordingTranscript, parseSegments, RecordingError, recordingId,
+  mergeRecordingTranscript, parseSegments, RecordingError, recordingId, recordingTranscriptSpeakers,
   RECORDING_LEASE_MS, transcribeRecordingAudio, validateChunk,
 } from '@/lib/meeting-recordings'
-import type { MeetingRecording, MeetingRecordingChunk, MeetingRecordingDetail, RecordingTrack } from '@/lib/meeting-recordings-types'
+import type { MeetingRecording, MeetingRecordingChunk, MeetingRecordingDetail, RecordingSpeaker, RecordingTrack } from '@/lib/meeting-recordings-types'
 import { getRecorderDeviceAuth, isRecorderDeviceRequest, RecorderDeviceAuthError, type RecorderDeviceAuth } from '@/lib/recorder-device-auth'
 import { assertRecorderOwnership, RECORDER_DAILY_AUDIO_MS, recorderAudioQuota, recorderClientRef, recorderQuotaStart, recorderRecording, recorderRecordingDetail, type RecorderRecording, type RecorderRecordingDetail } from '@/lib/recorder-recordings'
 import { recorderUpcomingCalls } from '@/lib/recorder-upcoming-calls'
@@ -30,6 +30,9 @@ type RecordingRow = typeof schema.meetingRecordings.$inferSelect
 type ChunkRow = typeof schema.meetingRecordingChunks.$inferSelect
 const recordings = schema.meetingRecordings
 const chunks = schema.meetingRecordingChunks
+
+/** The tray joins up to 10 minutes early plus its 2 minute window lead. */
+const RECORDER_EARLY_LINK_MS = 12 * 60_000
 
 export interface RecordingContext {
   database: DB
@@ -42,9 +45,10 @@ function jsonValue<T>(value: string | null, fallback: T): T {
 }
 
 function publicRecording(row: RecordingRow, source: 'browser' | 'tray' = 'browser'): MeetingRecording {
+  const options = readRecordingOptions(row.tracks)
   return {
     id: row.id, source, title: row.title, orgId: row.orgId, callKind: row.callKind, callId: row.callId,
-    createdById: row.createdById, ...readRecordingOptions(row.tracks),
+    createdById: row.createdById, ...options, speakerNames: options.speakerNames ?? {},
     state: row.state, startedAt: row.startedAt, stoppedAt: row.stoppedAt, durationMs: row.durationMs,
     expectedChunks: jsonValue(row.expectedChunks, null), transcriptId: row.transcriptId,
     error: row.error, deletedAt: row.deletedAt, createdAt: row.createdAt, updatedAt: row.updatedAt,
@@ -90,16 +94,24 @@ async function speakerNames(database: DB, row: Pick<RecordingRow, 'createdById' 
   return recordingSpeakerNames(row.createdById, team, attendees, clientName)
 }
 
+/** One renderer for every place transcript text is produced: names, renames and echo removal. */
+async function renderTranscript(database: DB, row: RecordingRow, chunkRows: readonly MeetingRecordingChunk[]): Promise<string> {
+  return mergeRecordingTranscript(chunkRows, await speakerNames(database, row), readRecordingOptions(row.tracks).speakerNames)
+}
+
 export async function recordingDetail(database: DB, id: string, preparedRow?: RecordingRow): Promise<MeetingRecordingDetail> {
   const row = preparedRow ?? await readRecording(database, id)
   const chunkRows = (await readChunks(database, id)).map(publicChunk)
-  let text = mergeRecordingTranscript(chunkRows, await speakerNames(database, row))
+  const names = await speakerNames(database, row)
+  const overrides = readRecordingOptions(row.tracks).speakerNames
+  let text = mergeRecordingTranscript(chunkRows, names, overrides)
   if (row.transcriptId) {
     const [transcript] = await database.select({ text: schema.callTranscripts.text })
       .from(schema.callTranscripts).where(eq(schema.callTranscripts.id, row.transcriptId)).limit(1)
     text = transcript?.text ?? text
   }
-  return { recording: publicRecording(row), chunks: chunkRows, transcript: { id: row.transcriptId, text } }
+  const speakers = recordingTranscriptSpeakers(chunkRows, names, overrides)
+  return { recording: publicRecording(row), chunks: chunkRows, transcript: { id: row.transcriptId, text }, speakers }
 }
 
 export async function scopedRecordingDetail(context: RecordingContext, id: string): Promise<MeetingRecordingDetail> {
@@ -280,7 +292,7 @@ async function createDeviceRecording(
   const openCutoff = new Date(nowMs - MAX_RECORDING_DURATION_MS - 60 * 60 * 1000).toISOString()
   const calls = body.callId ? await recorderUpcomingCalls(context.database, auth, nowMs) : []
   const call = calls.find(candidate => candidate.id === body.callId && candidate.kind === body.callKind
-    && nowMs >= candidate.startMs - 120_000 && nowMs <= candidate.endMs + 600_000)
+    && nowMs >= candidate.startMs - RECORDER_EARLY_LINK_MS && nowMs <= candidate.endMs + 600_000)
   const target = call ? await choice(context, { callId: call.id, callKind: call.kind })
     : { orgId: null, callKind: null, callId: null }
   const id = crypto.randomUUID()
@@ -297,7 +309,7 @@ async function createDeviceRecording(
         INNER JOIN recorder_recordings rr ON rr.recording_id = c.recording_id
         WHERE rr.device_id = ? AND c.track = 'mic' AND c.created_at > ?) < ?`)
       .bind(id, title, target.orgId, target.callKind, target.callId, auth.userId,
-        writeRecordingOptions(body.tracks as RecordingTrack[], false), now, now, now,
+        writeRecordingOptions(body.tracks as RecordingTrack[], body.separateSpeakers === true), now, now, now,
         auth.recorderDevice.id, clientRef, auth.recorderDevice.id, openCutoff,
         auth.recorderDevice.id, recorderQuotaStart(new Date(nowMs)), RECORDER_DAILY_AUDIO_MS),
     context.database.$client.prepare(`INSERT INTO recorder_recordings
@@ -333,7 +345,6 @@ export async function createRecording(context: RecordingContext, value: unknown)
     throw new RecordingError('Separate speakers requires system audio. Turn it off for a microphone-only recording.')
   }
   if (context.auth.recorderDevice) {
-    if (body.separateSpeakers === true) throw new RecordingError('Tray recordings use standard transcription.')
     return createDeviceRecording(context, body, title)
   }
   const target = await choice(context, body)
@@ -586,7 +597,7 @@ async function mirrorDiscovery(
 }
 
 async function finalizeRecording(context: RecordingContext, row: RecordingRow, lease: string, found: ChunkRow[]): Promise<void> {
-  const text = mergeRecordingTranscript(found.map(publicChunk), await speakerNames(context.database, row))
+  const text = await renderTranscript(context.database, row, found.map(publicChunk))
   if (!text.trim()) {
     await updateLeased(context, lease, { state: 'failed', error: 'No speech was detected in the saved audio.' })
     return
@@ -681,7 +692,7 @@ async function useWhisperForSystem(context: RecordingContext, row: RecordingRow,
   // Completed microphone results are never changed.
   const updatedAt = new Date().toISOString()
   const [changed] = await context.database.batch([
-    context.database.update(recordings).set({ tracks: writeRecordingOptions(options.tracks, false), state: 'transcribing', error: null, updatedAt })
+    context.database.update(recordings).set({ tracks: writeRecordingOptions(options.tracks, false, options.speakerNames), state: 'transcribing', error: null, updatedAt })
       .where(and(eq(recordings.id, row.id), eq(recordings.leaseToken, lease))).returning({ id: recordings.id }),
     context.database.update(chunks).set({ state: 'uploaded', error: null, ...(resetReady ? { text: null, segments: null } : {}), updatedAt })
       .where(and(eq(chunks.recordingId, row.id), eq(chunks.track, 'system'), resetReady ? undefined : sql`${chunks.state} != 'ready'`,
@@ -786,8 +797,7 @@ export async function linkRecording(context: RecordingContext, value: unknown): 
     const [previous] = await context.database.select({ text: schema.callTranscripts.text }).from(schema.callTranscripts)
       .where(eq(schema.callTranscripts.id, row.transcriptId)).limit(1)
     if (!previous) throw new RecordingError('Transcript not found.', 404)
-    const text = mergeRecordingTranscript((await readChunks(context.database, row.id)).map(publicChunk),
-      await speakerNames(context.database, { ...row, ...target }))
+    const text = await renderTranscript(context.database, { ...row, ...target }, (await readChunks(context.database, row.id)).map(publicChunk))
     const transcriptWrite = context.database.update(schema.callTranscripts).set({
       text, hash: hashTranscript(text), callKind: target.callKind, callId: target.callId,
       matchedBy: target.callId ? 'manual' : null, unlinkedReason: target.callId ? null : 'no_match',
@@ -813,6 +823,84 @@ export async function linkRecording(context: RecordingContext, value: unknown): 
     return mirrored
   }, true)
   return { ...await scopedRecordingDetail(context, context.recording!.id), mirrored }
+}
+
+export type SpeakerChoiceKind = 'team' | 'attendee' | 'contact'
+
+/** Names offered when renaming a voice: team, the linked call's attendees and the client's contacts. */
+export async function recordingSpeakerChoices(context: RecordingContext): Promise<{ speakers: RecordingSpeaker[]; options: Array<{ name: string; kind: SpeakerChoiceKind }> }> {
+  if (context.auth.recorderDevice) throw new RecordingError('Unauthorised', 401)
+  const row = context.recording
+  if (!row) throw new RecordingError('Recording not found.', 404)
+  const detail = await scopedRecordingDetail(context, row.id)
+  const options: Array<{ name: string; kind: SpeakerChoiceKind }> = []
+  const seen = new Set<string>()
+  const add = (name: unknown, kind: SpeakerChoiceKind) => {
+    const cleaned = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim().slice(0, 80) : ''
+    const key = cleaned.toLowerCase()
+    if (!cleaned || seen.has(key) || options.length >= 60) return
+    seen.add(key)
+    options.push({ name: cleaned, kind })
+  }
+  for (const member of await context.database.select({ name: schema.teamMembers.name }).from(schema.teamMembers)) add(member.name, 'team')
+  if (row.callId && row.callKind) {
+    const table = row.callKind === 'discovery' ? schema.discoveryCalls : schema.scheduledCalls
+    const [call] = await context.database.select({ attendees: table.attendees }).from(table).where(eq(table.id, row.callId)).limit(1)
+    const parsed = jsonValue<unknown>(call?.attendees ?? null, [])
+    if (Array.isArray(parsed)) for (const attendee of parsed) add((attendee as { name?: unknown } | null)?.name, 'attendee')
+  }
+  if (row.orgId) {
+    for (const contact of await context.database.select({ name: schema.contacts.name }).from(schema.contacts)
+      .where(eq(schema.contacts.orgId, row.orgId)).limit(60)) add(contact.name, 'contact')
+  }
+  return { speakers: detail.speakers ?? [], options }
+}
+
+/**
+ * Rename voices on a recording. The map lives in the recording's options JSON, and the
+ * transcript (and the call transcript it owns) is re-rendered from the saved chunks, which
+ * also re-applies echo removal to recordings transcribed before it existed.
+ */
+export async function renameRecordingSpeakers(context: RecordingContext, value: unknown): Promise<MeetingRecordingDetail> {
+  if (context.auth.recorderDevice) throw new RecordingError('Unauthorised', 401)
+  const body = value && typeof value === 'object' ? value as Record<string, unknown> : null
+  const parsed = parseSpeakerRenames(body?.speakerNames)
+  if (!parsed.ok) throw new RecordingError(parsed.error)
+  await withRecordingLease(context, async (row, lease) => {
+    // Like linking, a rename edits a finished transcript. Names for unfinished audio are not stored.
+    if (row.state !== 'ready' || !row.transcriptId) throw new RecordingError('Finish transcription before renaming speakers.', 409)
+    const options = readRecordingOptions(row.tracks)
+    const next = applySpeakerRenames(options.speakerNames ?? {}, parsed.value)
+    if (!next.ok) throw new RecordingError(next.error)
+    const renamed = { ...row, tracks: writeRecordingOptions(options.tracks, options.separateSpeakers, next.value) }
+    const optionsWrite = context.database.update(recordings).set({ tracks: renamed.tracks, updatedAt: new Date().toISOString() })
+      .where(and(eq(recordings.id, row.id), eq(recordings.leaseToken, lease)))
+    const text = row.transcriptId
+      ? await renderTranscript(context.database, renamed, (await readChunks(context.database, row.id)).map(publicChunk)) : ''
+    if (!row.transcriptId || !text.trim()) {
+      await optionsWrite
+    } else {
+      const [previous] = await context.database.select({ text: schema.callTranscripts.text }).from(schema.callTranscripts)
+        .where(eq(schema.callTranscripts.id, row.transcriptId)).limit(1)
+      if (!previous) throw new RecordingError('Transcript not found.', 404)
+      const writeGuard = sql`EXISTS (SELECT 1 FROM meeting_recordings WHERE id = ${row.id} AND lease_token = ${lease})`
+      // Only our own copy on the discovery call is refreshed; a human edit there is never overwritten.
+      const mirror = discoveryMirrorStatement(context, text, row, lease, previous.text)
+      // One transaction: the map and every copy of the text change together or not at all.
+      await context.database.batch([
+        optionsWrite,
+        context.database.update(schema.callTranscripts).set({ text, hash: hashTranscript(text) })
+          .where(and(eq(schema.callTranscripts.id, row.transcriptId), writeGuard)),
+        ...(mirror ? [mirror] : []),
+      ])
+    }
+    await updateLeased(context, lease, {})
+    await logAudit(context.database, {
+      userId: attributedUserId(context.auth), action: 'meeting_recording.speakers_renamed', entityType: 'meeting_recording', entityId: row.id,
+      metadata: { keys: Object.keys(parsed.value) },
+    })
+  }, true)
+  return scopedRecordingDetail(context, context.recording!.id)
 }
 
 export async function deleteRecordingAudio(context: RecordingContext): Promise<boolean> {

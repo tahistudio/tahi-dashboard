@@ -135,8 +135,8 @@ describe('tray recording create', () => {
     expect(sqlite.prepare('SELECT count(*) AS count FROM recorder_recordings').get()?.count).toBe(1)
   })
 
-  it('requires a UUID clientRef and cannot use browser-only speaker separation', async () => {
-    for (const extra of [{ clientRef: undefined }, { clientRef: '../bad' }, { separateSpeakers: true }]) {
+  it('requires a UUID clientRef', async () => {
+    for (const extra of [{ clientRef: undefined }, { clientRef: '../bad' }]) {
       expect((await createRecording(request('', input(extra)))).status).toBe(400)
     }
   })
@@ -176,16 +176,17 @@ describe('tray recording create', () => {
     seedCall('allowed')
     seedCall('other', { email: 'staci@tahi.studio' })
     seedCall('cancelled', { status: 'cancelled' })
-    seedCall('later', { offset: 300_000 })
+    seedCall('later', { offset: 13 * 60_000 })
     seedCall('stale', { offset: -180_000 })
     seedCall('in-progress', { offset: -20 * 60_000, durationMinutes: 60 })
     seedCall('ended', { offset: -41 * 60_000 })
     seedCall('grace-boundary', { offset: -40 * 60_000 })
     seedCall('opens-now', { offset: 120_000 })
+    seedCall('early-11', { offset: 11 * 60_000 })
     for (const [id, kind, expected] of [['allowed', 'discovery', 'allowed'], ['other', 'discovery', null],
       ['cancelled', 'discovery', null], ['later', 'discovery', null], ['stale', 'discovery', 'stale'],
       ['in-progress', 'discovery', 'in-progress'], ['ended', 'discovery', null],
-      ['grace-boundary', 'discovery', 'grace-boundary'], ['opens-now', 'discovery', 'opens-now'],
+      ['grace-boundary', 'discovery', 'grace-boundary'], ['opens-now', 'discovery', 'opens-now'], ['early-11', 'discovery', 'early-11'],
       ['allowed', 'scheduled', null], ['missing', 'discovery', null]]) {
       const recording = await create({ clientRef: crypto.randomUUID(), callId: id, callKind: kind, orgId: 'forged-client' })
       expect(sqlite.prepare('SELECT call_id,org_id FROM meeting_recordings WHERE id=?').get(recording))

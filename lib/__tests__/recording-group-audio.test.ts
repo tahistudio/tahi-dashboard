@@ -205,3 +205,31 @@ describe('Cloudflare group speaker results', () => {
     expect(new DataView(last.data.buffer, last.data.byteOffset).getInt16(last.data.byteLength - 2, true)).toBe(-16384)
   })
 })
+
+describe('tray shaped system timeline', () => {
+  it('streams many 30 second chunks and a 31.5 second folded tail as one gapless call timeline', async () => {
+    const full = new Float32Array(30 * 16_000).fill(0.25)
+    const tail = new Float32Array(31.5 * 16_000).fill(-0.25)
+    const fullAudio = encodeRecordingPcmWav(full)
+    const tailAudio = encodeRecordingPcmWav(tail)
+    const chunks: RecordingGroupChunk[] = Array.from({ length: 41 }, (_, sequence) => ({
+      sequence, startMs: sequence * 30_000, durationMs: sequence === 40 ? 31_500 : 30_000, mimeType: 'audio/wav',
+      size: sequence === 40 ? tailAudio.byteLength : fullAudio.byteLength,
+    }))
+    const load = vi.fn(async (entry: RecordingGroupChunk) => entry.sequence === 40 ? tailAudio : fullAudio)
+    const combined = createRecordingGroupAudio(chunks, load)
+    expect(combined.durationSeconds).toBe(1231.5)
+    const pcm = parseRecordingPcmWav(await readAudio(combined.body))
+    expect(pcm.sampleCount).toBe(1231.5 * 16_000)
+    expect(load).toHaveBeenCalledTimes(41)
+    const values = new DataView(pcm.data.buffer, pcm.data.byteOffset, pcm.data.byteLength)
+    expect(values.getInt16(29_999 * 16 * 2, true)).toBe(8192)
+    expect(values.getInt16(1_200_000 * 16 * 2, true)).toBe(-8192)
+  })
+
+  it('refuses a tray timeline whose chunk sequences have a hole', () => {
+    const audio = encodeRecordingPcmWav(new Float32Array(30 * 16_000))
+    const meta = (sequence: number): RecordingGroupChunk => ({ sequence, startMs: sequence * 30_000, durationMs: 30_000, mimeType: 'audio/wav', size: audio.byteLength })
+    expect(() => createRecordingGroupAudio([meta(0), meta(2)], async () => audio)).toThrow('incomplete or invalid')
+  })
+})

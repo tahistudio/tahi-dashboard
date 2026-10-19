@@ -1,5 +1,6 @@
-import type { MeetingRecordingChunk, RecordingSegment, ReserveRecordingChunk } from './meeting-recordings-types'
-import type { RecordingSpeakerNames } from './recording-speaker-names'
+import type { MeetingRecordingChunk, RecordingSegment, RecordingSpeaker, ReserveRecordingChunk } from './meeting-recordings-types'
+import type { RecordingSpeakerNames, RecordingSpeakerOverrides } from './recording-speaker-names'
+import { removeMicEcho } from './recording-echo'
 import { splitRecordingPcmWav } from './recording-group-audio'
 
 export const RECORDING_MODEL = '@cf/openai/whisper-large-v3-turbo' as const
@@ -64,12 +65,20 @@ export function parseSegments(value: unknown, durationMs: number): RecordingSegm
   })
 }
 
-/** Use absolute segment times; chunk sequence alone cannot order two tracks. */
-export function mergeRecordingTranscript(
-  chunks: readonly Pick<MeetingRecordingChunk, 'track' | 'sequence' | 'startMs' | 'durationMs' | 'state' | 'text' | 'segments'>[],
-  names: RecordingSpeakerNames = { mic: 'Me', system: 'Them' },
-): string {
-  const lines = chunks.filter(chunk => chunk.state === 'ready').flatMap(chunk => {
+interface TranscriptLine {
+  at: number
+  end: number
+  track: 'mic' | 'system'
+  speaker: number | undefined
+  sequence: number
+  index: number
+  text: string
+}
+
+type MergeChunk = Pick<MeetingRecordingChunk, 'track' | 'sequence' | 'startMs' | 'durationMs' | 'state' | 'text' | 'segments'>
+
+function transcriptLines(chunks: readonly MergeChunk[]): TranscriptLine[] {
+  return chunks.filter(chunk => chunk.state === 'ready').flatMap(chunk => {
     const segments: RecordingSegment[] = chunk.segments.length ? chunk.segments : chunk.text?.trim()
       ? [{ start: 0, end: chunk.durationMs / 1000, text: chunk.text.trim() }] : []
     return segments.map((segment, index) => ({
@@ -82,6 +91,51 @@ export function mergeRecordingTranscript(
       text: segment.text.trim(),
     }))
   })
+}
+
+/** Stable rename key for a voice. */
+export function speakerKey(track: 'mic' | 'system', speaker: number | undefined): string {
+  return track === 'mic' ? 'mic' : speaker === undefined ? 'system' : `system:${speaker}`
+}
+
+function defaultSpeakerLabel(track: 'mic' | 'system', speaker: number | undefined, names: RecordingSpeakerNames): string {
+  return track === 'system' && speaker !== undefined ? `Them ${speaker + 1}` : names[track]
+}
+
+/**
+ * Voices present in the transcript, mic first. Listed before echo removal so a voice whose
+ * words were all echo can still be renamed.
+ */
+export function recordingTranscriptSpeakers(
+  chunks: readonly MergeChunk[],
+  names: RecordingSpeakerNames = { mic: 'Me', system: 'Them' },
+  overrides: RecordingSpeakerOverrides = {},
+): RecordingSpeaker[] {
+  const found = new Map<string, RecordingSpeaker>()
+  for (const line of transcriptLines(chunks)) {
+    if (!line.text) continue
+    const key = speakerKey(line.track, line.speaker)
+    if (found.has(key)) continue
+    const defaultLabel = defaultSpeakerLabel(line.track, line.speaker, names)
+    const label = overrides[key] || defaultLabel
+    found.set(key, { key, track: line.track, defaultLabel, label, custom: label !== defaultLabel || key in overrides })
+  }
+  return [...found.values()].sort((a, b) => {
+    if (a.track !== b.track) return a.track === 'mic' ? -1 : 1
+    return a.key.localeCompare(b.key, undefined, { numeric: true })
+  })
+}
+
+/**
+ * Use absolute segment times; chunk sequence alone cannot order two tracks.
+ * Mic words that merely repeat the system track (speaker bleed) are removed on every render.
+ */
+export function mergeRecordingTranscript(
+  chunks: readonly MergeChunk[],
+  names: RecordingSpeakerNames = { mic: 'Me', system: 'Them' },
+  overrides: RecordingSpeakerOverrides = {},
+): string {
+  const lines = removeMicEcho(transcriptLines(chunks))
   lines.sort((a, b) => a.at - b.at || (a.track === b.track ? 0 : a.track === 'mic' ? -1 : 1)
     || a.sequence - b.sequence || a.index - b.index)
   const paragraphs: typeof lines = []
@@ -98,7 +152,7 @@ export function mergeRecordingTranscript(
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor(seconds / 60) % 60
     const stamp = `${hours ? `${String(hours).padStart(2, '0')}:` : ''}${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
-    const name = line.track === 'system' && line.speaker !== undefined ? `Them ${line.speaker + 1}` : names[line.track]
+    const name = overrides[speakerKey(line.track, line.speaker)] || defaultSpeakerLabel(line.track, line.speaker, names)
     return `[${stamp}] ${name}: ${line.text}`
   }).join('\n')
 }

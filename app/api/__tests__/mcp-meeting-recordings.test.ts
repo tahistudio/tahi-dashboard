@@ -53,6 +53,15 @@ describe('manual call recording MCP profiles', () => {
     expect(gateToolCall('link_meeting_recording', args, 'full', 'Liam').ok).toBe(true)
   })
 
+  it('keeps speaker renames blocked for designers even with confirmation', () => {
+    const args = { id: 'rec-1', speakerNames: { mic: 'Staci' }, confirmed: true }
+    expect(classifyTool('rename_recording_speakers', 'designer')).toBe('blocked')
+    expect(gateToolCall('rename_recording_speakers', args, 'designer', 'Staci').ok).toBe(false)
+    expect(toolsForProfile(TOOLS, 'designer').some(tool => tool.name === 'rename_recording_speakers')).toBe(false)
+    expect(isDesignerRequestAllowed('PATCH', '/api/admin/recordings/rec-1/speakers')).toBe(false)
+    expect(gateToolCall('rename_recording_speakers', args, 'full', 'Liam').ok).toBe(true)
+  })
+
   it('keeps transcription and administrator fallback blocked for designers even with confirmation', () => {
     const args = { id: 'rec-1', separateSpeakers: false, confirmed: true }
     expect(classifyTool('transcribe_meeting_recording', 'designer')).toBe('blocked')
@@ -121,6 +130,35 @@ describe('manual call recording MCP dispatch', () => {
     const invalid = coerceArgs(schema, { id: 'rec-1', separateSpeakers: 'true' })
     await expect(executeTool('transcribe_meeting_recording', invalid, credentials, manyRequests)).rejects.toThrow('separateSpeakers must be false or omitted')
     expect(calls).toHaveLength(1)
+  })
+
+  it('renames speakers through the guarded admin route and forwards only the map', async () => {
+    const calls = interceptedCalls()
+    await executeTool('rename_recording_speakers', { id: 'rec-1', speakerNames: { mic: 'Liam', 'system:0': 'Michael Day', 'system:1': null }, title: 'discard this' }, credentials, manyRequests)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url.pathname).toBe('/api/admin/recordings/rec-1/speakers')
+    expect(calls[0].method).toBe('PATCH')
+    expect(calls[0].body).toEqual({ speakerNames: { mic: 'Liam', 'system:0': 'Michael Day', 'system:1': null } })
+    expect([...calls[0].headers.values()]).toContain('test-signed-actor')
+  })
+
+  it('accepts the speaker map as a JSON string from a connector and refuses anything else before dispatch', async () => {
+    const calls = interceptedCalls()
+    await executeTool('rename_recording_speakers', { id: 'rec-1', speakerNames: '{"mic":"Liam"}' }, credentials, manyRequests)
+    expect(calls[0].body).toEqual({ speakerNames: { mic: 'Liam' } })
+    for (const speakerNames of [undefined, null, 'not json', ['mic'], 7]) {
+      await expect(executeTool('rename_recording_speakers', { id: 'rec-1', speakerNames }, credentials, manyRequests)).rejects.toThrow()
+    }
+    await expect(executeTool('rename_recording_speakers', { id: '../x', speakerNames: { mic: 'a' } }, credentials, manyRequests)).rejects.toThrow('id is not a valid id')
+    expect(calls).toHaveLength(1)
+    const schema = definition('rename_recording_speakers').inputSchema
+    expect(schema.required).toEqual(['id', 'speakerNames'])
+    expect(schema.properties?.speakerNames).toMatchObject({ type: 'object' })
+  })
+
+  it('describes the saved map and speaker keys on the read tool', () => {
+    expect(definition('get_meeting_recording').description).toMatch(/speakerNames/)
+    expect(definition('get_meeting_recording').description).toMatch(/speakers/)
   })
 
   it('links only the explicitly selected client', async () => {

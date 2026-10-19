@@ -1276,13 +1276,17 @@ export const TOOLS: ToolDef[] = [
 
   // Manual browser recordings: capture itself requires the dashboard browser.
   tool('list_meeting_recordings', 'List manual call recordings visible to this studio identity, with their processing state and explicit client or call link. Recording capture happens only in the dashboard browser. Returns { items }.'),
-  tool('get_meeting_recording', 'Read a manual call recording, its chunk processing states, group speaker option and its saved named transcript. Microphone uses the creator name or Me; system uses the sole external attendee or client, or Them 1, Them 2 when group separation was explicitly enabled in the browser. Returns { recording, chunks, transcript }.', {
+  tool('get_meeting_recording', 'Read a manual call recording, its chunk processing states, group speaker option and its saved named transcript. Microphone uses the creator name or Me; system uses the sole external attendee or client, or Them 1, Them 2 when group separation was enabled (browser or tray). Microphone words that only repeat the system audio (speaker bleed) are removed from the transcript. recording.speakerNames is the saved rename map and speakers lists each voice with its key, default label and current label. Returns { recording, chunks, transcript, speakers }.', {
     id: prop('string', 'Meeting recording id'),
   }, ['id']),
   tool('transcribe_meeting_recording', 'Advance transcription of saved recording audio by one chunk or a grouped system attempt. Repeat while pending is true; a failed recording requires a retry. Omit separateSpeakers for normal processing. Only on an administrator\'s explicit request, pass separateSpeakers=false to transcribe without speaker separation using per-chunk Whisper. Saved microphone text is retained. This does not record new audio or apply suggestions. Returns { recording, chunks, transcript, pending }.', {
     id: prop('string', 'Meeting recording id'),
     separateSpeakers: { type: 'boolean', enum: [false], description: 'Optional explicit administrator fallback to Whisper without speaker separation. Only false is accepted; omit for normal processing.' },
   }, ['id']),
+  tool('rename_recording_speakers', 'Rename the speakers of a manual call recording after transcription. Pass speakerNames as an object of speaker key to name: mic (the microphone voice), system (the single remote voice) or system:0, system:1 and so on (diarized voices, Them 1 is system:0). Use get_meeting_recording to see the keys in speakers. A null or empty name resets that voice to its default label. The saved transcript and its linked call transcript are re-rendered from the saved chunks, which also re-applies speaker bleed removal. Returns { recording, chunks, transcript, speakers }.', {
+    id: prop('string', 'Meeting recording id'),
+    speakerNames: { type: 'object', description: 'Map of speaker key (mic, system, system:0, system:1, ...) to the new name, or null to reset', additionalProperties: { type: ['string', 'null'] } },
+  }, ['id', 'speakerNames']),
   tool('link_meeting_recording', 'Link a manual call recording to the client or call explicitly selected by the person. Pass either orgId, or callKind plus callId, never both. Never infer a client from transcript content. Validates call ownership and client access. Linking makes its saved transcript eligible for the existing suggestions approval flow; it never applies a task or request.', {
     id: prop('string', 'Meeting recording id'),
     orgId: prop('string', 'Explicitly selected client id; omit when linking to a call'),
@@ -2875,6 +2879,15 @@ export async function executeTool(
       }
       return json(await apiWrite(`/api/admin/recordings/${id}/transcribe`, token, 'POST',
         args.separateSpeakers === false ? { separateSpeakers: false } : {}))
+    }
+    case 'rename_recording_speakers': {
+      const id = need('id')
+      assertSafeIdArgs({ id })
+      let names: unknown = args.speakerNames
+      // Some connectors send an object argument as a JSON string.
+      if (typeof names === 'string') { try { names = JSON.parse(names) as unknown } catch { names = null } }
+      if (!names || typeof names !== 'object' || Array.isArray(names)) throw new Error('speakerNames must be an object of speaker key to name')
+      return json(await apiWrite(`/api/admin/recordings/${id}/speakers`, token, 'PATCH', { speakerNames: names }))
     }
     case 'link_meeting_recording': {
       const id = need('id')

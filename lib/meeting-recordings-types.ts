@@ -20,6 +20,8 @@ export interface MeetingRecording {
   createdById: string
   tracks: RecordingTrack[]
   separateSpeakers?: boolean
+  /** Speaker rename map keyed by mic, system or system:N. Empty when nothing was renamed. */
+  speakerNames?: Record<string, string>
   state: RecordingState
   startedAt: string
   stoppedAt: string | null
@@ -57,6 +59,8 @@ export interface MeetingRecordingDetail {
   recording: MeetingRecording
   chunks: MeetingRecordingChunk[]
   transcript: RecordingTranscript
+  /** Voices present in the transcript, for renaming. */
+  speakers?: RecordingSpeaker[]
   pending?: boolean
 }
 
@@ -67,4 +71,14 @@ export interface ReserveRecordingChunk {
   durationMs: number
   mimeType: string
   size: number
+}
+
+/** One voice in the rendered transcript, with its default and current label. */
+export interface RecordingSpeaker {
+  /** Rename key: mic, system, or system:N for the Nth diarized voice (zero based). */
+  key: string
+  track: RecordingTrack
+  defaultLabel: string
+  label: string
+  custom: boolean
 }
