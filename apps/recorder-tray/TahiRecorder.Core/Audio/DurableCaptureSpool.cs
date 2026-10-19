@@ -198,13 +198,14 @@ public sealed class DurableCaptureSpool : IDisposable
         File.Move(wavPath + ".tmp", wavPath, overwrite: true);
     }
 
-    public static IReadOnlyList<RecoveredSpool> RecoverInterrupted(string spoolDirectory)
+    public static IReadOnlyList<RecoveredSpool> RecoverInterrupted(string spoolDirectory, IReadOnlySet<Guid>? skip = null)
     {
         if (!Directory.Exists(spoolDirectory)) return [];
         var recovered = new List<RecoveredSpool>();
         foreach (var directory in Directory.EnumerateDirectories(spoolDirectory))
         {
             if (!Guid.TryParseExact(Path.GetFileName(directory), "D", out var clientRef)) continue;
+            if (skip is not null && skip.Contains(clientRef)) continue;
             try
             {
                 var capture = RecoverOne(directory, clientRef);

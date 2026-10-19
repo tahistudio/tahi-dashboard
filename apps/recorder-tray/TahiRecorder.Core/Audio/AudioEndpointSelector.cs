@@ -12,9 +12,12 @@ public sealed record AudioEndpointSelection(string? EndpointId, string Name, str
 
 public static class AudioEndpointSelector
 {
+    public const string MeetingSessionReason = "Active meeting process session";
+    public const string RetainedReason = "Current endpoint retained after meeting activity ended";
+
     public static AudioEndpointSelection Select(AudioEndpointFlow flow,
         IReadOnlyList<AudioEndpointSnapshot> endpoints, IReadOnlyCollection<int> meetingProcessIds,
-        string? overrideId = null, string? currentEndpointId = null)
+        string? overrideId = null, string? currentEndpointId = null, bool retainCurrentWithoutMeeting = false)
     {
         var available = endpoints.Where(endpoint => endpoint.Flow == flow).ToArray();
         if (!string.IsNullOrWhiteSpace(overrideId))
@@ -34,7 +37,15 @@ public static class AudioEndpointSelector
                 .ThenBy(endpoint => endpoint.IsCommunicationsDefault ? 0 : 1)
                 .ThenBy(endpoint => endpoint.IsMultimediaDefault ? 0 : 1)
                 .ThenBy(endpoint => endpoint.Id, StringComparer.Ordinal).First();
-            return new(chosen.Id, chosen.Name, "Active meeting process session");
+            return new(chosen.Id, chosen.Name, MeetingSessionReason);
+        }
+
+        // A session flap or the meeting ending must not restart a working device: that churn is
+        // what races the stop. The current endpoint stays until it disappears or a meeting session names another.
+        if (retainCurrentWithoutMeeting && currentEndpointId is not null)
+        {
+            var current = available.FirstOrDefault(endpoint => endpoint.Id == currentEndpointId);
+            if (current is not null) return new(current.Id, current.Name, RetainedReason);
         }
 
         var fallback = available.FirstOrDefault(endpoint => endpoint.IsCommunicationsDefault);

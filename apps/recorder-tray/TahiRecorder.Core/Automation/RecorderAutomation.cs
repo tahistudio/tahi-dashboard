@@ -55,6 +55,7 @@ public sealed class RecorderAutomation
     public static readonly TimeSpan InactiveStopDelay = TimeSpan.FromSeconds(60);
     public static readonly TimeSpan OverrunInactiveDelay = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan CaptureGapAutoStartDelay = TimeSpan.FromSeconds(45);
+    public static readonly TimeSpan AbandonedStartDelay = TimeSpan.FromMinutes(2);
     public static readonly TimeSpan EarlyJoinWindow = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan MaximumDuration = TimeSpan.FromHours(12);
     private readonly List<SuppressedCall> _suppressedCalls;
@@ -249,6 +250,13 @@ public sealed class RecorderAutomation
     }
 
     public void PauseAutoStartForOneHour(DateTimeOffset now) => _pausedUntil = now.AddHours(1);
+
+    /// <summary>Holds off automatic starts, for example after a start that wedged the audio device.</summary>
+    public void DelayAutoStart(DateTimeOffset now, TimeSpan delay)
+    {
+        var until = now + delay;
+        if (_autoStartNotBefore is not { } existing || existing < until) _autoStartNotBefore = until;
+    }
 
     /// <summary>Only a not-yet-sent create can be changed to unlinked.</summary>
     public bool NotThisCall()

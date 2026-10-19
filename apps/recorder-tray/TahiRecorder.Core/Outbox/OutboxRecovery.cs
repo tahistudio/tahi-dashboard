@@ -5,13 +5,15 @@ namespace TahiRecorder.Core.Outbox;
 public static class OutboxRecovery
 {
     public static async Task<bool> RecoverAsync(FileOutboxStore store, string spoolDirectory,
-        CancellationToken cancellationToken = default, Func<Guid, CancellationToken, Task>? blockRecording = null)
+        CancellationToken cancellationToken = default, Func<Guid, CancellationToken, Task>? blockRecording = null,
+        IReadOnlySet<Guid>? skip = null)
     {
-        var recovered = DurableCaptureSpool.RecoverInterrupted(spoolDirectory).ToDictionary(item => item.ClientRef);
+        // Skipped sessions are live or parked: their audio is still owned by a running capture.
+        var recovered = DurableCaptureSpool.RecoverInterrupted(spoolDirectory, skip).ToDictionary(item => item.ClientRef);
         var ids = store.RecordingIds().ToArray();
         var attention = Directory.Exists(spoolDirectory) && Directory.EnumerateDirectories(spoolDirectory)
             .Any(path => Guid.TryParse(Path.GetFileName(path), out var id) && !ids.Contains(id));
-        foreach (var id in ids)
+        foreach (var id in ids.Where(id => skip is null || !skip.Contains(id)))
         {
             try
             {

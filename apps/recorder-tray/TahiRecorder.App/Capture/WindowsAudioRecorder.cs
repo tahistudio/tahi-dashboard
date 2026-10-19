@@ -11,6 +11,8 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
 {
     private const int SampleRate = 16_000;
     private const int DeliverySlackMs = 250;
+    private static readonly TimeSpan NativeReleaseTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan PumpStopTimeout = TimeSpan.FromSeconds(5);
     private readonly string _spoolDirectory;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
@@ -30,11 +32,13 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     private Guid _clientRef;
     private int _selectionDirty;
     private bool _running;
+    private bool _stopping;
     private bool _disposed;
     private int _reopenMic;
     private int _reopenSystem;
     private int _persistenceFailure;
     private int _audioGapStopDurationMs = -1;
+    private long _lastPumpTimestamp = Stopwatch.GetTimestamp();
 
     public WindowsAudioRecorder(string spoolDirectory)
     {
@@ -50,6 +54,9 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     public bool HasAudioGap => Volatile.Read(ref _audioGapStopDurationMs) >= 0;
     public bool LastStopCompleted { get; private set; }
     public bool IsRecording { get { lock (_gate) return _running; } }
+    /// <summary>True when a pump outlived a stop. The host must replace this recorder rather than reuse it.</summary>
+    public bool IsPoisoned { get; private set; }
+    public TimeSpan SinceLastPump => Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastPumpTimestamp));
 
     private sealed class CaptureChannel(string track)
     {
@@ -79,6 +86,8 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
     public async Task StartAsync(string clientRef, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (IsPoisoned)
+            throw new InvalidOperationException("This recorder must be replaced after a stuck stop.");
         if (!Guid.TryParseExact(clientRef, "D", out var parsedClientRef))
             throw new ArgumentException("Recording client reference must be a UUID.", nameof(clientRef));
         await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -113,9 +122,11 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         Interlocked.Exchange(ref _persistenceFailure, 0);
         Interlocked.Exchange(ref _audioGapStopDurationMs, -1);
         _clock.Restart();
+        Interlocked.Exchange(ref _lastPumpTimestamp, Stopwatch.GetTimestamp());
         lock (_gate)
         {
             _running = true;
+            _stopping = false;
             _levels.ShouldWarn(TimeSpan.Zero, _meeting.IsActive);
         }
         try
@@ -161,7 +172,22 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
                     ? new WasapiCapture(channel.Endpoint)
                     : new WasapiLoopbackCapture(channel.Endpoint);
             }
-            lock (_gate) channel.Capture = capture;
+            bool stopping;
+            lock (_gate)
+            {
+                stopping = _stopping;
+                if (!stopping) channel.Capture = capture;
+            }
+            if (stopping)
+            {
+                // A pump that outlived the stop must not start a source nobody will release.
+                var lateEndpoint = channel.Endpoint;
+                channel.Endpoint = null;
+                if (!BoundedNative.TryRun(() => ReleaseNative(capture, lateEndpoint), NativeReleaseTimeout,
+                        error => HostLog.Error("Late audio capture release failed", error)))
+                    HostLog.Write($"Late audio capture release timed out on {channel.Track}; abandoned.");
+                return;
+            }
             // NAudio 2.2.1 sets AutoConvertPcm and SrcDefaultQuality on both capture types.
             // Windows resamples the endpoint mix format to the canonical upload format.
             capture.WaveFormat = new WaveFormat(SampleRate, 16, 1);
@@ -218,8 +244,11 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         var processIds = meeting.ProcessTreeIds.Count > 0 ? meeting.ProcessTreeIds
             : meeting.ProcessId is { } id ? new[] { id } : Array.Empty<int>();
         var overrideId = channel.Track == "mic" ? preferences.CaptureEndpointId : preferences.RenderEndpointId;
+        // A working device is not restarted when meeting activity flaps or ends; that churn races the stop.
+        var retainCurrent = channel.EndpointSelection?.Reason is AudioEndpointSelector.MeetingSessionReason
+            or AudioEndpointSelector.RetainedReason;
         var selection = AudioEndpointSelector.Select(flow, endpoints, processIds, overrideId,
-            channel.EndpointSelection?.EndpointId);
+            channel.EndpointSelection?.EndpointId, retainCurrent);
         var rootId = meeting.ProcessTreeRootId ?? meeting.ProcessId;
         bool processFailed;
         lock (_failedProcessLoopbacks) processFailed = rootId is { } root && _failedProcessLoopbacks.Contains(root);
@@ -337,6 +366,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             {
                 if (HasPersistenceFailure || HasAudioGap)
                     return;
+                Interlocked.Exchange(ref _lastPumpTimestamp, Stopwatch.GetTimestamp());
                 var retry = _channels.Values.Any(channel => !channel.Available
                     && DateTimeOffset.UtcNow >= channel.RetryAt);
                 var dirty = Interlocked.Exchange(ref _selectionDirty, 0) != 0;
@@ -344,6 +374,8 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
                 var systemFailed = Interlocked.Exchange(ref _reopenSystem, 0) != 0;
                 if (dirty || retry || micFailed || systemFailed)
                     ReselectChannels();
+                // A device switch can outlast a stop. Never touch the spool after StopAsync finished it.
+                cancellationToken.ThrowIfCancellationRequested();
                 IReadOnlyList<CapturedChunk> chunks;
                 bool warn;
                 lock (_gate)
@@ -374,18 +406,47 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             ReportPersistenceFailure("all",
                 "Recording persistence failed. Recording is stopping and saved audio is preserved. Check disk space.");
         }
+        catch (Exception exception)
+        {
+            // The stop path finalises the spool even when the pump died, so only record why.
+            HostLog.Error("Capture pump stopped unexpectedly", exception);
+        }
     }
 
     private void CloseChannel(CaptureChannel channel)
     {
+        var release = DetachChannel(channel);
+        if (release is null)
+            return;
+        // A restarting device can block the driver join forever. Abandon it rather than wedge the stop.
+        var released = BoundedNative.TryRun(release, NativeReleaseTimeout,
+            error => HostLog.Error("Audio capture release failed", error));
+        if (!released)
+            HostLog.Write($"Audio capture release timed out on {channel.Track}; abandoned so the recording can finish.");
+    }
+
+    private Action? DetachChannel(CaptureChannel channel)
+    {
+        IWaveIn? capture;
+        MMDevice? endpoint;
         lock (_gate)
         {
             channel.Closing = true;
             channel.Available = false;
+            // Detaching first means a source that never finishes stopping can no longer write audio.
+            capture = channel.Capture;
+            endpoint = channel.Endpoint;
+            channel.Capture = null;
+            channel.Endpoint = null;
         }
+        return capture is null && endpoint is null ? null : () => ReleaseNative(capture, endpoint);
+    }
+
+    private static void ReleaseNative(IWaveIn? capture, MMDevice? endpoint)
+    {
         try
         {
-            channel.Capture?.StopRecording();
+            capture?.StopRecording();
         }
         catch (Exception exception) when (exception is COMException or InvalidOperationException)
         {
@@ -395,7 +456,7 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         {
             try
             {
-                channel.Capture?.Dispose();
+                capture?.Dispose();
             }
             catch (Exception exception) when (exception is COMException or InvalidOperationException)
             {
@@ -403,13 +464,11 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
             }
             finally
             {
-                lock (_gate) channel.Capture = null;
-                try { channel.Endpoint?.Dispose(); }
+                try { endpoint?.Dispose(); }
                 catch (Exception exception) when (exception is COMException or InvalidOperationException)
                 {
                     HostLog.Error("Audio endpoint release failed", exception);
                 }
-                finally { channel.Endpoint = null; }
             }
         }
     }
@@ -421,63 +480,15 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         {
             if (!_running)
                 return;
+            lock (_gate) _stopping = true;
             _captureCancellation!.Cancel();
-            if (_pump is not null)
-                await _pump.ConfigureAwait(false);
-            await Task.Run(() =>
-            {
-                IReadOnlyList<CapturedChunk> chunks = [];
-                try
-                {
-                    foreach (var channel in _channels.Values)
-                    {
-                        try { CloseChannel(channel); }
-                        catch (COMException) { ReportError(channel.Track, "The disconnected audio device has been released."); }
-                    }
-                    lock (_gate)
-                    {
-                        _clock.Stop();
-                        LastDurationMs = CaptureEndDurationMs();
-                        try
-                        {
-                            chunks = _spool!.Advance(LastDurationMs, complete: true);
-                        }
-                        catch (CaptureGapExceededException exception)
-                        {
-                            ReportAudioGap(exception);
-                            LastDurationMs = CaptureEndDurationMs();
-                            chunks = _spool!.Advance(LastDurationMs, complete: true);
-                        }
-                        LastStopCompleted = true;
-                    }
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                    ReportPersistenceFailure("all",
-                        "The recording tail is saved for recovery. Check disk space before restarting the recorder.");
-                }
-                finally
-                {
-                    lock (_gate)
-                    {
-                        _clock.Stop();
-                        LastDurationMs = CaptureEndDurationMs();
-                        _running = false;
-                        Interlocked.Exchange(ref _audioGapStopDurationMs, -1);
-                        try { _spool?.Dispose(); }
-                        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                        {
-                            LastStopCompleted = false;
-                            ReportPersistenceFailure("all", "Saved audio needs recovery after disk access is restored.");
-                        }
-                        finally { _spool = null; }
-                    }
-                    try { ReleaseEnumerator(); }
-                    catch (COMException) { /* A removed endpoint has no remaining capture resources. */ }
-                    finally { _channels.Clear(); }
-                }
-                Publish(chunks);
-            }, CancellationToken.None).ConfigureAwait(false);
+            IReadOnlyList<CapturedChunk> chunks = [];
+            var outcome = await Task.Run(() => CaptureStopSequence.RunAsync(_pump, PumpStopTimeout,
+                () => _channels.Values.Select(DetachChannel).OfType<Action>().ToList(), NativeReleaseTimeout,
+                () => chunks = FinaliseStop(), HostLog.Write), CancellationToken.None).ConfigureAwait(false);
+            // A pump that outlived the stop could reopen a source on the next session, so the host replaces this recorder.
+            if (!outcome.PumpStopped) IsPoisoned = true;
+            Publish(chunks);
         }
         finally
         {
@@ -488,20 +499,72 @@ public sealed class WindowsAudioRecorder : IAsyncDisposable
         }
     }
 
-    private void ReleaseEnumerator()
+    private IReadOnlyList<CapturedChunk> FinaliseStop()
     {
+        IReadOnlyList<CapturedChunk> chunks = [];
         try
         {
-            _deviceObserver?.Dispose();
+            lock (_gate)
+            {
+                _clock.Stop();
+                LastDurationMs = CaptureEndDurationMs();
+                try
+                {
+                    chunks = _spool!.Advance(LastDurationMs, complete: true);
+                }
+                catch (CaptureGapExceededException exception)
+                {
+                    ReportAudioGap(exception);
+                    LastDurationMs = CaptureEndDurationMs();
+                    chunks = _spool!.Advance(LastDurationMs, complete: true);
+                }
+                LastStopCompleted = true;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            ReportPersistenceFailure("all",
+                "The recording tail is saved for recovery. Check disk space before restarting the recorder.");
         }
         finally
         {
-            _enumerator?.Dispose();
-            _enumerator = null;
-            _deviceObserver = null;
-            Interlocked.Exchange(ref _reopenMic, 0);
-            Interlocked.Exchange(ref _reopenSystem, 0);
+            lock (_gate)
+            {
+                _clock.Stop();
+                LastDurationMs = CaptureEndDurationMs();
+                _running = false;
+                Interlocked.Exchange(ref _audioGapStopDurationMs, -1);
+                try { _spool?.Dispose(); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    LastStopCompleted = false;
+                    ReportPersistenceFailure("all", "Saved audio needs recovery after disk access is restored.");
+                }
+                finally { _spool = null; }
+            }
+            try { ReleaseEnumerator(); }
+            catch (COMException) { /* A removed endpoint has no remaining capture resources. */ }
+            finally { _channels.Clear(); }
         }
+        return chunks;
+    }
+
+    private void ReleaseEnumerator()
+    {
+        var observer = _deviceObserver;
+        var enumerator = _enumerator;
+        _enumerator = null;
+        _deviceObserver = null;
+        Interlocked.Exchange(ref _reopenMic, 0);
+        Interlocked.Exchange(ref _reopenSystem, 0);
+        // The observer joins a COM thread that can hang while a device restarts.
+        var released = BoundedNative.TryRun(() =>
+        {
+            try { observer?.Dispose(); }
+            finally { enumerator?.Dispose(); }
+        }, NativeReleaseTimeout, error => HostLog.Error("Audio device observer release failed", error));
+        if (!released)
+            HostLog.Write("Audio device observer release timed out; abandoned so the recording can finish.");
     }
 
     private void Publish(IEnumerable<CapturedChunk> chunks)

@@ -20,7 +20,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly RecorderApiClient _api;
     private readonly WindowsMeetingDetector _detector = new();
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
-    private readonly SemaphoreSlim _operations = new(1, 1);
+    private static readonly TimeSpan StaleParkedLimit = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CaptureCallLimit = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan HealInterval = TimeSpan.FromSeconds(30);
+    private readonly OperationGate _operations = new();
+    private readonly List<ParkedCapture> _parked = [];
     private readonly object _automationGate = new();
     private readonly CaptureChunkJobs _chunkJobs = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -51,6 +55,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private bool _pending;
     private bool _exiting;
     private bool _captureFault;
+    private bool _healDue;
+    private DateTimeOffset _nextHealUtc;
+    private string? _spoolDirectory;
     private bool _accessEnded;
     private string? _detail;
     private bool _meetingActive;
@@ -97,7 +104,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
             if (!TryPersistState())
             {
-                _captureFault = true;
+                MarkFault();
                 lock (_automationGate) _automation.ManualStop(DateTimeOffset.UtcNow);
                 await StopCaptureAsync(_settings.ActiveCaptureRef);
             }
@@ -202,40 +209,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _pending = false;
         _store = new FileOutboxStore(AppPaths.Outbox(deviceId));
         var spool = AppPaths.Capture(deviceId);
+        _spoolDirectory = spool;
         _pump = new OutboxPump(_store, _api);
+        // An incomplete session from an earlier run is finalised and stopped here, before any new capture.
         var needsAttention = await OutboxRecovery.RecoverAsync(_store, spool, _lifetime.Token,
             async (id, cancellation) => await _pump.BlockRecordingAsync(id, cancellation));
-        _capture = new WindowsAudioRecorder(spool);
-        _capture.ChunkReady += (_, args) =>
-        {
-            var currentStore = _store;
-            if (currentStore is null) return;
-            _chunkJobs.Add(TransferChunkAsync(currentStore, args.Chunk));
-        };
-        _capture.Error += (_, args) => Post(async () =>
-        {
-            HostLog.Write($"Capture reported an error on {args.Track}.");
-            if (!args.IsFatal)
-            {
-                _detail = "Audio device changed or unavailable. Capture is reconnecting.";
-                RefreshTray();
-                return;
-            }
-            // Polling and device callbacks share the Core capture failure decision.
-            await TickAsync();
-        });
-        var currentCapture = _capture;
-        _capture.SilentSystemAudio += (_, args) =>
-        {
-            Post(() =>
-            {
-                if (!ReferenceEquals(_capture, currentCapture) || !currentCapture.IsRecording) return;
-                RecordingPlan? plan;
-                lock (_automationGate) plan = _automation.Current;
-                if (plan is not null && plan.ClientRef == args.ClientRef) _notifications.SilentSystemAudio(plan);
-                RefreshTray();
-            });
-        };
+        _capture = CreateCapture();
         _pump.CreateSending += clientRef =>
         {
             lock (_automationGate)
@@ -258,7 +237,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         });
         _paired = true;
         _accessEnded = false;
-        _captureFault = needsAttention;
+        // Old damaged audio never blocks new meetings: every recording uses its own capture folder.
+        _captureFault = false;
+        _healDue = false;
         _detail = needsAttention ? "Recorder needs attention. Check local recordings and logs. Other uploads continue." : null;
         _settings = _settings with { ActiveCaptureRef = null };
         PersistState();
@@ -267,6 +248,164 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var currentPump = _pump;
         _uploadTask = Task.Run(() => UploadLoopAsync(currentPump, cancellation));
         _calendarTask = Task.Run(() => CalendarLoopAsync(cancellation));
+    }
+
+    private WindowsAudioRecorder CreateCapture()
+    {
+        var capture = new WindowsAudioRecorder(_spoolDirectory!);
+        capture.ChunkReady += (_, args) =>
+        {
+            var currentStore = _store;
+            if (currentStore is null) return;
+            _chunkJobs.Add(TransferChunkAsync(currentStore, args.Chunk));
+        };
+        capture.Error += (_, args) => Post(async () =>
+        {
+            HostLog.Write($"Capture reported an error on {args.Track}.");
+            if (!args.IsFatal)
+            {
+                _detail = "Audio device changed or unavailable. Capture is reconnecting.";
+                RefreshTray();
+                return;
+            }
+            // Polling and device callbacks share the Core capture failure decision.
+            await TickAsync();
+        });
+        capture.SilentSystemAudio += (_, args) =>
+        {
+            Post(() =>
+            {
+                if (!ReferenceEquals(_capture, capture) || !capture.IsRecording) return;
+                RecordingPlan? plan;
+                lock (_automationGate) plan = _automation.Current;
+                if (plan is not null && plan.ClientRef == args.ClientRef) _notifications.SilentSystemAudio(plan);
+                RefreshTray();
+            });
+        };
+        return capture;
+    }
+
+    private sealed record ParkedCapture(WindowsAudioRecorder Recorder, Guid? ClientRef, DateTimeOffset Since, Task Done);
+
+    /// <summary>
+    /// A native device call that never returns must not own the recorder. The stuck recorder is parked,
+    /// a fresh one takes over for the next meeting, and the parked session is finalised once it lets go
+    /// (or by startup recovery). Mutations are locked because this runs off the UI thread.
+    /// </summary>
+    private void AbandonCapture(WindowsAudioRecorder stuck, Task done, bool backOffAutoStart)
+    {
+        lock (_automationGate)
+        {
+            if (_parked.All(item => !ReferenceEquals(item.Recorder, stuck)))
+                _parked.Add(new ParkedCapture(stuck, _settings.ActiveCaptureRef ?? _automation.Current?.ClientRef,
+                    DateTimeOffset.UtcNow, done));
+            if (ReferenceEquals(_capture, stuck) && _spoolDirectory is not null)
+                _capture = CreateCapture();
+            _automation.StopForLifecycle(RecordingStopReason.Shutdown);
+            // A wedged device must not create a new parked recorder and server recording on every retry.
+            if (backOffAutoStart) _automation.DelayAutoStart(DateTimeOffset.UtcNow, RecorderAutomation.AbandonedStartDelay);
+            _settings = _settings with { ActiveCaptureRef = null };
+            _healDue = true;
+            _nextHealUtc = DateTimeOffset.UtcNow;
+            _detail = "A recording could not be closed cleanly. Recovery will retry.";
+        }
+        _notifications.RemoveRecording();
+        TryPersistState();
+        Post(RefreshTray);
+    }
+
+    /// <summary>A bounded native call. A start that finishes late is stopped, or it would record forever.</summary>
+    private async Task BoundedCaptureAsync(WindowsAudioRecorder capture, string name, Func<Task> call)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finished = await BoundedNative.TryRunWithLateCleanupAsync(call, CaptureCallLimit, async () =>
+        {
+            // The parked session is only released once the call, and any stop it needs, has fully finished.
+            // A late stop that also hangs keeps the session parked until that stop finally returns.
+            try
+            {
+                if (name == "start")
+                {
+                    var stop = capture.StopAsync(CancellationToken.None);
+                    if (!await BoundedNative.TryWaitAsync(stop, CaptureCallLimit))
+                    {
+                        _ = stop.ContinueWith(_ => done.TrySetResult(), CancellationToken.None,
+                            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                        return;
+                    }
+                }
+            }
+            catch (Exception error) { HostLog.Error("Late start cleanup failed", error); }
+            done.TrySetResult();
+        }).ConfigureAwait(false);
+        if (finished) return;
+        HostLog.Write($"Capture {name} did not finish in time; recorder abandoned.");
+        AbandonCapture(capture, done.Task, backOffAutoStart: name == "start");
+        throw new TimeoutException($"Capture {name} timed out.");
+    }
+
+    /// <summary>Latches the fault and guarantees a recovery pass will clear it once the disk is writable.</summary>
+    private void MarkFault()
+    {
+        _captureFault = true;
+        ScheduleHeal();
+    }
+
+    private void ScheduleHeal()
+    {
+        if (_healDue) return;
+        _healDue = true;
+        _nextHealUtc = DateTimeOffset.UtcNow + HealInterval;
+    }
+
+    /// <summary>Retries recovery until the disk is writable. Sessions still owned by a running capture are skipped.</summary>
+    private async Task HealAsync()
+    {
+        if (_store is null || _capture is not { } current || _spoolDirectory is null) return;
+        HashSet<Guid> skip;
+        // Query the recorder outside the lock: it has its own lock.
+        var recording = current.IsRecording;
+        lock (_automationGate)
+        {
+            _parked.RemoveAll(item => item.Done.IsCompleted);
+            if (_automation.Current is not null || recording) return;
+            if (_parked.Any(item => DateTimeOffset.UtcNow - item.Since > StaleParkedLimit))
+                _detail = "Restart Tahi Recorder to finish the earlier recording.";
+            // A parked session with an unknown identity cannot be excluded safely, so wait for it.
+            if (_parked.Any(item => item.ClientRef is null)) return;
+            skip = _parked.Select(item => item.ClientRef!.Value).ToHashSet();
+        }
+        try
+        {
+            var probe = Path.Combine(_spoolDirectory, ".write-check");
+            await FileOutboxStore.AtomicWriteAsync(probe, [0], _lifetime.Token);
+            File.Delete(probe);
+            try { await _chunkJobs.DrainAsync(); }
+            catch (Exception error) { HostLog.Error("Chunk transfer retained for recovery", error); }
+            // Re-check immediately before recovery: it must never touch a live session.
+            var recordingNow = current.IsRecording;
+            lock (_automationGate)
+            {
+                if (_automation.Current is not null || recordingNow || !ReferenceEquals(_capture, current)) return;
+            }
+            var needsAttention = await OutboxRecovery.RecoverAsync(_store, _spoolDirectory, _lifetime.Token,
+                async (id, cancellation) => await _pump!.BlockRecordingAsync(id, cancellation), skip);
+            try { await current.DisposeAsync(); }
+            catch (Exception error) { HostLog.Error("Previous recorder release failed", error); }
+            lock (_automationGate)
+            {
+                _capture = CreateCapture();
+                _captureFault = false;
+                _healDue = _parked.Count > 0;
+                if (!_parked.Any(item => DateTimeOffset.UtcNow - item.Since > StaleParkedLimit))
+                    _detail = needsAttention ? "Recorder needs attention. Check local recordings and logs. Other uploads continue." : null;
+            }
+            HostLog.Write("Recorder recovered after a failed capture.");
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            HostLog.Error("Recorder recovery will retry", error);
+        }
     }
 
     private async Task TransferChunkAsync(FileOutboxStore store, CapturedChunk chunk)
@@ -287,9 +426,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task TickAsync()
     {
-        if (_exiting || !await _operations.WaitAsync(0)) return;
+        if (_exiting) return;
+        var lease = _operations.TryEnter();
+        var startedWith = _capture;
+        if (lease is null)
+        {
+            return;
+        }
         try
         {
+            if (_paired && _healDue && DateTimeOffset.UtcNow >= _nextHealUtc)
+            {
+                _nextHealUtc = DateTimeOffset.UtcNow + HealInterval;
+                await HealAsync();
+            }
             if (DateTimeOffset.UtcNow >= _nextRetentionUtc)
             {
                 await PruneLocalDataAsync();
@@ -297,8 +447,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
             if (_paired && !_captureFault)
             {
-                var failure = CaptureFailurePolicy.Evaluate(_capture?.IsRecording == true,
-                    _capture?.HasAudioGap == true, _capture?.HasPersistenceFailure == true);
+                var capturing = _capture?.IsRecording == true;
+                // Safety net: a capture that is "recording" but has stopped producing audio is finalised.
+                var stalled = capturing && CaptureStallPolicy.IsStalled(true, _capture!.SinceLastPump);
+                var failure = CaptureFailurePolicy.Evaluate(capturing,
+                    _capture?.HasAudioGap == true, _capture?.HasPersistenceFailure == true, stalled);
                 if (failure == CaptureFailureAction.DisableRecorder)
                     throw new IOException("Capture cannot persist audio.");
                 var meeting = _detector.Poll();
@@ -314,7 +467,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 }
                 await ApplyActionsAsync(actions);
                 if (actions.Any(action => action.StopReason == RecordingStopReason.CaptureGap))
-                    _detail = "Recording stopped after an audio gap longer than 10 seconds. Local audio is retained.";
+                    _detail = stalled ? "Recording stopped because capture stopped making progress. Local audio is retained."
+                        : "Recording stopped after an audio gap longer than 10 seconds. Local audio is retained.";
                 PersistState();
             }
             RefreshTray();
@@ -322,16 +476,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (Exception error)
         {
             HostLog.Error("Recording automation failed", error);
-            _captureFault = true;
+            // Only a failing disk disables capture, and even that is retried by HealAsync.
+            if (error is IOException or UnauthorizedAccessException) MarkFault();
+            else ScheduleHeal();
             lock (_automationGate) _automation.ManualStop(DateTimeOffset.UtcNow);
             TryPersistState();
-            try { await StopCaptureAsync(_settings.ActiveCaptureRef); }
+            // Only act on the recorder this tick started with; a replacement belongs to a newer session.
+            try { if (ReferenceEquals(_capture, startedWith)) await StopCaptureAsync(_settings.ActiveCaptureRef); }
             catch (Exception stoppingError) { HostLog.Error("Interrupted audio retained for recovery", stoppingError); }
             TryPersistState();
             _detail = "Recorder needs attention. Local audio is retained.";
             RefreshTray();
         }
-        finally { _operations.Release(); }
+        finally { lease.Dispose(); }
     }
 
     private async Task PruneLocalDataAsync()
@@ -365,16 +522,35 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 _settings = _settings with { ActiveCaptureRef = action.Plan.ClientRef };
                 PersistState();
                 _notifications.Recording(action.Plan);
+                var starting = _capture;
                 try
                 {
-                    _capture.UpdateAudioContext(_detector.Poll(), _settings.AudioDevices ?? new AudioDevicePreferences());
-                    await _capture.StartAsync(action.Plan.ClientRef.ToString("D"), _lifetime.Token);
+                    starting.UpdateAudioContext(_detector.Poll(), _settings.AudioDevices ?? new AudioDevicePreferences());
+                    await BoundedCaptureAsync(starting, "start",
+                        () => starting.StartAsync(action.Plan.ClientRef.ToString("D"), _lifetime.Token));
                 }
                 catch
                 {
-                    try { await _capture.StopAsync(_lifetime.Token); }
+                    try
+                    {
+                        if (ReferenceEquals(_capture, starting))
+                            await BoundedCaptureAsync(starting, "stop", () => starting.StopAsync(_lifetime.Token));
+                    }
                     catch (Exception error) { HostLog.Error("Interrupted startup capture retained", error); }
                     lock (_automationGate) _automation.ManualStop(DateTimeOffset.UtcNow);
+                    if (ReferenceEquals(_capture, starting))
+                    {
+                        // Seal the failed session so a stale active ref never excludes it from recovery.
+                        // Audio already on disk is left to recovery, which seals with the real duration.
+                        if (HasSpooledAudio(action.Plan.ClientRef))
+                            ScheduleHeal();
+                        else
+                        {
+                            try { await _store.StopAsync(action.Plan.ClientRef, 0, _lifetime.Token); }
+                            catch (Exception error) { HostLog.Error("Failed start could not be sealed", error); }
+                        }
+                        lock (_automationGate) _settings = _settings with { ActiveCaptureRef = null };
+                    }
                     TryPersistState();
                     _notifications.RemoveRecording();
                     throw;
@@ -401,7 +577,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task<bool> StopForLifecycleAsync(RecordingStopReason reason, Guid? expectedClientRef = null)
     {
-        await _operations.WaitAsync().ConfigureAwait(false);
+        var lease = await _operations.EnterAsync().ConfigureAwait(false);
         try
         {
             Guid? clientRef;
@@ -416,11 +592,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
             if (reason == RecordingStopReason.RecordingBlocked) _detail = OutboxPump.BlockedError;
             await StopCaptureAsync(clientRef).ConfigureAwait(false);
-            _captureFault |= !TryPersistState();
+            if (!TryPersistState()) MarkFault();
             Post(RefreshTray);
             return true;
         }
-        finally { _operations.Release(); }
+        finally { lease.Dispose(); }
     }
 
     private Task StopManuallyAsync(Guid? generation = null) => InOperationAsync(async () =>
@@ -431,7 +607,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (generation is not null && _automation.Current?.ClientRef != generation) return;
             actions = _automation.ManualStop(DateTimeOffset.UtcNow);
             // Persist suppression before capture or network work can be interrupted.
-            if (!TryPersistState()) _captureFault = true;
+            if (!TryPersistState()) MarkFault();
         }
         await ApplyActionsAsync(actions);
         if (actions.Count == 0 && (_capture?.IsRecording == true || _settings.ActiveCaptureRef is not null))
@@ -441,10 +617,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task StopCaptureAsync(Guid? clientRef)
     {
-        if (_capture is null || _store is null) return;
-        // Physical capture stops before any fallible settings/outbox write.
-        await _capture.StopAsync(_lifetime.Token).ConfigureAwait(false);
-        var levels = _capture.AudioLevels;
+        var capture = _capture;
+        if (capture is null || _store is null) return;
+        // Physical capture stops before any fallible settings/outbox write. A stuck stop is abandoned, not awaited forever.
+        await BoundedCaptureAsync(capture, "stop", () => capture.StopAsync(_lifetime.Token)).ConfigureAwait(false);
+        if (capture.IsPoisoned && ReferenceEquals(_capture, capture) && _spoolDirectory is not null)
+        {
+            // Its pump outlived the stop, so it is never reused. It cannot start new sources (the stopping flag),
+            // and it is disposed in the background with a time limit.
+            lock (_automationGate) _capture = CreateCapture();
+            _ = BoundedNative.TryWaitAsync(capture.DisposeAsync().AsTask(), CaptureCallLimit);
+        }
+        var levels = capture.AudioLevels;
         if (levels.HasRecording)
         {
             lock (_automationGate) _settings = _settings with { LastAudioLevels = levels };
@@ -454,13 +638,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // Outbox draining may wait on a network operation. Show the physical stop immediately.
         Post(RefreshTray);
         await _chunkJobs.DrainAsync().ConfigureAwait(false);
-        if (!_capture.LastStopCompleted && clientRef is not null)
+        if (!capture.LastStopCompleted && clientRef is not null)
         {
-            _captureFault = true;
+            _healDue = true;
             throw new IOException("Capture tail remains local and must be recovered before stop.");
         }
         if (clientRef is not null && await _store.ContainsAsync(clientRef.Value, _lifetime.Token).ConfigureAwait(false))
-            await _store.StopAsync(clientRef.Value, _capture.LastDurationMs, _lifetime.Token).ConfigureAwait(false);
+            await _store.StopAsync(clientRef.Value, capture.LastDurationMs, _lifetime.Token).ConfigureAwait(false);
         _settings = _settings with { ActiveCaptureRef = null };
         PersistState();
     }
@@ -532,7 +716,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_pairing is { IsDisposed: false }) { _pairing.Activate(); return; }
         _pairing = new PairingForm(_api, async response =>
         {
-            await _operations.WaitAsync(_lifetime.Token);
+            var lease = await _operations.EnterAsync(_lifetime.Token);
             try
             {
                 await StopWorkersAsync();
@@ -555,7 +739,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 await ConfigureDeviceAsync(response.Device.Id);
                 RefreshTray();
             }
-            finally { _operations.Release(); }
+            finally { lease.Dispose(); }
         });
         _pairing.Show();
     }
@@ -591,33 +775,61 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_exiting) return;
         _exiting = true;
         _timer.Stop();
-        await StopForLifecycleAsync(RecordingStopReason.Shutdown);
-        await _operations.WaitAsync();
+        // Quit must work even when a native device call is hung: give the flush a bound, then force the gate.
+        try
+        {
+            if (!await BoundedNative.TryWaitAsync(StopForLifecycleAsync(RecordingStopReason.Shutdown), CaptureCallLimit))
+            {
+                HostLog.Write("Shutdown flush timed out; interrupted audio stays local for recovery.");
+                _operations.TryBreakIfStuck(TimeSpan.Zero);
+            }
+        }
+        catch (Exception error)
+        {
+            // A failed flush must not stop Quit: the audio is retained and startup recovery finishes it.
+            HostLog.Error("Shutdown flush failed; interrupted audio stays local for recovery", error);
+            _operations.TryBreakIfStuck(TimeSpan.Zero);
+        }
+        var lease = await _operations.EnterAsync();
         try
         {
             await StopWorkersAsync();
             _lifetime.Cancel();
-            if (_capture is not null) await _capture.DisposeAsync();
+            if (_capture is not null)
+                await BoundedNative.TryWaitAsync(_capture.DisposeAsync().AsTask(), CaptureCallLimit);
             _pairing?.Close();
             _tray.Visible = false;
             ExitThread();
         }
         catch (Exception error) { HostLog.Error("Shutdown retained interrupted capture", error); ExitThread(); }
-        finally { _operations.Release(); }
+        finally { lease.Dispose(); }
+    }
+
+    private bool HasSpooledAudio(Guid clientRef)
+    {
+        if (_spoolDirectory is null) return false;
+        try
+        {
+            var folder = Path.Combine(_spoolDirectory, clientRef.ToString("D"));
+            return Directory.Exists(folder)
+                && (Directory.EnumerateFiles(folder, "*.pcm").Any() || Directory.EnumerateFiles(folder, "*.wav").Any());
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return true; }
     }
 
     private async Task InOperationAsync(Func<Task> work)
     {
-        await _operations.WaitAsync();
+        var lease = await _operations.EnterAsync();
         try { await work(); }
         catch (Exception error)
         {
             HostLog.Error("Tray action failed", error);
             if (error is IOException or UnauthorizedAccessException) _captureFault = true;
+            ScheduleHeal();
             _detail = "Action could not finish. Local audio is retained.";
             RefreshTray();
         }
-        finally { _operations.Release(); }
+        finally { lease.Dispose(); }
     }
 
     private void PersistState()

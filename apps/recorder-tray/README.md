@@ -222,6 +222,17 @@ fourteen days. Log retention errors never stop startup or recording ticks.
 Retention runs at startup and hourly, deleting the capture journal last and
 tolerating an absent journal for an already ready or failed recording.
 
+A hung native device call must never own the recorder (incident 2026-10-19). Every
+capture release and the device observer join are bounded at five seconds and abandoned if
+stuck, so the partial chunk is still flushed, the journal marked complete and stop sent.
+A working microphone or render endpoint is retained when meeting activity flaps or ends,
+rather than being restarted. A capture whose pump has not ticked for 30 seconds is stopped and finalised (missing audio
+is already stopped by the spool padding limit). A capture call that outlives 45 seconds is
+abandoned: a fresh recorder takes over, a start that finishes late is stopped, and the parked
+session is finalised by a recovery pass that skips live and parked sessions. A failed stop is
+retried every 30 seconds instead of disabling auto-recording until restart.
+Damaged old recordings show needs attention but do not block new meetings.
+
 - Network/timeouts, `409 busy`, retryable `503`: retain audio and back off.
 - `429 open_recording`: let the earlier recording finish. Known local capture
   is recovered automatically. An orphaned server row needs dashboard review.
