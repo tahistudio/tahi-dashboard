@@ -207,6 +207,13 @@ export const ORG_SCOPED_TABLES: readonly OrgScopedTable[] = [
   // Slack profile, so there is nothing to keep. A founder's or a team
   // member's row carries org_id NULL and is therefore never in scope here.
   { schemaKey: 'slackIdentities', table: 'slack_identities', policy: 'delete' },
+  // Site QA sites (migration 0115). 'refuse', not 'delete': a site owns a
+  // tree keyed by site_id, round_id and round_page_id (pages, rounds, round
+  // pages, scan and link results) that the org_id sweep cannot reach, so a
+  // hard delete would orphan it. A merge re-points org_id and the tree
+  // follows the site. Archiving a site keeps its row, so a client with any
+  // QA site, archived or not, is refused here by design.
+  { schemaKey: 'qaSites', table: 'qa_sites', policy: 'refuse' },
 ]
 
 interface OrgTableHandle {

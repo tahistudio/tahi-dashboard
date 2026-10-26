@@ -60,6 +60,64 @@ describe('checkLinks', () => {
   it('dedupes and returns one result per unique URL', async () => {
     const f = fakeFetch({ 'https://a.com/': { status: 200 } })
     const out = await checkLinks(['https://a.com/', 'https://a.com/'], { fetch: f, target: 'staging' })
-    expect(out).toHaveLength(1)
+    expect(out.results).toHaveLength(1)
+    expect(out.unchecked).toEqual([])
+  })
+  it('stops at the shared budget and returns the rest as unchecked', async () => {
+    const routes: Record<string, { status: number }> = {}
+    const urls = Array.from({ length: 10 }, (_, i) => { const u = `https://a.com/${i}`; routes[u] = { status: 200 }; return u })
+    const budget = { remaining: 4 }
+    const out = await checkLinks(urls, { fetch: fakeFetch(routes), target: 'live', budget })
+    expect(out.results).toHaveLength(4)
+    expect(out.unchecked).toHaveLength(6)
+    expect(budget.remaining).toBe(0)
+    expect([...out.results.map(r => r.url), ...out.unchecked].sort()).toEqual([...urls].sort())
+  })
+  it('defaults to a budget of 400 fetches per call', async () => {
+    let calls = 0
+    const f: FetchLike = async () => { calls++; return new Response(null, { status: 200 }) }
+    const urls = Array.from({ length: 450 }, (_, i) => `https://a.com/${i}`)
+    const out = await checkLinks(urls, { fetch: f, target: 'live' })
+    expect(calls).toBe(400)
+    expect(out.results).toHaveLength(400)
+    expect(out.unchecked).toHaveLength(50)
+  })
+  it('a link cut off mid redirect chain by the budget is unchecked, not broken', async () => {
+    const f = fakeFetch({ 'https://a.com/1': { status: 301, location: '/2' }, 'https://a.com/2': { status: 200 } })
+    const out = await checkLinks(['https://a.com/1'], { fetch: f, target: 'live', budget: { remaining: 1 } })
+    expect(out.results).toEqual([])
+    expect(out.unchecked).toEqual(['https://a.com/1'])
+  })
+})
+
+describe('checkLink request cap', () => {
+  it('makes at most maxHops + 1 requests on an endless redirect loop', async () => {
+    let calls = 0
+    const f: FetchLike = async () => { calls++; return new Response(null, { status: 302, headers: { location: 'https://a.com/loop' } }) }
+    const r = await checkLink('https://a.com/loop', { fetch: f, target: 'live', maxHops: 5 })
+    expect(calls).toBe(6)
+    expect(r.error).toBe('too_many_redirects')
+  })
+  it('counts the GET fallback and keeps using GET after a 405', async () => {
+    const methods: string[] = []
+    const f: FetchLike = async (url, init) => {
+      methods.push(init.method)
+      if (init.method === 'HEAD') return new Response(null, { status: 405 })
+      if (url.endsWith('/a')) return new Response(null, { status: 301, headers: { location: '/b' } })
+      return new Response(null, { status: 200 })
+    }
+    const r = await checkLink('https://a.com/a', { fetch: f, target: 'live' })
+    expect(methods).toEqual(['HEAD', 'GET', 'GET'])
+    expect(r.status).toBe(200)
+  })
+  it('never exceeds maxHops + 1 requests even with fallbacks', async () => {
+    let calls = 0
+    const f: FetchLike = async (_url, init) => {
+      calls++
+      if (init.method === 'HEAD') return new Response(null, { status: 405 })
+      return new Response(null, { status: 302, headers: { location: 'https://a.com/x' } })
+    }
+    await checkLink('https://a.com/x', { fetch: f, target: 'live', maxHops: 2 })
+    expect(calls).toBeLessThanOrEqual(3)
   })
 })

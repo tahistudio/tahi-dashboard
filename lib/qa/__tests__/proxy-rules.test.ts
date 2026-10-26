@@ -24,10 +24,28 @@ describe('rewriteHref', () => {
   })
   it('leaves other origins and special schemes alone', () => {
     expect(rewriteHref('https://google.com', page, UP, PB)).toBeNull()
-    expect(rewriteHref('#section', page, UP, PB)).toBeNull()
     expect(rewriteHref('mailto:a@b.com', page, UP, PB)).toBeNull()
     expect(rewriteHref('tel:123', page, UP, PB)).toBeNull()
     expect(rewriteHref('javascript:void(0)', page, UP, PB)).toBeNull()
+  })
+})
+
+describe('rewriteHref in-page and empty hrefs', () => {
+  const page = 'https://acme.webflow.io/blog/post-a?x=1'
+  it('turns #frag into the current proxy URL plus the fragment', () => {
+    expect(rewriteHref('#section', page, UP, PB)).toBe(`${PB}/blog/post-a?x=1#section`)
+    expect(rewriteHref('#', page, UP, PB)).toBe(`${PB}/blog/post-a?x=1#`)
+  })
+  it('turns empty href into the current proxy URL', () => {
+    expect(rewriteHref('', page, UP, PB)).toBe(`${PB}/blog/post-a?x=1`)
+    expect(rewriteHref('   ', page, UP, PB)).toBe(`${PB}/blog/post-a?x=1`)
+  })
+  it('rewrites relative form actions like links and leaves off-site ones', () => {
+    expect(rewriteHref('/search', page, UP, PB)).toBe(`${PB}/search`)
+    expect(rewriteHref('https://other.com/s', page, UP, PB)).toBeNull()
+  })
+  it('returns null for an unparseable page URL', () => {
+    expect(rewriteHref('#a', 'not a url', UP, PB)).toBeNull()
   })
 })
 
@@ -66,6 +84,18 @@ describe('scrubResponseHeaders', () => {
     expect(out.get('content-security-policy')).toBe('frame-ancestors https://portal.tahi.studio')
     expect(out.get('cache-control')).toBe('no-store')
     expect(out.get('x-robots-tag')).toBe('noindex')
+    expect(out.get('referrer-policy')).toBe('no-referrer')
+  })
+  it('drops upstream referrer and cross-origin isolation policies', () => {
+    const h = new Headers({
+      'referrer-policy': 'unsafe-url',
+      'cross-origin-embedder-policy': 'require-corp',
+      'cross-origin-opener-policy': 'same-origin',
+    })
+    const out = scrubResponseHeaders(h, 'https://portal.tahi.studio')
+    expect(out.get('referrer-policy')).toBe('no-referrer')
+    expect(out.get('cross-origin-embedder-policy')).toBeNull()
+    expect(out.get('cross-origin-opener-policy')).toBeNull()
   })
 })
 
@@ -75,5 +105,8 @@ describe('classifyRedirect', () => {
   })
   it('flags off-site redirects', () => {
     expect(classifyRedirect('https://other.com/x', 'https://acme.webflow.io/old', UP, PB)).toEqual({ kind: 'external', location: 'https://other.com/x' })
+  })
+  it('does not throw on a malformed Location header', () => {
+    expect(classifyRedirect('http://[bad', 'https://acme.webflow.io/old', UP, PB)).toEqual({ kind: 'external', location: 'http://[bad' })
   })
 })

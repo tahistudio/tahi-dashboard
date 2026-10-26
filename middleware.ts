@@ -138,6 +138,7 @@ const isAdminOnlyRoute = createRouteMatcher([
   '/time(.*)',
   '/team(.*)',
   '/docs(.*)',
+  '/qa(.*)',
 ])
 
 // Client-only routes : if admin hits these, they get redirected to /requests

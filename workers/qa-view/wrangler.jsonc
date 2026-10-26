@@ -1,0 +1,16 @@
+{
+  // Site QA sandbox proxy. Serves client pages on THIS origin, never the
+  // dashboard's, so client-site JavaScript can never read dashboard cookies.
+  //
+  // Secrets (set with `wrangler secret put <NAME>` from workers/qa-view):
+  //   QA_VIEW_SECRET   same value as the dashboard's QA_VIEW_SECRET; verifies view tokens
+  //
+  // Declared as comments on purpose: a `vars` entry with an empty value would
+  // shadow the real secret at deploy time.
+  "name": "tahi-qa-view",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-12",
+  "observability": { "enabled": true },
+  "build": { "command": "node build-scanner.mjs" },
+  "rules": [{ "type": "Text", "globs": ["**/*.bundle.js"], "fallthrough": false }]
+}

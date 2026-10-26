@@ -33,4 +33,31 @@ describe('runSiteChecks', () => {
     expect(checks.find(c => c.code === 'sitemap')?.result).toBe('fail')
     expect(checks.some(c => c.code === 'https_redirect')).toBe(false)
   })
+  it('follows an apex to www redirect for robots.txt and sitemap.xml', async () => {
+    const checks = await runSiteChecks('https://acme.com', 'staging', f({
+      'https://acme.com/robots.txt': { status: 301, location: 'https://www.acme.com/robots.txt' },
+      'https://www.acme.com/robots.txt': { status: 200, body: 'User-agent: *\nAllow: /' },
+      'https://acme.com/sitemap.xml': { status: 301, location: 'https://www.acme.com/sitemap.xml' },
+      'https://www.acme.com/sitemap.xml': { status: 200, body: '<urlset></urlset>' },
+    }))
+    expect(checks.find(c => c.code === 'robots')?.result).toBe('pass')
+    expect(checks.find(c => c.code === 'sitemap')?.result).toBe('pass')
+  })
+  it('does not follow a redirect to another site or an unsafe host', async () => {
+    const checks = await runSiteChecks('https://acme.com', 'staging', f({
+      'https://acme.com/robots.txt': { status: 302, location: 'https://evil.example/robots.txt' },
+      'https://evil.example/robots.txt': { status: 200, body: 'ok' },
+      'https://acme.com/sitemap.xml': { status: 302, location: 'http://127.0.0.1/sitemap.xml' },
+      'http://127.0.0.1/sitemap.xml': { status: 200 },
+    }))
+    expect(checks.find(c => c.code === 'robots')?.result).toBe('warn')
+    expect(checks.find(c => c.code === 'sitemap')?.result).toBe('fail')
+  })
+  it('gives up on a same-site redirect loop', async () => {
+    const checks = await runSiteChecks('https://acme.com', 'staging', f({
+      'https://acme.com/robots.txt': { status: 301, location: 'https://www.acme.com/robots.txt' },
+      'https://www.acme.com/robots.txt': { status: 301, location: 'https://acme.com/robots.txt' },
+    }))
+    expect(checks.find(c => c.code === 'robots')?.result).toBe('warn')
+  })
 })

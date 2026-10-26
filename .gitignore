@@ -80,3 +80,4 @@ ds-bundle/
 .design-sync/compiled.css
 playwright.local.config.ts
 .claude/backups/
+workers/qa-view/src/generated/

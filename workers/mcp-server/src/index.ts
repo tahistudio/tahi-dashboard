@@ -12,6 +12,7 @@ import { requestToolCall } from './request-tools'
 import { taskCommentToolCall } from './task-comment-tools'
 import { taskSuggestionToolCall } from './task-suggestion-tools'
 import { feedbackToolCall } from './feedback-tools'
+import { qaToolCall } from './qa-tools'
 import { snapshotToolCall } from './snapshot-tools'
 import {
   APPROVAL_ATTEMPT_LIMIT,
@@ -1695,6 +1696,93 @@ export const TOOLS: ToolDef[] = [
     id: prop('string', 'Feedback comment ID'),
   }, ['id']),
 
+  // ── Site QA ───────────────────────────────────────────────────────────
+  tool('list_qa_sites', 'List the client websites tracked in Site QA, newest first, with the open round for each where there is one.', {
+    org_id: prop('string', 'Narrow to one client (organisations.id). Omit to list every site.'),
+  }),
+  tool('create_qa_site', 'Add a client website to Site QA with its staging and live URLs. At least one URL is needed.', {
+    org_id: prop('string', 'Client organisation ID (organisations.id)'),
+    name: prop('string', 'Site name, 1 to 120 characters'),
+    staging_url: prop('string', 'Staging site URL, public https. Only the origin is kept.'),
+    live_url: prop('string', 'Live site URL, public https. Only the origin is kept.'),
+    notes: prop('string', 'Free-text notes about the site'),
+  }, ['org_id', 'name']),
+  tool('import_qa_sitemap', 'Read the sitemap.xml of a QA site on its staging or live URL and add its pages to the site page list.', {
+    site_id: prop('string', 'QA site ID'),
+    target: prop('string', 'Which URL to read the sitemap from', { enum: ['staging', 'live'] }),
+  }, ['site_id', 'target']),
+  tool('list_qa_rounds', 'List the QA rounds for one site, newest first, with tick and pass, fail and untested counts.', {
+    site_id: prop('string', 'QA site ID'),
+  }, ['site_id']),
+  tool('start_qa_round', 'Start a new QA round on a site against its staging or live URL, taking a snapshot of its page list.', {
+    site_id: prop('string', 'QA site ID'),
+    name: prop('string', 'Round name, 1 to 120 characters'),
+    target: prop('string', 'Which URL the round checks', { enum: ['staging', 'live'] }),
+  }, ['site_id', 'name', 'target']),
+  tool('get_qa_round', 'Get one QA round with its pages, their statuses, viewport ticks and counts.', {
+    round_id: prop('string', 'QA round ID'),
+  }, ['round_id']),
+  tool('update_qa_round_page', 'Set the status, note or viewport ticks of one page in a QA round.', {
+    round_page_id: prop('string', 'QA round page ID'),
+    status: prop('string', 'Page status', { enum: ['untested', 'pass', 'fail'] }),
+    note: prop(['string', 'null'], 'Page note, up to 4000 characters. Send null to clear it.'),
+    viewports: prop('object', 'Viewport ticks as booleans: {xl, desktop, tablet, mobile_l, mobile_p}. Send only the ones to change.'),
+  }, ['round_page_id']),
+  tool('check_qa_round_links', 'Check up to 100 link URLs for a QA round and return each final status, redirect chain and whether it is broken. The response includes an unchecked list of URLs not reached in this call; call again with that list.', {
+    round_id: prop('string', 'QA round ID'),
+    urls: prop('array', 'Link URLs to check, 1 to 100 of them'),
+  }, ['round_id', 'urls']),
+  tool('run_qa_site_checks', 'Run the site-level checks (robots.txt, sitemap, HTTPS, www, favicon) for a QA round and store the result on the round.', {
+    round_id: prop('string', 'QA round ID'),
+  }, ['round_id']),
+  tool('get_qa_round_report', 'Get the report data for a QA round: summary counts, site checks, redirect map and the page table.', {
+    round_id: prop('string', 'QA round ID'),
+  }, ['round_id']),
+  tool('update_qa_site', 'Edit a QA site name, staging URL, live URL or notes. Send only the fields to change; an empty string or null clears a URL or the notes.', {
+    site_id: prop('string', 'QA site ID'),
+    name: prop('string', 'Site name, 1 to 120 characters'),
+    staging_url: prop(['string', 'null'], 'Staging site URL, public https. Only the origin is kept.'),
+    live_url: prop(['string', 'null'], 'Live site URL, public https. Only the origin is kept.'),
+    notes: prop(['string', 'null'], 'Free-text notes about the site'),
+  }, ['site_id']),
+  tool('archive_qa_site', 'Archive a QA site so it drops out of the site list. Its pages and rounds are kept. Confirm with the user before calling.', {
+    site_id: prop('string', 'QA site ID'),
+  }, ['site_id']),
+  tool('add_qa_page', 'Add one page path such as /about to a QA site, or restore it if it was removed.', {
+    site_id: prop('string', 'QA site ID'),
+    path: prop('string', 'Page path such as /about, up to 500 characters'),
+  }, ['site_id', 'path']),
+  tool('remove_qa_page', 'Remove one page from a QA site page list. The row is kept and add_qa_page restores it.', {
+    page_id: prop('string', 'QA page ID (qa_pages.id, not a round page ID)'),
+  }, ['page_id']),
+  tool('update_qa_round', 'Rename a QA round or close or reopen it. A closed round refuses scans, PageSpeed runs and new requests.', {
+    round_id: prop('string', 'QA round ID'),
+    name: prop('string', 'Round name, 1 to 120 characters'),
+    status: prop('string', 'Round status', { enum: ['open', 'closed'] }),
+  }, ['round_id']),
+  tool('add_qa_round_samples', 'Add the next pages of a template group to an open QA round, up to 20 at a time, skipping pages already in the round.', {
+    round_id: prop('string', 'QA round ID'),
+    group_key: prop('string', 'Template group key, as listed in the groups of get_qa_round'),
+    count: prop('number', 'How many pages to add, 1 to 20 (default 3)'),
+  }, ['round_id', 'group_key']),
+  tool('get_qa_round_page', 'Get one page of a QA round with its scans per viewport, link results and every issue found.', {
+    round_page_id: prop('string', 'QA round page ID'),
+  }, ['round_page_id']),
+  tool('create_qa_request', 'File a QA finding as an internal request on the site client. The request is internal and is not shown to the client. The round page is linked to it. Refused when the round is closed.', {
+    round_page_id: prop('string', 'QA round page ID'),
+    title: prop('string', 'Request title, 1 to 200 characters'),
+    description: prop('string', 'Finding details, up to 4000 characters'),
+    viewport: prop('string', 'Viewport the finding was seen on', { enum: ['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'] }),
+  }, ['round_page_id', 'title']),
+  tool('run_qa_pagespeed', 'Run Google PageSpeed for one page of a live QA round on mobile or desktop and store the scores. Refused when the round is closed.', {
+    round_page_id: prop('string', 'QA round page ID'),
+    strategy: prop('string', 'Device strategy', { enum: ['mobile', 'desktop'] }),
+  }, ['round_page_id', 'strategy']),
+  tool('check_qa_redirect_map', 'Map up to 150 old URLs onto the live site of a QA round, check where each one lands and store the redirect map on the round. The response includes an unchecked list of URLs not reached in this call; call again with that list.', {
+    round_id: prop('string', 'QA round ID'),
+    urls: prop('array', 'Old URLs or paths to map, 1 to 150 of them'),
+  }, ['round_id', 'urls']),
+
   // ── Messaging ─────────────────────────────────────────────────────────
   // The inbox is ONE surface over TWO stores: an org channel (the standing
   // line with a client) and a request thread (the message stream that already
@@ -2246,6 +2334,16 @@ export async function executeTool(
   const feedbackCall = feedbackToolCall(name, args)
   if (feedbackCall) {
     return json(await apiWrite(feedbackCall.path, token, feedbackCall.method, feedbackCall.body))
+  }
+
+  // The site QA tools, same pattern again.
+  const qaCall = qaToolCall(name, args)
+  if (qaCall) {
+    return json(
+      qaCall.method === 'GET'
+        ? await apiGet(qaCall.path, token)
+        : await apiWrite(qaCall.path, token, qaCall.method, qaCall.body),
+    )
   }
 
   // The monthly financial snapshot tools, same pattern again.

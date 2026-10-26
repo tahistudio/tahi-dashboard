@@ -3,6 +3,7 @@ import { schema } from '@/db/d1'
 import type { QaLinkResult, QaScanResult, QaTarget, QaViewportKey } from '@/lib/qa/types'
 import { countIssues, pageIssues } from '@/lib/qa/issue-rules'
 import { isSafePublicUrl } from '@/lib/qa/ssrf'
+import { discardBody, MAX_BODY_BYTES, QA_USER_AGENT, readCappedText, type FetchLike } from '@/lib/qa/link-check'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -51,9 +52,15 @@ export function rowToLinkResult(r: typeof schema.qaLinkResults.$inferSelect): Qa
 /** D1 caps bound parameters per statement at 100. Keep each IN list well under that. */
 const LINK_QUERY_CHUNK = 90
 
-/** Reads the stored scans and link results for one round page and rewrites its count columns. */
-export async function recomputeCounts(database: D1, roundPageId: string): Promise<void> {
-  const loaded = await loadRoundPage(database, roundPageId)
+export type LoadedRound = NonNullable<Awaited<ReturnType<typeof loadRound>>>
+
+/**
+ * Reads the stored scans and link results for one round page and rewrites its
+ * count columns. Pass the already-loaded round and site to skip three queries
+ * per page when recomputing many pages of the same round.
+ */
+export async function recomputeCounts(database: D1, roundPageId: string, preloaded?: LoadedRound): Promise<void> {
+  const loaded = preloaded ?? await loadRoundPage(database, roundPageId)
   if (!loaded) return
   const { round, site } = loaded
   const scanRows = await database.select().from(schema.qaScanResults).where(eq(schema.qaScanResults.roundPageId, roundPageId))
@@ -79,8 +86,57 @@ export async function recomputeCounts(database: D1, roundPageId: string): Promis
   }).where(eq(schema.qaRoundPages.id, roundPageId))
 }
 
-/** fetch for server-side checks: global fetch with the SSRF guard applied by the caller's helpers. */
-export const serverFetch = (url: string, init: RequestInit & { method: string }) => fetch(url, init)
+const FETCH_TIMEOUT_MS = 8000
+const MAX_REDIRECTS = 5
+
+/**
+ * fetch for server-side checks: global fetch with the QA user agent and an 8s
+ * timeout unless the caller supplies a signal. The SSRF guard is applied by
+ * the caller's helpers; redirect handling is the caller's choice.
+ */
+export const serverFetch: FetchLike = (url, init) => {
+  const headers = new Headers(init.headers)
+  if (!headers.has('user-agent')) headers.set('user-agent', QA_USER_AGENT)
+  return fetch(url, { ...init, headers, signal: init.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+}
+
+export interface FetchedText { status: number; text: string; truncated: boolean }
+
+/**
+ * Hardened GET for reading small remote documents (sitemaps). Follows up to 5
+ * redirects itself and re-checks isSafePublicUrl on every hop, uses one 8s
+ * deadline across the whole exchange, and stops reading at 5 MB. Returns null
+ * for an unsafe URL, a non-2xx answer, too many redirects, a timeout or any
+ * network error.
+ */
+export async function fetchText(url: string, fetchImpl: FetchLike = serverFetch): Promise<FetchedText | null> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
+  try {
+    let current = url
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (!isSafePublicUrl(current)) return null
+      const res = await fetchImpl(current, { method: 'GET', redirect: 'manual', signal: ctrl.signal, headers: { 'user-agent': QA_USER_AGENT } })
+      const location = res.headers.get('location')
+      if (res.status >= 300 && res.status < 400 && location) {
+        await discardBody(res)
+        current = new URL(location, current).toString()
+        continue
+      }
+      if (res.status < 200 || res.status >= 300) {
+        await discardBody(res)
+        return null
+      }
+      const { text, truncated } = await readCappedText(res, MAX_BODY_BYTES)
+      return { status: res.status, text, truncated }
+    }
+    return null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)

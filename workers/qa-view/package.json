@@ -1,0 +1,20 @@
+{
+  "name": "tahi-qa-view",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:scanner": "node build-scanner.mjs",
+    "type-check": "tsc --noEmit -p .",
+    "dev": "npm run build:scanner && wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "axe-core": "4.11.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.14.0"
+  }
+}
