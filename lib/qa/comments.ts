@@ -4,9 +4,20 @@
  */
 import {
   QA_COMMENT_BODY_MAX,
+  QA_CONTEXT_CLASS_MAX,
+  QA_CONTEXT_HTML_MAX,
+  QA_CONTEXT_MAX_ANCESTORS,
+  QA_CONTEXT_MAX_BYTES,
+  QA_CONTEXT_MAX_CLASSES,
+  QA_VIEWPORTS,
   QA_VIEWPORT_KEYS,
   type QaComment,
+  type QaCommentDetail,
   type QaCommentStatus,
+  type QaContextAncestor,
+  type QaElementContext,
+  type QaTarget,
+  type QaViewportInfo,
   type QaViewportKey,
 } from '@/lib/qa/types'
 
@@ -33,6 +44,8 @@ export interface CommentRow {
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
+  /** JSON text of a QaElementContext, null when the comment has none */
+  elementContext: string | null
 }
 
 export interface CommentInput {
@@ -43,6 +56,7 @@ export interface CommentInput {
   elementTag: string | null
   elementText: string | null
   body: string
+  elementContext: QaElementContext | null
 }
 
 export interface CommentPatch {
@@ -92,6 +106,144 @@ export function rowToComment(row: CommentRow): QaComment {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     resolvedAt: row.resolvedAt,
+    elementContext: parseStoredContext(row.elementContext),
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Element context (where a picked element sits)                       */
+/* ------------------------------------------------------------------ */
+
+const CONTEXT_ID_MAX = 200
+const CONTEXT_TAG_MAX = 40
+const CONTEXT_NUMBER_MAX = 10_000_000
+
+function cleanString(v: unknown, max: number): string | null {
+  if (typeof v !== 'string') return null
+  const trimmed = v.trim().slice(0, max)
+  return trimmed || null
+}
+
+function cleanClasses(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  const out: string[] = []
+  for (const item of v) {
+    const cls = cleanString(item, QA_CONTEXT_CLASS_MAX)
+    if (cls) out.push(cls)
+    if (out.length >= QA_CONTEXT_MAX_CLASSES) break
+  }
+  return out
+}
+
+function cleanNumber(v: unknown): number {
+  if (!isFiniteNumber(v)) return 0
+  return Math.round(Math.min(CONTEXT_NUMBER_MAX, Math.max(-CONTEXT_NUMBER_MAX, v)))
+}
+
+function cleanAncestors(v: unknown): QaContextAncestor[] {
+  if (!Array.isArray(v)) return []
+  const out: QaContextAncestor[] = []
+  for (const item of v) {
+    if (!isRecord(item)) continue
+    const tag = cleanString(item.tag, CONTEXT_TAG_MAX)
+    if (!tag) continue
+    out.push({ tag: tag.toLowerCase(), id: cleanString(item.id, CONTEXT_ID_MAX), classes: cleanClasses(item.classes) })
+    if (out.length >= QA_CONTEXT_MAX_ANCESTORS) break
+  }
+  return out
+}
+
+function contextBytes(ctx: QaElementContext): number {
+  return new TextEncoder().encode(JSON.stringify(ctx)).length
+}
+
+/**
+ * Validates and clamps element context from a client. Invalid parts are
+ * dropped (empty list, empty text, zero) rather than rejecting the comment.
+ * Returns null when the input is not an object or still exceeds the 8 KB cap
+ * after the html, then the ancestors, are shed.
+ */
+export function parseElementContext(raw: unknown): QaElementContext | null {
+  if (!isRecord(raw)) return null
+  const box = isRecord(raw.box) ? raw.box : {}
+  const ctx: QaElementContext = {
+    id: cleanString(raw.id, CONTEXT_ID_MAX),
+    classes: cleanClasses(raw.classes),
+    ancestors: cleanAncestors(raw.ancestors),
+    html: typeof raw.html === 'string' ? raw.html.slice(0, QA_CONTEXT_HTML_MAX) : '',
+    box: { x: cleanNumber(box.x), y: cleanNumber(box.y), width: cleanNumber(box.width), height: cleanNumber(box.height) },
+    scrollY: cleanNumber(raw.scrollY),
+    pageHeight: cleanNumber(raw.pageHeight),
+    viewportWidth: cleanNumber(raw.viewportWidth),
+    viewportHeight: cleanNumber(raw.viewportHeight),
+  }
+  if (contextBytes(ctx) <= QA_CONTEXT_MAX_BYTES) return ctx
+  ctx.html = ''
+  if (contextBytes(ctx) <= QA_CONTEXT_MAX_BYTES) return ctx
+  ctx.ancestors = []
+  if (contextBytes(ctx) <= QA_CONTEXT_MAX_BYTES) return ctx
+  return null
+}
+
+/** Reads a stored context column. Bad or missing JSON gives null. */
+export function parseStoredContext(text: string | null): QaElementContext | null {
+  if (!text) return null
+  try {
+    return parseElementContext(JSON.parse(text))
+  } catch {
+    return null
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Detail shape for MCP and the round comments endpoint                */
+/* ------------------------------------------------------------------ */
+
+const WEBFLOW_BREAKPOINTS: Record<QaViewportKey, string> = {
+  xl: '1920px (Webflow 1920 breakpoint, if enabled)',
+  desktop: '1440px (Webflow 1440 breakpoint, if enabled, else Desktop)',
+  tablet: 'Tablet (991px and below)',
+  mobile_l: 'Mobile landscape (767px and below)',
+  mobile_p: 'Mobile portrait (478px and below)',
+}
+
+export function viewportInfoFor(key: QaViewportKey): QaViewportInfo {
+  const vp = QA_VIEWPORTS.find(v => v.key === key) ?? QA_VIEWPORTS[1]
+  return { key: vp.key, label: vp.label, width: vp.width, height: vp.height, webflowBreakpoint: WEBFLOW_BREAKPOINTS[vp.key] }
+}
+
+/** The site origin plus the path, or null when the site has no usable URL for the target. */
+export function pageUrlFor(siteUrl: string | null, path: string): string | null {
+  if (!siteUrl) return null
+  try {
+    const origin = new URL(siteUrl.trim()).origin
+    return origin + (path.startsWith('/') ? path : `/${path}`)
+  } catch {
+    return null
+  }
+}
+
+export interface CommentDetailContext {
+  roundId: string
+  roundName: string
+  siteName: string
+  target: QaTarget
+  /** the site's URL for the round target (staging or live) */
+  siteUrl: string | null
+}
+
+export function toCommentDetail(row: CommentRow, n: number, path: string, ctx: CommentDetailContext): QaCommentDetail {
+  const comment = rowToComment(row)
+  return {
+    ...comment,
+    n,
+    path,
+    pageUrl: pageUrlFor(ctx.siteUrl, path),
+    target: ctx.target,
+    viewportInfo: viewportInfoFor(comment.viewport),
+    roundId: ctx.roundId,
+    roundName: ctx.roundName,
+    siteName: ctx.siteName,
   }
 }
 
@@ -134,6 +286,7 @@ export function parseCommentInput(body: unknown): ParseResult<CommentInput> {
       elementTag: tag.value,
       elementText: text.value,
       body: commentBody,
+      elementContext: parseElementContext(body.elementContext),
     },
   }
 }

@@ -14,6 +14,7 @@ import { SlideOver } from '@/components/tahi/slide-over'
 import {
   QA_VIEWPORTS,
   type QaCommentModeMessage,
+  type QaElementContext,
   type QaFocusPinMessage,
   type QaHighlightMessage,
   type QaIssue,
@@ -120,6 +121,8 @@ interface ComposerState {
   oy: number
   tag: string
   text: string
+  /** Where the element sits, from the frame. Absent when the scanner is older. */
+  context?: QaElementContext
   left: number
   top: number
   width: number
@@ -482,6 +485,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
           oy: pick.oy,
           tag: pick.tag,
           text: pick.text,
+          context: pick.context,
           ...composerPlacement(rect, window.innerWidth, window.innerHeight),
         })
       }
@@ -559,6 +563,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
       oy: composer.oy,
       elementTag: composer.tag,
       elementText: composer.text,
+      elementContext: composer.context,
       body,
     })
     // Comment mode stays on for the next pick.

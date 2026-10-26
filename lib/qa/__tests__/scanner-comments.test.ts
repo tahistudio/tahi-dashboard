@@ -3,6 +3,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createCommentLayer, type CommentLayer } from '../../../workers/qa-view/src/scanner/comments'
 import { uniqueSelector } from '../../../workers/qa-view/src/scanner/selector'
+import { ancestorsOf, buildElementContext } from '../../../workers/qa-view/src/scanner/context'
+import type { QaPickMessage } from '../types'
 
 /*
  * The comment layer and selector builder run inside the proxied client page.
@@ -144,7 +146,62 @@ describe('createCommentLayer comment mode', () => {
       oy: 0.5,
       tag: 'a',
       text: 'Click me',
+      context: expect.objectContaining({ id: 'go', classes: [] }),
     })
+  })
+
+  it('the pick carries element context: classes, ancestors nearest first, box and viewport', () => {
+    document.body.innerHTML =
+      '<div class="page-wrapper"><section id="hero" class="section_hero is-dark"><div class="padding-global">' +
+      '<div class="container-large"><h1 class="heading-style-h1 u-center">Title</h1></div></div></section></div>'
+    const { layer, post } = makeLayer()
+    const h1 = must('h1')
+    place(h1, 10, 20, 300, 60)
+    layer.setMode(true)
+    h1.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }))
+
+    const msg = post.mock.calls[0][0] as QaPickMessage
+    const ctx = msg.context
+    if (!ctx) throw new Error('no context')
+    expect(ctx.id).toBeNull()
+    expect(ctx.classes).toEqual(['heading-style-h1', 'u-center'])
+    expect(ctx.ancestors.map(a => a.tag)).toEqual(['div', 'div', 'section'])
+    expect(ctx.ancestors[0].classes).toEqual(['container-large'])
+    expect(ctx.ancestors[2]).toEqual({ tag: 'section', id: 'hero', classes: ['section_hero', 'is-dark'] })
+    expect(ctx.html.startsWith('<h1 class="heading-style-h1 u-center">')).toBe(true)
+    expect(ctx.box).toEqual({ x: 10, y: 20, width: 300, height: 60 })
+    for (const n of [ctx.scrollY, ctx.pageHeight, ctx.viewportWidth, ctx.viewportHeight, ctx.box.x, ctx.box.y]) {
+      expect(Number.isFinite(n)).toBe(true)
+      expect(Number.isInteger(n)).toBe(true)
+    }
+    expect(ctx.viewportWidth).toBe(window.innerWidth)
+  })
+
+  it('context limits: 20 classes of 100 chars, 8 ancestors, 600 chars of html, stop at a body child', () => {
+    const many = Array.from({ length: 30 }, (_, i) => `c${i}`).join(' ')
+    const longClass = 'x'.repeat(150)
+    let nested = `<p class="${many} ${longClass}">${'t'.repeat(900)}</p>`
+    for (let i = 0; i < 10; i++) nested = `<div class="d${i}">${nested}</div>`
+    document.body.innerHTML = nested
+    const target = must('p')
+    const ctx = buildElementContext(target, window, document)
+    expect(ctx.classes).toHaveLength(20)
+    expect(ctx.html.length).toBe(600)
+    expect(ctx.ancestors).toHaveLength(8)
+    expect(ctx.ancestors[0].classes).toEqual(['d0'])
+    expect(ancestorsOf(target)[7].classes).toEqual(['d7'])
+
+    const longOnly = document.createElement('i')
+    longOnly.setAttribute('class', longClass)
+    document.body.appendChild(longOnly)
+    expect(buildElementContext(longOnly, window, document).classes[0]).toHaveLength(100)
+  })
+
+  it('ancestors stop at the first landmark and at a body child, and never list body', () => {
+    document.body.innerHTML = '<main><article><div class="a"><span id="s">x</span></div></article></main><p id="top"><b id="b">y</b></p>'
+    expect(ancestorsOf(must('#s')).map(a => a.tag)).toEqual(['div', 'article'])
+    expect(ancestorsOf(must('#b')).map(a => a.tag)).toEqual(['p'])
+    expect(ancestorsOf(must('main'))).toEqual([])
   })
 
   it('clamps ox and oy to 0 to 1 when the click is outside the box', () => {

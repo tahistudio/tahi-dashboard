@@ -42,6 +42,8 @@ const QA_TOOL_NAMES = [
   'add_qa_comment',
   'update_qa_comment',
   'delete_qa_comment',
+  'list_qa_round_comments',
+  'get_qa_comment',
 ] as const
 
 function call(name: string, args: Record<string, unknown> = {}) {
@@ -381,6 +383,34 @@ describe('element comment tools', () => {
     expect(mapped.path).toBe('/api/admin/qa/round-pages/rp_1/comments')
     expect(mapped.method).toBe('GET')
     expect(() => call('list_qa_comments', {})).toThrow('round_page_id is required')
+  })
+
+  it('list_qa_round_comments gets a whole round, open by default, with an optional status', () => {
+    const plain = call('list_qa_round_comments', { round_id: 'r_1' })
+    expect(plain.path).toBe('/api/admin/qa/rounds/r_1/comments')
+    expect(plain.method).toBe('GET')
+    expect(call('list_qa_round_comments', { round_id: 'r_1', status: 'all' }).path).toBe('/api/admin/qa/rounds/r_1/comments?status=all')
+    expect(call('list_qa_round_comments', { round_id: 'r_1', status: 'resolved' }).path).toContain('?status=resolved')
+    expect(() => call('list_qa_round_comments', { round_id: 'r_1', status: 'closed' })).toThrow('status must be one of')
+    expect(() => call('list_qa_round_comments', {})).toThrow('round_id is required')
+    expect(() => call('list_qa_round_comments', { round_id: '../x' })).toThrow('round_id is not a valid id')
+  })
+
+  it('get_qa_comment gets one comment', () => {
+    const mapped = call('get_qa_comment', { comment_id: 'qc_1' })
+    expect(mapped.path).toBe('/api/admin/qa/comments/qc_1')
+    expect(mapped.method).toBe('GET')
+    expect(() => call('get_qa_comment', {})).toThrow('comment_id is required')
+    expect(() => call('get_qa_comment', { comment_id: 'a/../b' })).toThrow('comment_id is not a valid id')
+  })
+
+  it('the detail tool descriptions tell the assistant how to use what it gets', () => {
+    for (const name of ['list_qa_round_comments', 'get_qa_comment']) {
+      const description = TOOLS.find((t) => t.name === name)?.description ?? ''
+      for (const word of ['pageUrl', 'viewportInfo', 'webflowBreakpoint', 'classes', 'selector', 'box', 'update_qa_comment', 'resolved', 'confirm with the user']) {
+        expect(description, `${name} mentions ${word}`).toContain(word)
+      }
+    }
   })
 
   it('add_qa_comment posts camel case body keys and defaults ox and oy to 0.5', () => {

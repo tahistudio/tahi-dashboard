@@ -28,6 +28,7 @@ function comment(over: Partial<QaComment> & { id: string; viewport: QaViewportKe
     createdAt: '2026-10-27T10:00:00.000Z',
     updatedAt: '2026-10-27T10:00:00.000Z',
     resolvedAt: null,
+    elementContext: null,
     ...over,
   }
 }
@@ -186,6 +187,21 @@ describe('parsePickMessage', () => {
     expect(parsePickMessage({ ...goodPick, oy: 1.1 })).toBeNull()
     expect(parsePickMessage({ ...goodPick, ox: Number.NaN })).toBeNull()
     expect(parsePickMessage({ ...goodPick, oy: '0.5' })).toBeNull()
+  })
+
+  it('accepts an optional element context and clamps it', () => {
+    const context = { id: null, classes: ['hero', 3], ancestors: [], html: '<h1></h1>', box: { x: 1.4, y: 2, width: 3, height: 4 }, scrollY: 0, pageHeight: 900, viewportWidth: 1440, viewportHeight: 900 }
+    const parsed = parsePickMessage({ ...goodPick, context })
+    expect(parsed?.context?.classes).toEqual(['hero'])
+    expect(parsed?.context?.box.x).toBe(1)
+  })
+
+  it('drops a bad context but still accepts the pick', () => {
+    for (const context of ['junk', 5, null, [], { classes: 'x', box: {} }, { classes: [] }]) {
+      const parsed = parsePickMessage({ ...goodPick, context })
+      expect(parsed).toEqual({ ...goodPick, tag: 'button', text: 'Book a call' })
+      expect(parsed && 'context' in parsed).toBe(false)
+    }
   })
 
   it('caps the text at 120 characters', () => {

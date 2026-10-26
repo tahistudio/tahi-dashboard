@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
-import type { QaComment, QaPin, QaViewportKey } from '@/lib/qa/types'
+import type { QaComment, QaElementContext, QaPin, QaViewportKey } from '@/lib/qa/types'
 import { numberComments, pinsFor, type NumberedComment } from './comments-helpers'
 
 export interface AddCommentInput {
@@ -13,6 +13,7 @@ export interface AddCommentInput {
   oy: number
   elementTag?: string
   elementText?: string
+  elementContext?: QaElementContext
   body: string
 }
 

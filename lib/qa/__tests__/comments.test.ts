@@ -4,11 +4,16 @@ import {
   commentUpdateFields,
   numberComments,
   parseCommentInput,
+  pageUrlFor,
   parseCommentPatch,
+  parseElementContext,
+  parseStoredContext,
   rowToComment,
+  toCommentDetail,
+  viewportInfoFor,
   type CommentRow,
 } from '@/lib/qa/comments'
-import { QA_COMMENT_BODY_MAX } from '@/lib/qa/types'
+import { QA_COMMENT_BODY_MAX, QA_CONTEXT_MAX_BYTES } from '@/lib/qa/types'
 
 const validInput = {
   viewport: 'desktop',
@@ -38,9 +43,130 @@ function row(overrides: Partial<CommentRow> = {}): CommentRow {
     createdAt: '2026-10-27T10:00:00.000Z',
     updatedAt: '2026-10-27T10:00:00.000Z',
     resolvedAt: null,
+    elementContext: null,
     ...overrides,
   }
 }
+
+const goodContext = {
+  id: 'hero-title',
+  classes: ['heading-style-h1', 'u-center'],
+  ancestors: [{ tag: 'div', id: null, classes: ['container-large'] }, { tag: 'section', id: 'hero', classes: ['section_hero'] }],
+  html: '<h1 class="heading-style-h1">Hi</h1>',
+  box: { x: 10.4, y: 20.6, width: 300, height: 60 },
+  scrollY: 120,
+  pageHeight: 4000,
+  viewportWidth: 1440,
+  viewportHeight: 900,
+}
+
+describe('parseElementContext', () => {
+  it('keeps a good context and rounds numbers', () => {
+    expect(parseElementContext(goodContext)).toEqual({ ...goodContext, box: { x: 10, y: 21, width: 300, height: 60 } })
+  })
+
+  it('returns null for anything that is not an object', () => {
+    for (const v of [null, undefined, 'x', 4, [], true]) expect(parseElementContext(v)).toBeNull()
+  })
+
+  it('drops invalid parts instead of rejecting', () => {
+    const ctx = parseElementContext({
+      id: 5,
+      classes: ['ok', 7, '', null, 'also-ok'],
+      ancestors: [{ tag: 'div', classes: 'nope' }, 'bad', { tag: '' }, { tag: 'SECTION', id: 'a', classes: ['x'] }],
+      html: 12,
+      box: { x: Number.NaN, y: Infinity, width: '5', height: 7 },
+      scrollY: 'far',
+      pageHeight: Number.NaN,
+      viewportWidth: -Infinity,
+    })
+    expect(ctx).toEqual({
+      id: null,
+      classes: ['ok', 'also-ok'],
+      ancestors: [{ tag: 'div', id: null, classes: [] }, { tag: 'section', id: 'a', classes: ['x'] }],
+      html: '',
+      box: { x: 0, y: 0, width: 0, height: 7 },
+      scrollY: 0,
+      pageHeight: 0,
+      viewportWidth: 0,
+      viewportHeight: 0,
+    })
+  })
+
+  it('clamps classes, ancestors and html to the limits', () => {
+    const ctx = parseElementContext({
+      ...goodContext,
+      classes: Array.from({ length: 40 }, (_, i) => (i === 0 ? 'x'.repeat(300) : `c${i}`)),
+      ancestors: Array.from({ length: 20 }, () => ({ tag: 'div', id: null, classes: [] })),
+      html: 'h'.repeat(5000),
+    })
+    expect(ctx?.classes).toHaveLength(20)
+    expect(ctx?.classes[0]).toHaveLength(100)
+    expect(ctx?.ancestors).toHaveLength(8)
+    expect(ctx?.html).toHaveLength(600)
+  })
+
+  it('keeps the stored JSON within 8 KB, shedding html then ancestors', () => {
+    const fat = { tag: 'div', id: 'i'.repeat(200), classes: Array.from({ length: 20 }, () => 'y'.repeat(100)) }
+    const ctx = parseElementContext({
+      ...goodContext,
+      classes: Array.from({ length: 20 }, () => 'z'.repeat(100)),
+      ancestors: Array.from({ length: 8 }, () => fat),
+      html: 'h'.repeat(600),
+    })
+    expect(ctx).not.toBeNull()
+    expect(new TextEncoder().encode(JSON.stringify(ctx)).length).toBeLessThanOrEqual(QA_CONTEXT_MAX_BYTES)
+    expect(ctx?.html).toBe('')
+    expect(ctx?.ancestors).toEqual([])
+    expect(ctx?.classes).toHaveLength(20)
+  })
+
+  it('parseStoredContext tolerates missing and broken JSON', () => {
+    expect(parseStoredContext(null)).toBeNull()
+    expect(parseStoredContext('{not json')).toBeNull()
+    expect(parseStoredContext(JSON.stringify(goodContext))?.classes).toEqual(['heading-style-h1', 'u-center'])
+  })
+
+  it('parseCommentInput carries a valid context and ignores a bad one', () => {
+    const ok = parseCommentInput({ ...validInput, elementContext: goodContext })
+    expect(ok.ok && ok.value.elementContext?.classes).toEqual(['heading-style-h1', 'u-center'])
+    const bad = parseCommentInput({ ...validInput, elementContext: 'junk' })
+    expect(bad.ok && bad.value.elementContext).toBeNull()
+    const none = parseCommentInput(validInput)
+    expect(none.ok && none.value.elementContext).toBeNull()
+  })
+
+  it('rowToComment parses the stored column', () => {
+    expect(rowToComment(row({ elementContext: JSON.stringify(goodContext) })).elementContext?.id).toBe('hero-title')
+    expect(rowToComment(row()).elementContext).toBeNull()
+  })
+})
+
+describe('viewport info and comment detail', () => {
+  it('maps every viewport to its Webflow breakpoint guidance', () => {
+    expect(viewportInfoFor('xl')).toEqual({ key: 'xl', label: 'XL', width: 1920, height: 1080, webflowBreakpoint: '1920px (Webflow 1920 breakpoint, if enabled)' })
+    expect(viewportInfoFor('desktop').webflowBreakpoint).toBe('1440px (Webflow 1440 breakpoint, if enabled, else Desktop)')
+    expect(viewportInfoFor('tablet').webflowBreakpoint).toBe('Tablet (991px and below)')
+    expect(viewportInfoFor('mobile_l')).toMatchObject({ width: 425, webflowBreakpoint: 'Mobile landscape (767px and below)' })
+    expect(viewportInfoFor('mobile_p')).toMatchObject({ width: 375, webflowBreakpoint: 'Mobile portrait (478px and below)' })
+  })
+
+  it('builds the page URL from the site origin and path', () => {
+    expect(pageUrlFor('https://acme.webflow.io', '/about')).toBe('https://acme.webflow.io/about')
+    expect(pageUrlFor('https://acme.webflow.io/ignored/path', 'about')).toBe('https://acme.webflow.io/about')
+    expect(pageUrlFor(null, '/about')).toBeNull()
+    expect(pageUrlFor('not a url', '/about')).toBeNull()
+  })
+
+  it('toCommentDetail is a superset of the plain comment', () => {
+    const r = row({ viewport: 'tablet', elementContext: JSON.stringify(goodContext) })
+    const detail = toCommentDetail(r, 3, '/about', {
+      roundId: 'r1', roundName: 'Launch QA', siteName: 'Acme', target: 'staging', siteUrl: 'https://acme.webflow.io',
+    })
+    expect(detail).toMatchObject({ ...rowToComment(r), n: 3, path: '/about', pageUrl: 'https://acme.webflow.io/about', target: 'staging', roundId: 'r1', roundName: 'Launch QA', siteName: 'Acme' })
+    expect(detail.viewportInfo).toMatchObject({ key: 'tablet', width: 768, height: 1024 })
+  })
+})
 
 describe('clampUnit', () => {
   it('clamps into 0..1', () => {
@@ -70,6 +196,7 @@ describe('rowToComment', () => {
       createdAt: '2026-10-27T10:00:00.000Z',
       updatedAt: '2026-10-27T10:00:00.000Z',
       resolvedAt: '2026-10-27T11:00:00.000Z',
+      elementContext: null,
     })
   })
 })
@@ -87,6 +214,7 @@ describe('parseCommentInput', () => {
         elementTag: 'h1',
         elementText: 'Welcome',
         body: 'Heading is too low',
+        elementContext: null,
       },
     })
   })

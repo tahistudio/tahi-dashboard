@@ -250,6 +250,21 @@ export function qaToolCall(
       assertSafeIdArgs({ round_page_id: roundPageId })
       return { path: `/api/admin/qa/round-pages/${roundPageId}/comments`, method: 'GET' }
     }
+    case 'list_qa_round_comments': {
+      const roundId = required(args, 'round_id')
+      assertSafeIdArgs({ round_id: roundId })
+      const status = str(args, 'status')
+      if (status && !['open', 'resolved', 'all'].includes(status)) {
+        throw new Error('status must be one of open, resolved, all')
+      }
+      const query = status ? `?status=${status}` : ''
+      return { path: `/api/admin/qa/rounds/${roundId}/comments${query}`, method: 'GET' }
+    }
+    case 'get_qa_comment': {
+      const commentId = required(args, 'comment_id')
+      assertSafeIdArgs({ comment_id: commentId })
+      return { path: `/api/admin/qa/comments/${commentId}`, method: 'GET' }
+    }
     case 'add_qa_comment': {
       const roundPageId = required(args, 'round_page_id')
       assertSafeIdArgs({ round_page_id: roundPageId })

@@ -1,4 +1,5 @@
 import type { QaCommentModeChangedMessage, QaEscapeMessage, QaPickMessage, QaPin, QaPinClickMessage } from '../../../../lib/qa/types'
+import { buildElementContext } from './context'
 import { uniqueSelector } from './selector'
 
 export interface CommentLayerOptions {
@@ -139,6 +140,7 @@ export function createCommentLayer(opts: CommentLayerOptions): CommentLayer {
       oy: fraction(e.clientY, rect.top, rect.height),
       tag: el.tagName.toLowerCase(),
       text: (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      context: buildElementContext(el, win, doc),
     }
     post(msg)
   }

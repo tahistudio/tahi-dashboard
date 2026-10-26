@@ -20,3 +20,8 @@ export const QA_COMMENTS_MIGRATION = [
   `CREATE TABLE IF NOT EXISTS qa_comments (id text PRIMARY KEY NOT NULL, round_page_id text NOT NULL, viewport text NOT NULL, selector text NOT NULL, ox real NOT NULL DEFAULT 0.5, oy real NOT NULL DEFAULT 0.5, element_tag text, element_text text, body text NOT NULL, status text NOT NULL DEFAULT 'open', request_id text, author_id text, author_name text, created_at text NOT NULL, updated_at text NOT NULL, resolved_at text)`,
   `CREATE INDEX IF NOT EXISTS idx_qa_comments_round_page ON qa_comments(round_page_id)`,
 ] as const
+
+/** Element context on comments (SQA.3), mirrored in drizzle/migrations/0117_qa_comment_context.sql. The migrate runner tolerates "duplicate column name", so a rerun is safe. */
+export const QA_COMMENT_CONTEXT_MIGRATION = [
+  `ALTER TABLE qa_comments ADD COLUMN element_context text`,
+] as const

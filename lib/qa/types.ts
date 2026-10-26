@@ -110,6 +110,34 @@ export interface QaCommentModeChangedMessage { type: 'qa:comment-mode-changed'; 
 /** Frame to dashboard: Esc was pressed inside the frame while comment mode was off, so the dashboard can peel its own layers. */
 export interface QaEscapeMessage { type: 'qa:escape'; version: 1 }
 
+/** Limits for QaElementContext, enforced by the scanner and again by the API. */
+export const QA_CONTEXT_MAX_CLASSES = 20
+export const QA_CONTEXT_CLASS_MAX = 100
+export const QA_CONTEXT_MAX_ANCESTORS = 8
+export const QA_CONTEXT_HTML_MAX = 600
+export const QA_CONTEXT_MAX_BYTES = 8192
+
+export interface QaContextAncestor { tag: string; id: string | null; classes: string[] }
+
+/**
+ * Where a picked element sits, captured in the frame at pick time so another
+ * tool can find and fix it without seeing the screen. The box is in page
+ * coordinates at the frame's width (client rect plus scroll), rounded.
+ */
+export interface QaElementContext {
+  id: string | null
+  classes: string[]
+  /** nearest first, stopping at the first section, header, footer, main, article, nav or body child */
+  ancestors: QaContextAncestor[]
+  /** outerHTML, truncated */
+  html: string
+  box: { x: number; y: number; width: number; height: number }
+  scrollY: number
+  pageHeight: number
+  viewportWidth: number
+  viewportHeight: number
+}
+
 /** Frame to dashboard: the user clicked an element in comment mode. */
 export interface QaPickMessage {
   type: 'qa:pick'
@@ -123,6 +151,8 @@ export interface QaPickMessage {
   tag: string
   /** first 120 characters of the element's visible text, trimmed */
   text: string
+  /** absent from older scanners */
+  context?: QaElementContext
 }
 
 /** Frame to dashboard: the user clicked a pin. */
@@ -149,6 +179,31 @@ export interface QaComment {
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
+  /** absent for comments made before element context existed */
+  elementContext: QaElementContext | null
+}
+
+/** Webflow breakpoint guidance for a viewport, so an editor knows which breakpoint to open. */
+export interface QaViewportInfo {
+  key: QaViewportKey
+  label: string
+  width: number
+  height: number
+  webflowBreakpoint: string
+}
+
+/** A comment with everything needed to find and fix it without seeing the screen. */
+export type QaCommentDetail = QaComment & {
+  /** pin number on its page */
+  n: number
+  path: string
+  /** the round target's site origin plus path, null when the site has no URL for the target */
+  pageUrl: string | null
+  target: QaTarget
+  viewportInfo: QaViewportInfo
+  roundId: string
+  roundName: string
+  siteName: string
 }
 
 export const QA_COMMENT_BODY_MAX = 4000
