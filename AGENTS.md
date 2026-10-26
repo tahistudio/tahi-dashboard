@@ -43,7 +43,7 @@
 - **Bugs before features.** Fix what is broken on production before building the next thing; log every live failure as a task with its id.
 
 ### Production data and safety
-- **Writes to production data go through the app's own endpoints as Liam**, in his browser session, dry run first where the route offers it; deletes are Liam's clicks. Never UPDATE or DELETE production D1 directly for data surgery (SELECTs and migrations through wrangler are fine where the tool permits; Claude Code's auto mode blocks migration applies on production, so there Liam runs them and the agent hands him the exact command).
+- **Writes to production data go through the app's own endpoints as Liam**, in his browser session, dry run first where the route offers it; deletes are Liam's clicks. Never UPDATE or DELETE production D1 directly for data surgery (SELECTs and migrations through wrangler are fine where the tool permits; since 2026-10-27 Liam wants the agent to run additive migration applies and `wrangler secret put` itself, then verify with a read-only query; only if the harness refuses does it hand him the exact one-line command).
 - **Email is allowlisted.** lib/email-delivery.ts is the single choke point; tahi.studio and liammiller.dev addresses and the Giant Group org (aa80a2d6) pass, everything else is logged as suppressed. Never set email.deliveryMode to all; widen email.allowedOrgIds only on Liam's word. Imports and lifecycle operations never send mail (tests enforce it).
 - **Liam types bank account numbers himself.** Never enter financial account numbers.
 - **Never write Claude Design serve URLs** (render_preview links) into files, reports or commits.
