@@ -15,9 +15,9 @@
     "test": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:tenancy": "playwright test e2e/tenancy-isolation.spec.ts",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && wrangler deploy",
-    "deploy:staging": "opennextjs-cloudflare build && wrangler deploy --env staging"
+    "preview": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && wrangler deploy",
+    "deploy:staging": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && wrangler deploy --env staging"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",

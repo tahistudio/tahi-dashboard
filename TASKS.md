@@ -1421,6 +1421,12 @@ scheduled; each needs a scope before building.
   Follow-ups, not v1: optional script-tag mode for sites the proxy renders
   badly; password-protected Webflow staging; screenshots on created
   requests; scheduled re-scans for retainers; spell check and visual diff.
+- [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
+  build Next 15 since its support window ended (21 Oct 2026); the first
+  dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build
+  (OpenNext)". Liam chose to unblock with --dangerouslyUseUnsupportedNextVersion
+  on every `opennextjs-cloudflare build` (deploy.yml, package.json) and upgrade
+  next. Remove the flag once on Next 16; full regression pass before [x].
 - [ ] WQA.0 - [Scope] Website QA tester: clients pin comments on sites we are
   building and suggest copy edits with original/proposed text. The studio can
   discuss, resolve and convert feedback to a request with its source intact.
