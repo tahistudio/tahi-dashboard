@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import { QA_VIEWPORTS, type QaScanResult, type QaViewportKey } from '@/lib/qa/types'
 import { ViewportFrame, frameOuterWidthRem, type QaViewportDef } from './viewport-frame'
-import { useIsMobile } from './use-is-mobile'
+import { comparablePath } from './comparable-path'
 import type { QaScanState, QaTickMap } from './qa-types'
 
 const ROW_REM = 28
@@ -71,6 +71,8 @@ export interface ViewportStripProps {
   /** Which viewport the single-frame mobile switcher shows. */
   mobileViewport: QaViewportKey
   onMobileViewportChange: (key: QaViewportKey) => void
+  /** Single-frame layout, decided by the workspace's measured width. */
+  singleFrame: boolean
 }
 
 function isScanMessage(data: unknown): data is { type: 'qa:scan'; version: 1; url: string; viewportWidth: number; result: QaScanResult } {
@@ -79,12 +81,10 @@ function isScanMessage(data: unknown): data is { type: 'qa:scan'; version: 1; ur
   return d.type === 'qa:scan' && d.version === 1 && typeof d.url === 'string' && typeof d.viewportWidth === 'number' && typeof d.result === 'object' && d.result !== null
 }
 
-/** Path without query, hash or trailing slash (root stays '/'), for matching a scan to the page on screen. */
-function comparablePath(pathOrUrl: string): string {
-  let p = pathOrUrl
-  try { p = new URL(pathOrUrl, 'https://x.invalid').pathname } catch { p = pathOrUrl.split(/[?#]/)[0] }
-  return p.length > 1 ? p.replace(/\/+$/, '') : p
-}
+/** Short switcher labels for narrow widths, so five options stay distinguishable. */
+const SHORT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
+/** Below this switcher width (px) the short labels are used. */
+const SHORT_LABEL_BELOW_PX = 560
 
 export function ViewportStrip({
   baseUrl,
@@ -98,6 +98,7 @@ export function ViewportStrip({
   framesRef,
   mobileViewport,
   onMobileViewportChange,
+  singleFrame,
 }: ViewportStripProps) {
   const viewOrigin = useMemo(() => {
     try {
@@ -106,7 +107,7 @@ export function ViewportStrip({
       return null
     }
   }, [baseUrl])
-  const isMobile = useIsMobile()
+  const isMobile = singleFrame
   const [expandedKey, setExpandedKey] = useState<QaViewportKey | null>(null)
   const [availableWidth, setAvailableWidth] = useState(0)
   const [screenHeight, setScreenHeight] = useState(0)
@@ -229,7 +230,11 @@ export function ViewportStrip({
           onChange={onMobileViewportChange}
           ariaLabel="Viewport"
           fill
-          options={QA_VIEWPORTS.map(x => ({ value: x.key, label: x.label }))}
+          options={QA_VIEWPORTS.map(x => (
+            availableWidth > 0 && availableWidth < SHORT_LABEL_BELOW_PX
+              ? { value: x.key, label: SHORT_LABEL[x.key], title: `${x.label} (${x.width}px)` }
+              : { value: x.key, label: x.label }
+          ))}
         />
         {scale > 0 ? (
           <ViewportFrame key={v.key} {...frameProps(v, rowRem, false)} columnWidthRem={availableWidth / 16} />
@@ -266,7 +271,7 @@ export function ViewportStrip({
       </div>
       <div
         ref={containerRef}
-        className="flex w-full items-start overflow-x-auto pb-2"
+        className="relative flex w-full min-w-0 items-start overflow-x-auto pb-2"
         style={{ gap: `${FRAME_GAP_PX}px` }}
         role="group"
         aria-label="Viewport previews"

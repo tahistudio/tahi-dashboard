@@ -1403,6 +1403,24 @@ docs/superpowers/plans/2026-10-09-loopsii-qa-recording-ideas.md (Loopsii
 teardown, eight website feedback tools, call recording routes with costs). Not
 scheduled; each needs a scope before building.
 
+- [ ] SQA - [BE/FE] Site QA tester for client websites (Liam, 2026-10-26:
+  "a qa tester ... shows all screen sizes ... looks for missing links,
+  accessability issues ... a checklist of all pages on the site, and i can
+  tick them off 1 by one"; then "just for the clients sites for us to review
+  and check. not for the dashboard at all"). Spec
+  docs/superpowers/specs/2026-10-26-site-qa-tester-design.md, plan
+  docs/superpowers/plans/2026-10-26-site-qa-tester.md. Built and committed
+  on main (f45e3fea, 2d28bedd, ea9b43c6, plus the QA_VIEW_ORIGIN rename);
+  local Chromium run against tahi.studio passed at 1440px, 375px and dark.
+  Open before [x]: Liam sets QA_VIEW_SECRET (same value on the dashboard
+  Worker and workers/qa-view) and QA_VIEW_ORIGIN (the qa-view worker URL) on
+  the dashboard, both with `wrangler secret put` (a plain var is dropped by
+  the next deploy); the viewer stays on workers.dev or a separate domain,
+  never a tahi.studio subdomain; applies migration 0115 on production, pushes; then the
+  Definition of Done live smoke on one real client staging site.
+  Follow-ups, not v1: optional script-tag mode for sites the proxy renders
+  badly; password-protected Webflow staging; screenshots on created
+  requests; scheduled re-scans for retainers; spell check and visual diff.
 - [ ] WQA.0 - [Scope] Website QA tester: clients pin comments on sites we are
   building and suggest copy edits with original/proposed text. The studio can
   discuss, resolve and convert feedback to a request with its source intact.

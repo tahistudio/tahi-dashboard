@@ -57,6 +57,7 @@ const DROP = [
   'content-security-policy', 'content-security-policy-report-only', 'x-frame-options', 'set-cookie', 'strict-transport-security',
   'content-length', 'content-encoding', 'transfer-encoding',
   'referrer-policy', 'cross-origin-embedder-policy', 'cross-origin-opener-policy',
+  'service-worker-allowed', 'permissions-policy',
 ]
 
 export function scrubResponseHeaders(upstream: Headers, parentOrigin: string): Headers {
@@ -68,6 +69,7 @@ export function scrubResponseHeaders(upstream: Headers, parentOrigin: string): H
   out.set('cache-control', 'no-store')
   out.set('x-robots-tag', 'noindex')
   out.set('referrer-policy', 'no-referrer')
+  out.set('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), midi=()')
   return out
 }
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react'
 import { viewportByWidth, type QaScanResult, type QaViewportKey } from '@/lib/qa/types'
 import type { QaRoundPageRow } from './qa-types'
+import { comparablePath } from './comparable-path'
 
 /** The two hidden frames that scan every page: Desktop feeds SEO and links, Mobile P feeds layout. */
 export const SCAN_ALL_VIEWPORTS = ['desktop', 'mobile_p'] as const satisfies readonly QaViewportKey[]
@@ -22,10 +23,10 @@ function safeOrigin(url: string): string | null {
   }
 }
 
-function isScanMessage(data: unknown): data is { type: 'qa:scan'; version: 1; viewportWidth: number; result: QaScanResult } {
+function isScanMessage(data: unknown): data is { type: 'qa:scan'; version: 1; url: string; viewportWidth: number; result: QaScanResult } {
   if (!data || typeof data !== 'object') return false
   const d = data as Record<string, unknown>
-  return d.type === 'qa:scan' && d.version === 1 && typeof d.viewportWidth === 'number' && typeof d.result === 'object' && d.result !== null
+  return d.type === 'qa:scan' && d.version === 1 && typeof d.url === 'string' && typeof d.viewportWidth === 'number' && typeof d.result === 'object' && d.result !== null
 }
 
 export interface UseScanAllOptions {
@@ -65,6 +66,7 @@ export function useScanAll({ baseUrl, pages, submitScan, onError }: UseScanAllOp
   const pending = useRef<Partial<Record<QaViewportKey, PendingScan>>>({})
   const cancelled = useRef(false)
   const runningRef = useRef(false)
+  const currentPathRef = useRef<string | null>(null)
   const viewOrigin = baseUrl ? safeOrigin(baseUrl) : null
 
   // Collect scans from the hidden frames only (source match plus viewer origin).
@@ -78,6 +80,9 @@ export function useScanAll({ baseUrl, pages, submitScan, onError }: UseScanAllOp
       if (!SCAN_ALL_VIEWPORTS.some(v => v === key)) return
       const el = frameEls.current[key]
       if (!el || el.contentWindow !== event.source) return
+      // A late scan from the previous page must not resolve the wait for this one.
+      const wanted = currentPathRef.current
+      if (wanted === null || comparablePath(event.data.url) !== comparablePath(wanted)) return
       const waiting = pending.current[key]
       if (!waiting) return
       clearTimeout(waiting.timer)
@@ -129,6 +134,7 @@ export function useScanAll({ baseUrl, pages, submitScan, onError }: UseScanAllOp
         if (cancelled.current) break
         const page = pages[i]
         setCurrentPath(page.path)
+        currentPathRef.current = page.path
         const src = `${baseUrl}${page.path}`
         setFrameSrc({ desktop: src, mobile_p: src })
         const waits = SCAN_ALL_VIEWPORTS.map(v => waitFor(v).then(result => ({ v, result })))
@@ -143,6 +149,7 @@ export function useScanAll({ baseUrl, pages, submitScan, onError }: UseScanAllOp
         }
         setDone(i + 1)
       }
+      currentPathRef.current = null
       setFrameSrc(null)
       setCurrentPath(null)
       setRunning(false)

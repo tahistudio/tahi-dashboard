@@ -39,7 +39,7 @@ Dashboard API (server): link checker, site checks, PageSpeed, persistence (D1)
 
 ### qa-view worker (`workers/qa-view`)
 
-- Own Cloudflare Worker on its own origin (workers.dev URL first; a `qa-view.tahi.studio` custom domain later, Liam's DNS click). It must never share an origin with the dashboard: client-site JS runs on this origin.
+- Own Cloudflare Worker on its own origin: the workers.dev URL, or a domain on a separate registrable domain (never a tahi.studio subdomain). It must never share an origin or a site with the dashboard: client-site JS runs on this origin, and a `*.tahi.studio` host is same-site with portal.tahi.studio, so SameSite=Lax dashboard cookies would ride along on that JS's requests to admin APIs (a CSRF route) and any `.tahi.studio` cookie would be readable.
 - URL shape: `/v/<token>/<path>?<query>`. The token is `base64url(payload).base64url(hmac)` with HMAC-SHA256 over the payload using `QA_VIEW_SECRET` (shared with the dashboard). Payload: `{ o: upstreamOrigin, p: parentOrigin, exp: unixSeconds }`. Lifetime 12 hours.
 - Rejects: bad or expired token (403), non-http(s) upstream, upstream host that is an IP literal, `localhost`, or a private range (SSRF guard).
 - Fetches `upstreamOrigin + path + query` with GET only, `redirect: 'manual'`. An upstream redirect to the same origin is rewritten to the proxy URL; to another origin it is passed through as a 302 to a small "left the site" page.
@@ -153,9 +153,9 @@ Tools in `workers/mcp-server/src/qa-tools.ts`: `list_qa_sites`, `create_qa_site`
 
 ## Liam actions (cannot be done by agents)
 
-1. `wrangler secret put QA_VIEW_SECRET` on the new worker and the same value as a dashboard secret; set `NEXT_PUBLIC_QA_VIEW_ORIGIN` to the worker URL.
+1. `wrangler secret put QA_VIEW_SECRET` on the new worker and the same value as a dashboard secret; `wrangler secret put QA_VIEW_ORIGIN` on the dashboard with the worker URL. Both as secrets, not plain vars: the dashboard deploy runs `wrangler deploy` with no `vars` or `keep_vars` in wrangler.json, so a plain var set in the Cloudflare UI would be dropped on the next deploy.
 2. Apply migration 0115 on production (command handed over at deploy time).
-3. Optional: custom domain `qa-view.tahi.studio`; optional `GOOGLE_PSI_API_KEY`.
+3. Optional: a custom domain for the worker on a separate registrable domain (never under tahi.studio, see above); optional `GOOGLE_PSI_API_KEY` (also as a secret).
 
 ## Out of scope (v1)
 

@@ -12,7 +12,7 @@ async function get(f: FetchLike, url: string): Promise<Response | null> {
 const MAX_FOLLOW = 5
 
 function bareHost(host: string): string {
-  return host.toLowerCase().replace(/^www./, '')
+  return host.toLowerCase().replace(/^www\./, '')
 }
 
 /**

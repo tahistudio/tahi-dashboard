@@ -64,6 +64,33 @@ function asEntityType(value: string | undefined): NotificationEntityType | null 
 }
 
 /**
+ * True when the event is about a Tahi-internal request. Reads the flag the
+ * emitter put on the payload (request_created carries it) and otherwise looks
+ * the row up, because request_status_changed does not carry it. Fails closed:
+ * if the lookup throws, the request is treated as internal so no client is
+ * notified on an unknown.
+ */
+async function isInternalRequestEvent(
+  database: Database,
+  payload: EventPayload,
+): Promise<boolean> {
+  if (payload.entityType !== 'request' || !payload.entityId) return false
+  const flag = payload.data?.isInternal
+  if (flag === true || flag === 1 || flag === '1') return true
+  if (flag === false || flag === 0 || flag === '0') return false
+  try {
+    const rows = await database
+      .select({ isInternal: schema.requests.isInternal })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, payload.entityId))
+      .limit(1)
+    return rows[0]?.isInternal === true
+  } catch {
+    return true
+  }
+}
+
+/**
  * Fires all enabled automation rules matching the given event.
  * Called by lib/events.ts emitDomainEvent after relevant events (request
  * created, status changed, invoice paid, client onboarded, etc).
@@ -91,6 +118,8 @@ export async function fireAutomation(
     )
 
   const now = new Date().toISOString()
+  // Resolved lazily, once per event, only if a client-audience action runs.
+  let internalCache: boolean | undefined
 
   for (const rule of rules) {
     try {
@@ -167,8 +196,18 @@ export async function fireAutomation(
             // notifying the client org's contacts (still an in-app bell row,
             // never an external send) when the event carries an orgId.
             if (config.audience === 'client' && payload.orgId) {
-              await notifyOrgContacts(database, payload.orgId, notifPayload)
-              executedActions.push('send_notification -> client contacts')
+              // Internal requests are Tahi-only: a client must never be told
+              // about one, whichever path raised the event. Decided here, not
+              // at each emitter, so every current and future path is covered.
+              if (internalCache === undefined) {
+                internalCache = await isInternalRequestEvent(database, payload)
+              }
+              if (internalCache) {
+                executedActions.push('send_notification skipped (internal request, client audience)')
+              } else {
+                await notifyOrgContacts(database, payload.orgId, notifPayload)
+                executedActions.push('send_notification -> client contacts')
+              }
             } else {
               await notifyAllAdmins(database, notifPayload)
               executedActions.push('send_notification -> team')

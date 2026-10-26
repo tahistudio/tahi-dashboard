@@ -7,7 +7,6 @@ import { Badge } from '@/components/tahi/badge'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { QA_VIEWPORTS, type QaPageStatus } from '@/lib/qa/types'
 import { issueTotal, ticksFor, tickCount, type QaGroupSummary, type QaRoundPageRow } from './qa-types'
-import { useIsMobile } from './use-is-mobile'
 
 export type QaRailFilter = 'all' | 'untested' | 'failing' | 'issues'
 
@@ -61,7 +60,9 @@ export interface PageRailProps {
   onFilterChange: (filter: QaRailFilter) => void
   collapsed: boolean
   onToggleCollapsed: () => void
-  /** Mobile sheet state. Only used below 48rem. */
+  /** Single-frame layout (decided by the workspace's measured width): the rail becomes a sheet. */
+  singleFrame: boolean
+  /** Mobile sheet state. Only used in the single-frame layout. */
   sheetOpen: boolean
   onSheetClose: () => void
   onAddSamples: (groupKey: string) => void
@@ -69,7 +70,7 @@ export interface PageRailProps {
 }
 
 export function PageRail(props: PageRailProps) {
-  const isMobile = useIsMobile()
+  const isMobile = props.singleFrame
   const listRef = useRef<HTMLDivElement | null>(null)
   const done = props.pages.reduce((n, p) => n + tickCount(p), 0)
   const total = props.pages.length * QA_VIEWPORTS.length

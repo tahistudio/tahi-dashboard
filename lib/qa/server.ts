@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import type { QaLinkResult, QaScanResult, QaTarget, QaViewportKey } from '@/lib/qa/types'
 import { countIssues, pageIssues } from '@/lib/qa/issue-rules'
+import { parseStoredScan } from '@/lib/qa/normalise-scan'
 import { isSafePublicUrl } from '@/lib/qa/ssrf'
 import { discardBody, MAX_BODY_BYTES, QA_USER_AGENT, readCappedText, type FetchLike } from '@/lib/qa/link-check'
 
@@ -66,7 +67,7 @@ export async function recomputeCounts(database: D1, roundPageId: string, preload
   const scanRows = await database.select().from(schema.qaScanResults).where(eq(schema.qaScanResults.roundPageId, roundPageId))
   if (scanRows.length === 0) return
   const scans: Partial<Record<QaViewportKey, QaScanResult>> = {}
-  for (const row of scanRows) scans[row.viewport as QaViewportKey] = JSON.parse(row.result) as QaScanResult
+  for (const row of scanRows) scans[row.viewport as QaViewportKey] = parseStoredScan(row.result)
   const urls = [...new Set(Object.values(scans).flatMap(s => s.links.map(l => l.url)))]
   const linkRows: (typeof schema.qaLinkResults.$inferSelect)[] = []
   for (let i = 0; i < urls.length; i += LINK_QUERY_CHUNK) {

@@ -86,17 +86,21 @@ export function IssuePanel(props: IssuePanelProps) {
 
   return (
     <div className="flex min-h-0 flex-col" style={{ gap: '0.75rem' }}>
-      <SegmentedControl<IssuePanelTab>
-        value={tab}
-        onChange={onTabChange}
-        ariaLabel="Issue categories"
-        role="tablist"
-        size="sm"
-        options={TABS.map(t => ({
-          value: t.value,
-          label: t.category ? `${t.label} (${detail.issues.filter(i => i.category === t.category).length})` : t.label,
-        }))}
-      />
+      {/* min-w-max keeps every tab on one line; the wrapper scrolls sideways instead of the labels colliding. */}
+      <div className="w-full min-w-0 overflow-x-auto">
+        <SegmentedControl<IssuePanelTab>
+          value={tab}
+          onChange={onTabChange}
+          ariaLabel="Issue categories"
+          role="tablist"
+          size="sm"
+          className="min-w-max"
+          options={TABS.map(t => ({
+            value: t.value,
+            label: t.category ? `${t.label} (${detail.issues.filter(i => i.category === t.category).length})` : t.label,
+          }))}
+        />
+      </div>
       <div role="tabpanel" aria-label={current.label} className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'notes' ? (
           <NotesTab

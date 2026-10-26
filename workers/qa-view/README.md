@@ -13,12 +13,18 @@ dashboard cookies or call dashboard APIs. The worker strips the upstream
 `Content-Security-Policy`, `X-Frame-Options` and `Set-Cookie` headers and sets
 `frame-ancestors` to the dashboard origin only.
 
+Keep it on its `workers.dev` URL, or a custom domain on a separate registrable
+domain. Never put it on a `tahi.studio` subdomain: that host is same-site with
+portal.tahi.studio, so the browser would attach SameSite=Lax dashboard cookies
+to requests the proxied client JavaScript makes to dashboard APIs, and any
+cookie scoped to `.tahi.studio` would be readable.
+
 ## Secrets
 
-Set from this directory. Values never live in git:
+Set from this directory. Values never live in git. Always pass `--config wrangler.jsonc`: wrangler looks for `wrangler.json` before `wrangler.jsonc` and walks up the tree, so without it every command here targets the DASHBOARD worker (the repo root `wrangler.json`).
 
 ```bash
-npx wrangler secret put QA_VIEW_SECRET   # same value as the dashboard's QA_VIEW_SECRET
+npx wrangler secret put QA_VIEW_SECRET --config wrangler.jsonc   # same value as the dashboard's QA_VIEW_SECRET
 ```
 
 `QA_VIEW_SECRET` verifies the HMAC view tokens the dashboard signs. Tokens

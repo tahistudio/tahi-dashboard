@@ -5,6 +5,9 @@ import { baseHrefFor, classifyRedirect, rewriteHref, scrubResponseHeaders, upstr
 
 interface Env { QA_VIEW_SECRET: string }
 
+/** How long the proxy waits for the client site before showing an error page in the frame. */
+const UPSTREAM_TIMEOUT_MS = 20_000
+
 function page(status: number, title: string, body: string): Response {
   const html = `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font:14px/1.5 system-ui;padding:2rem;color:#121A0F"><h1 style="font-size:1rem">${title}</h1><p>${body}</p></body>`
   return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } })
@@ -18,10 +21,12 @@ const worker = {
     if (url.pathname === '/__qa/scanner.js') {
       return new Response(scannerJs, { headers: { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'public, max-age=300' } })
     }
+    if (req.headers.get('service-worker') === 'script') return page(403, 'Blocked', 'Service workers are not allowed on the QA viewer.')
     const m = url.pathname.match(/^\/v\/([^/]+)(\/.*)?$/)
     if (!m) return page(404, 'Not found', 'This is the Tahi QA viewer.')
     if (req.method !== 'GET' && req.method !== 'HEAD') return page(405, 'Read only', 'The QA viewer only loads pages.')
 
+    if (!env.QA_VIEW_SECRET) return page(503, 'QA viewer not configured', 'The QA viewer has no signing secret set.')
     const token = m[1]
     const payload = await verifyViewToken(token, env.QA_VIEW_SECRET)
     if (!payload) return page(403, 'Link expired', 'Reload the QA page in the dashboard to get a fresh view link.')
@@ -33,9 +38,10 @@ const worker = {
 
     let upstream: Response
     try {
-      upstream = await fetch(upstreamUrl, { method: 'GET', redirect: 'manual', headers: { 'user-agent': 'TahiQA/1.0 (+https://tahi.studio)', accept: req.headers.get('accept') ?? 'text/html' } })
+      // Bounded: a slow or stalled client site must not hold the frame open indefinitely.
+      upstream = await fetch(upstreamUrl, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'user-agent': 'TahiQA/1.0 (+https://tahi.studio)', accept: req.headers.get('accept') ?? 'text/html' } })
     } catch {
-      return page(502, 'Could not load the page', `The site did not respond: ${escapeHtml(upstreamUrl)}`)
+      return page(502, 'Could not load the page', `The site did not respond within ${UPSTREAM_TIMEOUT_MS / 1000} seconds: ${escapeHtml(upstreamUrl)}`)
     }
 
     const location = upstream.headers.get('location')

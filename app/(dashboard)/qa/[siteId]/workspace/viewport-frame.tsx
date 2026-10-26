@@ -27,8 +27,11 @@ export function frameScale(viewport: QaViewportDef, rowHeightRem: number): numbe
   return (rowHeightRem * 16) / viewport.height
 }
 
+/** Short codes for frames too narrow for the full viewport name. */
+const COMPACT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
+
 /** Narrowest a frame's column gets, so the label bar and its controls stay usable. */
-export const MIN_FRAME_REM = 6
+export const MIN_FRAME_REM = 8
 
 /** Width of the whole column (label bar plus frame) for a given row height. */
 export function frameOuterWidthRem(viewport: QaViewportDef, rowHeightRem: number): number {
@@ -69,18 +72,37 @@ export function ViewportFrame({
   const scale = frameScale(viewport, rowHeightRem)
   const boxWidthRem = (viewport.width * scale) / 16
   const outerWidthRem = columnWidthRem ?? frameOuterWidthRem(viewport, rowHeightRem)
-  const compact = outerWidthRem < 12
+  const compact = outerWidthRem < 16
   const label = viewport.label
+  // In the single-frame layout the Expand button leads the bar, away from the floating chat button.
+  const expandFirst = columnWidthRem !== undefined
+
+  const expandButton = (
+    <button
+      type="button"
+      onClick={onExpand}
+      aria-label={expanded ? `Collapse ${label} preview` : `Expand ${label} preview`}
+      aria-pressed={expanded}
+      className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center px-2 rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+      style={{ fontSize: '0.75rem' }}
+    >
+      {expanded ? 'Exit' : compact ? 'Max' : 'Expand'}
+    </button>
+  )
 
   return (
     <div
       data-viewport={viewport.key as QaViewportKey}
-      className="flex shrink-0 flex-col"
+      className="relative flex shrink-0 flex-col"
       style={{ width: `${outerWidthRem}rem`, gap: '0.25rem' }}
     >
-      <div className="flex min-w-0 flex-wrap items-center justify-between" style={{ gap: '0.25rem' }}>
+      <div
+        className={`flex min-w-0 flex-nowrap items-center ${expandFirst ? 'justify-start' : 'justify-between'}`}
+        style={{ gap: expandFirst ? '0.5rem' : '0.25rem', height: '2.75rem' }}
+      >
+        {expandFirst ? expandButton : null}
         <label
-          className="flex min-h-[2.75rem] cursor-pointer items-center text-[var(--color-text)] hover:text-[var(--color-brand-dark)] focus-within:text-[var(--color-brand-dark)]"
+          className="flex min-h-[2.75rem] min-w-0 cursor-pointer items-center text-[var(--color-text)] hover:text-[var(--color-brand-dark)] focus-within:text-[var(--color-brand-dark)]"
           style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
         >
           <input
@@ -90,15 +112,24 @@ export function ViewportFrame({
             onChange={e => onTick(e.target.checked)}
             className="size-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
           />
-          <span className="truncate">{label}</span>
+          {compact ? (
+            // Narrow frames show the short code (ML, MP) so Mobile L and Mobile P stay
+            // distinguishable on touch screens; the checkbox keeps the full name.
+            <>
+              <span aria-hidden="true" title={label}>{COMPACT_LABEL[viewport.key]}</span>
+              <span className="sr-only">{label}</span>
+            </>
+          ) : (
+            <span className="truncate" title={label}>{label}</span>
+          )}
           {compact ? null : (
             <span className="text-[var(--color-text-muted)]" style={{ fontWeight: 400 }}>
               {viewport.width}px
             </span>
           )}
         </label>
-        <div className="flex items-center" style={{ gap: '0.5rem' }}>
-          <span className="flex items-center text-[var(--color-text-muted)]" style={{ gap: '0.25rem', fontSize: '0.75rem' }}>
+        <div className="flex shrink-0 items-center" style={{ gap: '0.5rem' }}>
+          <span className="flex items-center text-[var(--color-text-muted)]" style={{ gap: '0.25rem', fontSize: '0.75rem' }} title={SCAN_LABEL[scanState]}>
             <span
               aria-hidden="true"
               className="inline-block rounded-full"
@@ -106,16 +137,7 @@ export function ViewportFrame({
             />
             {compact ? <span className="sr-only">{SCAN_LABEL[scanState]}</span> : SCAN_LABEL[scanState]}
           </span>
-          <button
-            type="button"
-            onClick={onExpand}
-            aria-label={expanded ? `Collapse ${label} preview` : `Expand ${label} preview`}
-            aria-pressed={expanded}
-            className="flex min-h-[2.75rem] min-w-[2.75rem] items-center justify-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
-            style={{ fontSize: '0.75rem' }}
-          >
-            {expanded ? 'Exit' : compact ? 'Max' : 'Expand'}
-          </button>
+          {expandFirst ? null : expandButton}
         </div>
       </div>
       <div

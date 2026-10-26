@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   }
 
   const secret = process.env.QA_VIEW_SECRET
-  const viewOrigin = process.env.NEXT_PUBLIC_QA_VIEW_ORIGIN
+  const viewOrigin = process.env.QA_VIEW_ORIGIN
   if (!secret || !viewOrigin) {
     return NextResponse.json({ error: 'QA viewer not configured' }, { status: 503 })
   }

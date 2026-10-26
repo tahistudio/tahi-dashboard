@@ -28,10 +28,12 @@ export function parsePageSpeed(body: unknown, now = new Date().toISOString()): P
   }
 }
 
+const PSI_TIMEOUT_MS = 60_000
+
 export async function runPageSpeed(url: string, strategy: 'mobile' | 'desktop', apiKey: string | undefined): Promise<PsiSummary> {
   const q = new URLSearchParams({ url, strategy, category: 'performance' })
   if (apiKey) q.set('key', apiKey)
-  const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${q.toString()}`)
+  const res = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${q.toString()}`, { signal: AbortSignal.timeout(PSI_TIMEOUT_MS) })
   if (!res.ok) throw new Error(`PageSpeed returned ${res.status}`)
   return parsePageSpeed(await res.json())
 }

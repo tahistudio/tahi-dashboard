@@ -11,6 +11,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-04-12",
   "observability": { "enabled": true },
-  "build": { "command": "node build-scanner.mjs" },
+  // watch_dir is the scanner source only. The build writes
+  // src/generated/scanner.bundle.js, so watching all of src (the default)
+  // re-triggers the build on its own output forever and wedges `wrangler dev`.
+  "build": { "command": "node build-scanner.mjs", "watch_dir": ["src/scanner", "../../lib/qa"] },
   "rules": [{ "type": "Text", "globs": ["**/*.bundle.js"], "fallthrough": false }]
 }

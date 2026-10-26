@@ -73,6 +73,8 @@ describe('scrubResponseHeaders', () => {
       'strict-transport-security': 'max-age=1',
       'content-length': '123',
       'content-encoding': 'gzip',
+      'service-worker-allowed': '/',
+      'permissions-policy': 'camera=*',
     })
     const out = scrubResponseHeaders(h, 'https://portal.tahi.studio')
     expect(out.get('content-type')).toBe('text/html')
@@ -85,6 +87,8 @@ describe('scrubResponseHeaders', () => {
     expect(out.get('cache-control')).toBe('no-store')
     expect(out.get('x-robots-tag')).toBe('noindex')
     expect(out.get('referrer-policy')).toBe('no-referrer')
+    expect(out.get('service-worker-allowed')).toBeNull()
+    expect(out.get('permissions-policy')).toBe('camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), midi=()')
   })
   it('drops upstream referrer and cross-origin isolation policies', () => {
     const h = new Headers({

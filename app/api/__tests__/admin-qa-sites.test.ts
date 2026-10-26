@@ -146,7 +146,7 @@ function site(overrides: Row = {}): Row {
 
 const savedEnv = {
   QA_VIEW_SECRET: process.env.QA_VIEW_SECRET,
-  NEXT_PUBLIC_QA_VIEW_ORIGIN: process.env.NEXT_PUBLIC_QA_VIEW_ORIGIN,
+  QA_VIEW_ORIGIN: process.env.QA_VIEW_ORIGIN,
 }
 
 beforeEach(() => {
@@ -159,7 +159,7 @@ beforeEach(() => {
   vi.mocked(requireFeature).mockResolvedValue(null)
   vi.mocked(requireAdmin).mockResolvedValue(null)
   process.env.QA_VIEW_SECRET = SECRET
-  process.env.NEXT_PUBLIC_QA_VIEW_ORIGIN = VIEW_ORIGIN
+  process.env.QA_VIEW_ORIGIN = VIEW_ORIGIN
 })
 
 afterEach(() => {
@@ -472,8 +472,8 @@ describe('POST /api/admin/qa/view-token', () => {
     expect(await res.json()).toEqual({ error: 'QA viewer not configured' })
   })
 
-  it('returns 503 when NEXT_PUBLIC_QA_VIEW_ORIGIN is unset', async () => {
-    delete process.env.NEXT_PUBLIC_QA_VIEW_ORIGIN
+  it('returns 503 when QA_VIEW_ORIGIN is unset', async () => {
+    delete process.env.QA_VIEW_ORIGIN
     const res = await viewToken(jsonReq('POST', '/view-token', { siteId: 'site_1', target: 'staging' }))
     expect(res.status).toBe(503)
   })

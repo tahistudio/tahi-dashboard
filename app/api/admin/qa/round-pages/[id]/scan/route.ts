@@ -1,7 +1,7 @@
 /**
  * POST /api/admin/qa/round-pages/[id]/scan
  *      Body: { viewport: QaViewportKey, result: QaScanResult }. Stores one
- *      viewport's scan (replacing any earlier scan for that viewport), stamps
+ *      viewport's normalised scan (replacing any earlier scan for that viewport), stamps
  *      scannedAt on the round page and recomputes its issue counts.
  *      413 when the serialised result is over 512 KB.
  */
@@ -13,6 +13,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { loadRoundPage, recomputeCounts } from '@/lib/qa/server'
+import { normaliseScanResult } from '@/lib/qa/normalise-scan'
 import { QA_VIEWPORT_KEYS, type QaViewportKey } from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -21,18 +22,6 @@ const MAX_RESULT_CHARS = 512_000
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-/** Minimal shape check: the scanner's top-level fields must be present with the right types. */
-function isScanResultShape(v: unknown): boolean {
-  return isRecord(v)
-    && Array.isArray(v.a11y)
-    && Array.isArray(v.links)
-    && Array.isArray(v.missingAnchors)
-    && isRecord(v.seo)
-    && isRecord(v.content)
-    && isRecord(v.layout)
-    && isRecord(v.perf)
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -49,13 +38,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (typeof viewport !== 'string' || !(QA_VIEWPORT_KEYS as readonly string[]).includes(viewport)) {
     return NextResponse.json({ error: `viewport must be one of ${QA_VIEWPORT_KEYS.join(', ')}` }, { status: 400 })
   }
-  if (!isScanResultShape(body.result)) {
+  if (!isRecord(body.result)) {
     return NextResponse.json({ error: 'result is not a scan result' }, { status: 400 })
   }
-  const serialised = JSON.stringify(body.result)
-  if (serialised.length > MAX_RESULT_CHARS) {
+  if (JSON.stringify(body.result).length > MAX_RESULT_CHARS) {
     return NextResponse.json({ error: 'Scan result is too large' }, { status: 413 })
   }
+  // The scanner shares a realm with the client site, so every scan is hostile input.
+  const serialised = JSON.stringify(normaliseScanResult(body.result))
 
   const { id } = await params
   const database = (await db()) as D1
@@ -74,7 +64,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   await database.update(schema.qaRoundPages)
     .set({ scannedAt: now, updatedAt: now })
     .where(eq(schema.qaRoundPages.id, id))
-  await recomputeCounts(database, id)
+  try {
+    await recomputeCounts(database, id)
+  } catch {
+    return NextResponse.json({ ok: true, counts: null })
+  }
 
   const [row] = await database.select().from(schema.qaRoundPages).where(eq(schema.qaRoundPages.id, id)).limit(1)
   const counts = row

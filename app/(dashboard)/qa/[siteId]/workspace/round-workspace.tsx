@@ -10,7 +10,7 @@ import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { QA_VIEWPORTS, type QaIssue, type QaScanResult, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
-import { useIsMobile } from './use-is-mobile'
+import { QA_RAIL_COLLAPSE_REM, QA_SINGLE_FRAME_REM, narrowerThanRem, useWorkspaceWidth } from './use-workspace-width'
 import { useRound, type QaPagePatch } from './use-round'
 import { useViewToken } from './use-view-token'
 import { useScanAll, SCAN_ALL_VIEWPORTS } from './scan-all'
@@ -120,13 +120,16 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const isMobile = useIsMobile()
+  const { ref: workspaceRef, width: workspaceWidth } = useWorkspaceWidth()
+  const isMobile = narrowerThanRem(workspaceWidth, QA_SINGLE_FRAME_REM)
   const viewer = useViewToken(siteId, round.target)
   const baseUrl = viewer.baseUrl
   const viewOrigin = useMemo(() => (baseUrl ? viewerOrigin(baseUrl) : null), [baseUrl])
 
   const [filter, setFilter] = useState<QaRailFilter>('all')
-  const [railCollapsed, setRailCollapsed] = useState(false)
+  // null follows the workspace width (icon rail when narrow); a click pins the user's choice.
+  const [railChoice, setRailChoice] = useState<boolean | null>(null)
+  const railCollapsed = railChoice ?? narrowerThanRem(workspaceWidth, QA_RAIL_COLLAPSE_REM)
   const [railSheetOpen, setRailSheetOpen] = useState(false)
   const [mobileViewport, setMobileViewport] = useState<QaViewportKey>(MOBILE_DEFAULT)
   const [issuesOpen, setIssuesOpen] = useState(true)
@@ -376,7 +379,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     return (
       <EmptyState
         title="The QA viewer is not set up yet"
-        description="Set QA_VIEW_SECRET and NEXT_PUBLIC_QA_VIEW_ORIGIN, then reload this page."
+        description="Set QA_VIEW_SECRET and QA_VIEW_ORIGIN, then reload this page."
       />
     )
   }
@@ -393,19 +396,21 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }
 
   return (
-    <section aria-label={`${round.name} workspace`} className="flex min-w-0 flex-col" style={{ gap: '1rem' }}>
+    <section ref={workspaceRef} aria-label={`${round.name} workspace`} className="flex min-w-0 flex-col" style={{ gap: '1rem' }}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3" style={{ gap: '0.5rem' }}>
         <div className="flex min-w-0 flex-wrap items-center" style={{ gap: '0.5rem' }}>
-          <button
-            type="button"
-            onClick={() => setRailSheetOpen(true)}
-            className="flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] px-3 transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)] md:hidden"
-            style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
-          >
-            <Layers className="size-4" aria-hidden="true" />
-            Pages
-          </button>
+          {isMobile ? (
+            <button
+              type="button"
+              onClick={() => setRailSheetOpen(true)}
+              className="flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] px-3 transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+              style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
+            >
+              <Layers className="size-4" aria-hidden="true" />
+              Pages
+            </button>
+          ) : null}
           <h2 className="min-w-0 truncate text-[var(--color-text)]" style={{ fontSize: '1rem', fontWeight: 700 }} title={selectedRow?.path ?? ''}>
             {selectedRow?.path ?? 'No page selected'}
           </h2>
@@ -489,7 +494,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
           filter={filter}
           onFilterChange={setFilter}
           collapsed={railCollapsed}
-          onToggleCollapsed={() => setRailCollapsed(c => !c)}
+          onToggleCollapsed={() => setRailChoice(!railCollapsed)}
+          singleFrame={isMobile}
           sheetOpen={railSheetOpen}
           onSheetClose={() => setRailSheetOpen(false)}
           onAddSamples={groupKey => void addSamples(groupKey)}
@@ -531,6 +537,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               onFrameLoad={handleFrameLoad}
               mobileViewport={mobileViewport}
               onMobileViewportChange={setMobileViewport}
+              singleFrame={isMobile}
             />
           ) : (
             <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.875rem' }}>No pages in this round yet.</p>
@@ -547,7 +554,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               {issuesOpen ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}
             </button>
             {issuesOpen ? (
-              <div className="h-auto overflow-y-auto p-3 md:h-[18rem]">
+              <div className="h-auto min-w-0 overflow-y-auto p-3 md:h-[18rem]">
                 {selectedRow ? (
                   <IssuePanel
                     detail={detailWithRow}

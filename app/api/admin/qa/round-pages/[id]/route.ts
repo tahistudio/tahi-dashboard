@@ -18,6 +18,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { loadRoundPage, rowToLinkResult, targetOrigin } from '@/lib/qa/server'
+import { parseStoredScan } from '@/lib/qa/normalise-scan'
 import { duplicateMetaIssues, pageIssues } from '@/lib/qa/issue-rules'
 import { QA_PRIMARY_VIEWPORT, type QaLinkResult, type QaScanResult, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
 
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const ownRows = await database.select().from(schema.qaScanResults)
     .where(eq(schema.qaScanResults.roundPageId, roundPage.id))
   const scans: Partial<Record<QaViewportKey, QaScanResult>> = {}
-  for (const row of ownRows) scans[row.viewport as QaViewportKey] = JSON.parse(row.result) as QaScanResult
+  for (const row of ownRows) scans[row.viewport as QaViewportKey] = parseStoredScan(row.result)
 
   const urls = [...new Set(Object.values(scans).flatMap(s => (s ? s.links.map(l => l.url) : [])))]
   const linkRows: (typeof schema.qaLinkResults.$inferSelect)[] = []
@@ -88,7 +89,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const metaPages = desktopRows.flatMap(row => {
     const path = pathById.get(row.roundPageId)
     if (path === undefined) return []
-    const seo = (JSON.parse(row.result) as QaScanResult).seo
+    const seo = parseStoredScan(row.result).seo
     return [{ path, title: seo.title, description: seo.metaDescription }]
   })
   const duplicates = duplicateMetaIssues(metaPages).get(roundPage.path) ?? []

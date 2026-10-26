@@ -1,7 +1,22 @@
 # Tahi Dashboard - Live Status
 
 > One-page snapshot of where the platform actually is. Update weekly.
-> Last updated: **2026-10-14** by Codex (next-20 batch A reconciliation; items 1 to 7 live; REC.0 server live and Windows tray built). Older observations retain their dates. Reading order for any agent: AGENTS.md.
+> Last updated: **2026-10-26** by Claude (Site QA tester built, not deployed; see the SQA section). Previous: **2026-10-14** by Codex (next-20 batch A reconciliation; items 1 to 7 live; REC.0 server live and Windows tray built). Older observations retain their dates. Reading order for any agent: AGENTS.md.
+
+## Site QA tester (SQA), 2026-10-26
+
+Built, committed on main and NOT yet deployed: /qa (admin, qa_tester
+feature) QAs client websites. Sites per client, pages from sitemap.xml,
+named rounds with five viewport ticks per page (XL 1920, Desktop 1440, Tablet
+768, Mobile L 425, Mobile P 375), live frames through the new sandbox proxy
+worker workers/qa-view, and axe accessibility, link, SEO, launch and
+performance checks, issue to internal request, and a printable report.
+Waits on Liam: QA_VIEW_SECRET on both workers and QA_VIEW_ORIGIN on the
+dashboard, all as wrangler secrets, migration 0115 on production, then push and live smoke. Logged
+flake: app/api/__tests__/t1-6-org-routes.test.ts ("GET admin/conversations
+refuses a denied scoped seat ... returns 403 before business queries") failed
+in 2 of 4 full parallel runs on 2026-10-26 and passes alone 3 of 3; untouched
+by SQA.
 
 ## Current reconciliation, 2026-10-14
 

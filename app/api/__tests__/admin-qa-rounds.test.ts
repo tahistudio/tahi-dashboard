@@ -79,6 +79,7 @@ import { POST as samplesPost } from '@/app/api/admin/qa/rounds/[id]/samples/rout
 import { GET as roundPageGet, PATCH as roundPagePatch } from '@/app/api/admin/qa/round-pages/[id]/route'
 import { POST as scanPost } from '@/app/api/admin/qa/round-pages/[id]/scan/route'
 import { getRequestAuth } from '@/lib/server-auth'
+import { normaliseScanResult } from '@/lib/qa/normalise-scan'
 
 const ADMIN = { userId: 'user_liam', orgId: 'org_tahi', sessionId: 's1' }
 const CLIENT = { userId: 'user_client', orgId: 'org_client', sessionId: 's2' }
@@ -326,6 +327,29 @@ describe('POST /api/admin/qa/round-pages/[id]/scan', () => {
     expect(scan.rows[0]).toMatchObject({ roundPageId: 'rp1', viewport: 'desktop' })
     const [stamp] = writesFor('qa_round_pages', 'update')
     expect(stamp.set).toMatchObject({ scannedAt: expect.any(String) })
+  })
+})
+
+describe('hostile scan payload', () => {
+  it('normalises, stores and counts it, and the round page GET still works', async () => {
+    seed('qa_round_pages', [seedRoundPage()])
+    seed('qa_rounds', [seedRound()])
+    seed('qa_sites', [seedSite()])
+    const hostile = { seo: {}, perf: {}, a11y: 'x', links: [{ url: 5 }], content: 'x', layout: null, missingAnchors: 7 }
+    // The fake ignores filters, so seed what the insert would have stored for the recount to read.
+    seed('qa_scan_results', [{ roundPageId: 'rp1', viewport: 'desktop', result: JSON.stringify(normaliseScanResult(hostile)), createdAt: NOW }])
+    const res = await scanPost(jsonReq({ viewport: 'desktop', result: hostile }), ctx('rp1'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true })
+    const [scan] = writesFor('qa_scan_results')
+    const stored = JSON.parse(scan.rows[0].result as string) as Record<string, unknown>
+    expect(stored.a11y).toEqual([])
+    expect(stored.links).toEqual([{ url: '', text: '', selector: '' }])
+    expect(stored.perf).toEqual({ images: [], totalTransferSize: 0 })
+    expect(writesFor('qa_round_pages', 'update').some(w => w.set && 'a11yCritical' in w.set)).toBe(true)
+    seed('qa_scan_results', [{ roundPageId: 'rp1', viewport: 'desktop', result: JSON.stringify({ seo: {}, perf: {}, a11y: 'x', links: [{ url: 5 }] }), createdAt: NOW }])
+    const get = await roundPageGet(getReq(), ctx('rp1'))
+    expect(get.status).toBe(200)
   })
 })
 

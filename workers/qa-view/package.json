@@ -5,8 +5,8 @@
   "scripts": {
     "build:scanner": "node build-scanner.mjs",
     "type-check": "tsc --noEmit -p .",
-    "dev": "npm run build:scanner && wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "npm run build:scanner && wrangler dev --config wrangler.jsonc",
+    "deploy": "wrangler deploy --config wrangler.jsonc"
   },
   "dependencies": {
     "axe-core": "4.11.1"
