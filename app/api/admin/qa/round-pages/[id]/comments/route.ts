@@ -10,7 +10,10 @@ import { numberComments, parseCommentInput, rowToComment, toCommentDetail } from
 import { targetOrigin } from '@/lib/qa/server'
 import type { QaTarget } from '@/lib/qa/types'
 
-type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+/** A comment body is at most 4000 characters and its context 8 KB, so 64 KB is generous. */
+const COMMENT_REQUEST_MAX_BYTES = 64 * 1024
+
+type Drizzle =ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /** Element comments on one round page, oldest first, each with its pin number, page URL and viewport guidance. */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -55,7 +58,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (adminDenied) return adminDenied
 
   const { id } = await params
-  const raw: unknown = await req.json().catch(() => null)
+  // Cap the request size before parsing: Content-Length first, then the real text length.
+  const declared = Number(req.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > COMMENT_REQUEST_MAX_BYTES) {
+    return NextResponse.json({ error: 'Request body is too large' }, { status: 413 })
+  }
+  const text = await req.text().catch(() => '')
+  if (new TextEncoder().encode(text).length > COMMENT_REQUEST_MAX_BYTES) {
+    return NextResponse.json({ error: 'Request body is too large' }, { status: 413 })
+  }
+  let raw: unknown = null
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    raw = null
+  }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 })
   }

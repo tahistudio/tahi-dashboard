@@ -110,9 +110,7 @@ export function rowToComment(row: CommentRow): QaComment {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Element context (where a picked element sits)                       */
-/* ------------------------------------------------------------------ */
+// Element context (where a picked element sits)
 
 const CONTEXT_ID_MAX = 200
 const CONTEXT_TAG_MAX = 40
@@ -195,16 +193,14 @@ export function parseStoredContext(text: string | null): QaElementContext | null
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Detail shape for MCP and the round comments endpoint                */
-/* ------------------------------------------------------------------ */
+// Detail shape for MCP and the round comments endpoint
 
 const WEBFLOW_BREAKPOINTS: Record<QaViewportKey, string> = {
-  xl: '1920px (Webflow 1920 breakpoint, if enabled)',
-  desktop: '1440px (Webflow 1440 breakpoint, if enabled, else Desktop)',
+  xl: '1920px breakpoint if enabled, else 1440px, else 1280px, else Desktop (base)',
+  desktop: '1440px breakpoint if enabled, else 1280px, else Desktop (base)',
   tablet: 'Tablet (991px and below)',
-  mobile_l: 'Mobile landscape (767px and below)',
-  mobile_p: 'Mobile portrait (478px and below)',
+  mobile_l: 'Mobile portrait (479px and below); this frame is 425px wide',
+  mobile_p: 'Mobile portrait (479px and below); this frame is 375px wide',
 }
 
 export function viewportInfoFor(key: QaViewportKey): QaViewportInfo {

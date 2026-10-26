@@ -177,6 +177,46 @@ describe('createCommentLayer comment mode', () => {
     expect(ctx.viewportWidth).toBe(window.innerWidth)
   })
 
+  it('the hover outline never lands in the html snippet, and the original inline style is kept', () => {
+    document.body.innerHTML = '<main><h1 id="t" style="color: red">Title</h1><h2 id="plain">Plain</h2></main>'
+    const { layer, post } = makeLayer()
+    layer.setMode(true)
+    for (const id of ['#t', '#plain']) {
+      const el = must<HTMLElement>(id)
+      place(el, 0, 0, 100, 20)
+      el.dispatchEvent(new Event('pointermove', { bubbles: true }))
+      expect(el.style.outline).toContain('solid')
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }))
+    }
+    const first = (post.mock.calls[0][0] as QaPickMessage).context
+    const second = (post.mock.calls[1][0] as QaPickMessage).context
+    expect(first?.html).not.toContain('outline')
+    expect(first?.html).toContain('color: red')
+    expect(second?.html).not.toContain('outline')
+    expect(second?.html).not.toContain('style')
+  })
+
+  it('a context that throws on its own is dropped but the pick is kept', () => {
+    setupPage()
+    const { layer, post } = makeLayer()
+    const anchor = must('#go')
+    let calls = 0
+    const rect = { x: 0, y: 0, left: 0, top: 0, width: 10, height: 10, right: 10, bottom: 10, toJSON: () => ({}) } as DOMRect
+    anchor.getBoundingClientRect = () => {
+      calls += 1
+      // The first read (offsets) works; the second (context) throws.
+      if (calls > 1) throw new Error('boom')
+      return rect
+    }
+    layer.setMode(true)
+    anchor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }))
+    expect(post).toHaveBeenCalledTimes(1)
+    const msg = post.mock.calls[0][0] as QaPickMessage
+    expect(msg.type).toBe('qa:pick')
+    expect(msg.context).toBeUndefined()
+    expect('context' in msg).toBe(false)
+  })
+
   it('context limits: 20 classes of 100 chars, 8 ancestors, 600 chars of html, stop at a body child', () => {
     const many = Array.from({ length: 30 }, (_, i) => `c${i}`).join(' ')
     const longClass = 'x'.repeat(150)

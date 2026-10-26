@@ -144,11 +144,11 @@ describe('parseElementContext', () => {
 
 describe('viewport info and comment detail', () => {
   it('maps every viewport to its Webflow breakpoint guidance', () => {
-    expect(viewportInfoFor('xl')).toEqual({ key: 'xl', label: 'XL', width: 1920, height: 1080, webflowBreakpoint: '1920px (Webflow 1920 breakpoint, if enabled)' })
-    expect(viewportInfoFor('desktop').webflowBreakpoint).toBe('1440px (Webflow 1440 breakpoint, if enabled, else Desktop)')
+    expect(viewportInfoFor('xl')).toEqual({ key: 'xl', label: 'XL', width: 1920, height: 1080, webflowBreakpoint: '1920px breakpoint if enabled, else 1440px, else 1280px, else Desktop (base)' })
+    expect(viewportInfoFor('desktop').webflowBreakpoint).toBe('1440px breakpoint if enabled, else 1280px, else Desktop (base)')
     expect(viewportInfoFor('tablet').webflowBreakpoint).toBe('Tablet (991px and below)')
-    expect(viewportInfoFor('mobile_l')).toMatchObject({ width: 425, webflowBreakpoint: 'Mobile landscape (767px and below)' })
-    expect(viewportInfoFor('mobile_p')).toMatchObject({ width: 375, webflowBreakpoint: 'Mobile portrait (478px and below)' })
+    expect(viewportInfoFor('mobile_l')).toMatchObject({ width: 425, webflowBreakpoint: 'Mobile portrait (479px and below); this frame is 425px wide' })
+    expect(viewportInfoFor('mobile_p')).toMatchObject({ width: 375, webflowBreakpoint: 'Mobile portrait (479px and below); this frame is 375px wide' })
   })
 
   it('builds the page URL from the site origin and path', () => {
