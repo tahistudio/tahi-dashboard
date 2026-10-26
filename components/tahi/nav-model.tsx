@@ -78,6 +78,7 @@ export const ADMIN_NAV: NavGroup[] = [
     group: 'Clients',
     items: [
       { label: 'Clients', href: '/clients', icon: 'clients', adminOnly: true },
+      { label: 'Site QA', href: '/qa', icon: 'checks', adminOnly: true },
     ],
   },
   {

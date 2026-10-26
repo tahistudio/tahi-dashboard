@@ -81,3 +81,4 @@ ds-bundle/
 playwright.local.config.ts
 .claude/backups/
 workers/qa-view/src/generated/
+workers/qa-view/.dev.vars

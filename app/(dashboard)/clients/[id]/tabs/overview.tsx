@@ -12,6 +12,7 @@ import { ChevronRight, Inbox } from 'lucide-react'
 import { EngagementHealthCard } from '@/components/tahi/engagement-health-card'
 import { Gate } from '@/components/tahi/permissions-context'
 import { DueDateChip } from '@/components/tahi/due-date-chip'
+import { QaSitesCard } from '@/components/tahi/qa-sites-card'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { StatusBadge } from '@/components/tahi/status-badge'
 import { AccountCard } from '../_kit/account-card'
@@ -168,6 +169,9 @@ export function OverviewTab({
           {org.healthNote && <HealthNoteCard note={org.healthNote} health={org.healthStatus} />}
           {recentRequests.length > 0 && <RequestMixCard requests={recentRequests} />}
           <ContactsCard contacts={contacts} onManage={() => onTab('people')} />
+          <Gate feature="qa_tester">
+            <QaSitesCard orgId={org.id} />
+          </Gate>
           <InternalNotesCard org={org} onUpdated={onUpdated} />
         </div>
       </div>
