@@ -5,14 +5,15 @@
 
 ## Site QA tester (SQA), 2026-10-26
 
-Built, committed on main and NOT yet deployed: /qa (admin, qa_tester
+Built and pushed to main 2026-10-27 (migration 0115 applied on production
+by Liam the same day, six qa_* tables verified): /qa (admin, qa_tester
 feature) QAs client websites. Sites per client, pages from sitemap.xml,
 named rounds with five viewport ticks per page (XL 1920, Desktop 1440, Tablet
 768, Mobile L 425, Mobile P 375), live frames through the new sandbox proxy
 worker workers/qa-view, and axe accessibility, link, SEO, launch and
 performance checks, issue to internal request, and a printable report.
 Waits on Liam: QA_VIEW_SECRET on both workers and QA_VIEW_ORIGIN on the
-dashboard, all as wrangler secrets, migration 0115 on production, then push and live smoke. Logged
+dashboard, all as wrangler secrets, then the live smoke. Logged
 flake: app/api/__tests__/t1-6-org-routes.test.ts ("GET admin/conversations
 refuses a denied scoped seat ... returns 403 before business queries") failed
 in 2 of 4 full parallel runs on 2026-10-26 and passes alone 3 of 3; untouched
