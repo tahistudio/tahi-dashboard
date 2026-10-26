@@ -6,6 +6,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { loadRound } from '@/lib/qa/server'
+import { numberComments } from '@/lib/qa/comments'
 import { QA_VIEWPORT_KEYS, type QaPageCounts, type QaPageStatus, type QaViewportKey } from '@/lib/qa/types'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -108,7 +109,47 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     perfIssues: sumCounts(c => c.perfIssues),
   }
 
+  // One join for the whole round, so the query stays within the D1 bound-parameter cap however many pages it has.
+  const commentRows = await database
+    .select({ comment: schema.qaComments })
+    .from(schema.qaComments)
+    .innerJoin(schema.qaRoundPages, eq(schema.qaComments.roundPageId, schema.qaRoundPages.id))
+    .where(eq(schema.qaRoundPages.roundId, round.id))
+    .orderBy(asc(schema.qaComments.createdAt), asc(schema.qaComments.id))
+  const allComments = commentRows.map(r => r.comment)
+  const pinNumbers = numberComments(allComments)
+  const pageOrder = new Map(rows.map((row, i) => [row.id, i]))
+  const pagePath = new Map(rows.map(row => [row.id, row.path]))
+
+  // Per page in list order, open before resolved, then pin number.
+  const comments = allComments
+    .map(c => ({
+      c,
+      page: pageOrder.get(c.roundPageId) ?? 0,
+      resolved: c.status === 'resolved' ? 1 : 0,
+      n: pinNumbers.get(c.id) ?? 0,
+    }))
+    .sort((a, b) => a.page - b.page || a.resolved - b.resolved || a.n - b.n)
+    .map(({ c, n }) => ({
+      roundPageId: c.roundPageId,
+      path: pagePath.get(c.roundPageId) ?? null,
+      viewport: c.viewport,
+      n,
+      body: c.body,
+      status: c.status,
+      elementTag: c.elementTag,
+      elementText: c.elementText,
+      authorName: c.authorName,
+      createdAt: c.createdAt,
+    }))
+  const commentCounts = {
+    open: allComments.filter(c => c.status === 'open').length,
+    resolved: allComments.filter(c => c.status === 'resolved').length,
+  }
+
   return NextResponse.json({
+    comments,
+    commentCounts,
     round: {
       id: round.id,
       siteId: round.siteId,

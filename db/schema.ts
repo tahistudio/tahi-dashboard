@@ -4422,3 +4422,28 @@ export const qaLinkResults = sqliteTable('qa_link_results', {
   error: text('error'),
   checkedAt: text('checked_at').notNull(),
 }, (table) => [uniqueIndex('idx_qa_link_results_round_url').on(table.roundId, table.url)])
+
+export const qaComments = sqliteTable('qa_comments', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  roundPageId: text('round_page_id').notNull(),
+  // QaViewportKey
+  viewport: text('viewport').notNull(),
+  selector: text('selector').notNull(),
+  // 0..1 inside the element box
+  ox: real('ox').notNull().default(0.5),
+  oy: real('oy').notNull().default(0.5),
+  elementTag: text('element_tag'),
+  elementText: text('element_text'),
+  body: text('body').notNull(),
+  // QaCommentStatus: 'open' | 'resolved'
+  status: text('status').notNull().default('open'),
+  // request created from this comment, if any
+  requestId: text('request_id'),
+  // Clerk user id
+  authorId: text('author_id'),
+  // team_members.name at write time
+  authorName: text('author_name'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  resolvedAt: text('resolved_at'),
+}, (table) => [index('idx_qa_comments_round_page').on(table.roundPageId)])

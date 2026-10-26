@@ -101,22 +101,36 @@ export const serverFetch: FetchLike = (url, init) => {
   return fetch(url, { ...init, headers, signal: init.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) })
 }
 
-export interface FetchedText { status: number; text: string; truncated: boolean }
+export interface FetchedText { status: number; text: string; truncated: boolean; finalUrl: string }
+
+export interface FetchTextOptions {
+  /** When set, a hop whose origin differs from this origin is not fetched and the call returns null. */
+  sameOrigin?: string
+  /** Called once before every upstream fetch (each redirect hop included), so callers can budget subrequests. */
+  onHop?: () => void
+}
 
 /**
  * Hardened GET for reading small remote documents (sitemaps). Follows up to 5
  * redirects itself and re-checks isSafePublicUrl on every hop, uses one 8s
  * deadline across the whole exchange, and stops reading at 5 MB. Returns null
  * for an unsafe URL, a non-2xx answer, too many redirects, a timeout or any
- * network error.
+ * network error. finalUrl is the URL that answered. Options let the crawler
+ * keep every hop on one origin and count the upstream fetches.
  */
-export async function fetchText(url: string, fetchImpl: FetchLike = serverFetch): Promise<FetchedText | null> {
+export async function fetchText(
+  url: string,
+  fetchImpl: FetchLike = serverFetch,
+  options: FetchTextOptions = {},
+): Promise<FetchedText | null> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
   try {
     let current = url
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (!isSafePublicUrl(current)) return null
+      if (options.sameOrigin && new URL(current).origin !== options.sameOrigin) return null
+      options.onHop?.()
       const res = await fetchImpl(current, { method: 'GET', redirect: 'manual', signal: ctrl.signal, headers: { 'user-agent': QA_USER_AGENT } })
       const location = res.headers.get('location')
       if (res.status >= 300 && res.status < 400 && location) {
@@ -129,7 +143,7 @@ export async function fetchText(url: string, fetchImpl: FetchLike = serverFetch)
         return null
       }
       const { text, truncated } = await readCappedText(res, MAX_BODY_BYTES)
-      return { status: res.status, text, truncated }
+      return { status: res.status, text, truncated, finalUrl: current }
     }
     return null
   } catch {

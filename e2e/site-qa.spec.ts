@@ -161,3 +161,133 @@ test.describe('Site QA', () => {
     })
   })
 })
+
+/** Adds a site on the public upstream, imports its sitemap and starts a round. Returns the site path. */
+async function startRound(page: Page, label: string): Promise<string> {
+  await page.goto('/qa')
+  await page.getByRole('button', { name: 'Add site' }).first().click()
+  const dialog = page.getByRole('dialog', { name: /site/i })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('group', { name: 'Client' }).getByRole('button').first().click()
+  await page.getByRole('listbox').getByRole('option').first().click()
+  await dialog.getByLabel('Name').fill(`E2E QA ${label} ${Date.now()}`)
+  await dialog.getByLabel('Live URL').fill(UPSTREAM)
+  await dialog.getByRole('button', { name: 'Add site' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page).toHaveURL(/\/qa\/[^/?]+/)
+  const siteUrl = new URL(page.url()).pathname
+  await page.getByRole('button', { name: 'Import pages', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: /pages in the sitemap/ })).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: 'Start round' }).first().click()
+  await page.getByRole('dialog', { name: 'Start round' }).getByRole('button', { name: 'Start round' }).click()
+  await expect(page).toHaveURL(/round=[^&]+/)
+  return siteUrl
+}
+
+/** Writes a screenshot when E2E_QA_SHOTS_DIR is set (for example test-results/sqa11). */
+async function shot(page: Page, name: string): Promise<void> {
+  const dir = process.env.E2E_QA_SHOTS_DIR
+  if (dir) await page.screenshot({ path: `${dir}/${name}.png` })
+}
+
+test.describe('Site QA wide mode', () => {
+  test('five frames fit without sideways scroll and Actual size appears only when it fits', async ({ page }) => {
+    test.setTimeout(240_000)
+    await page.setViewportSize({ width: 4600, height: 1400 })
+    let siteUrl: string | null = null
+    try {
+      siteUrl = await startRound(page, 'wide')
+      const frames = page.getByTitle(/ preview$/)
+      await expect(frames).toHaveCount(5, { timeout: 30_000 })
+
+      await page.getByRole('button', { name: 'Wide', exact: true }).click()
+      await expect(page.getByRole('button', { name: 'Exit wide' })).toHaveAttribute('aria-pressed', 'true')
+      await expect(frames).toHaveCount(5)
+      for (const title of ['XL preview', 'Desktop preview', 'Tablet preview', 'Mobile L preview', 'Mobile P preview']) {
+        await expect(page.getByTitle(title)).toBeVisible()
+      }
+      await expectNoHorizontalScroll(page)
+      // Every frame ends above the bottom of the window (the wide height cap).
+      const bottoms = await frames.evaluateAll(els => els.map(el => el.getBoundingClientRect().bottom))
+      for (const bottom of bottoms) expect(bottom).toBeLessThanOrEqual(1400)
+
+      const zoom = page.getByRole('group', { name: 'Preview zoom' })
+      await expect(zoom.getByRole('button', { name: 'Fit width' })).toBeVisible()
+      await expect(zoom.getByRole('button', { name: 'Actual size' })).toHaveCount(0)
+      await shot(page, 'wide-4600')
+
+      await page.setViewportSize({ width: 5200, height: 1400 })
+      await expect(zoom.getByRole('button', { name: 'Actual size' })).toBeVisible({ timeout: 10_000 })
+      await shot(page, 'wide-5200')
+
+      // Escape leaves wide mode.
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('button', { name: 'Wide', exact: true })).toHaveAttribute('aria-pressed', 'false')
+    } finally {
+      await page.evaluate(() => window.localStorage.removeItem('tahi-qa-wide')).catch(() => undefined)
+      if (siteUrl) await archiveSite(page, siteUrl)
+    }
+  })
+})
+
+test.describe('Site QA element comments', () => {
+  test('pick an element, save a comment, then resolve and delete it', async ({ page }) => {
+    test.setTimeout(240_000)
+    await page.setViewportSize({ width: 1920, height: 1100 })
+    let siteUrl: string | null = null
+    try {
+      siteUrl = await startRound(page, 'comments')
+      // The scanner is attached once the Desktop frame has scanned.
+      const desktopBar = page.getByRole('button', { name: /(Expand|Collapse) Desktop preview/ }).locator('..')
+      await expect(desktopBar).toContainText('Scanned', { timeout: 120_000 })
+
+      const toggle = page.getByRole('button', { name: 'Comment on Desktop' })
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+      // Only one frame is in comment mode at a time.
+      await page.getByRole('button', { name: 'Comment on Tablet' }).click()
+      await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+      // Click an element inside the Desktop frame; the scanner posts a qa:pick.
+      const target = page.frameLocator('iframe[title="Desktop preview"]').locator('h1, h2, p').first()
+      await target.click({ force: true })
+      const composer = page.getByRole('dialog', { name: 'Add comment' })
+      await expect(composer).toBeVisible({ timeout: 15_000 })
+      await shot(page, 'comment-composer')
+      await composer.getByRole('textbox').fill('E2E: tighten this heading\nsecond line')
+      await composer.getByRole('button', { name: 'Save' }).click()
+      await expect(composer).toBeHidden({ timeout: 20_000 })
+      // Comment mode stays on for the next pick.
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+      // The Issues panel shows the new comment.
+      const issuesToggle = page.getByRole('button', { name: 'Issues', exact: true })
+      if ((await issuesToggle.getAttribute('aria-expanded')) === 'false') await issuesToggle.click()
+      const tab = page.getByRole('tab', { name: 'Comments (1 open)' })
+      await expect(tab).toBeVisible()
+      await tab.click()
+      const item = page.getByRole('listitem').filter({ hasText: 'E2E: tighten this heading' })
+      await expect(item).toBeVisible()
+      await shot(page, 'comment-listed')
+
+      await item.getByRole('button', { name: 'Resolve' }).click()
+      await expect(page.getByRole('tab', { name: 'Comments (0 open)' })).toBeVisible()
+      await page.getByRole('button', { name: 'Resolved', exact: true }).click()
+      const resolved = page.getByRole('listitem').filter({ hasText: 'E2E: tighten this heading' })
+      await expect(resolved.getByRole('button', { name: 'Reopen' })).toBeVisible()
+
+      await resolved.getByRole('button', { name: 'Delete' }).click()
+      await page.getByRole('dialog', { name: 'Delete this comment?' }).getByRole('button', { name: 'Delete comment' }).click()
+      await expect(page.getByText('E2E: tighten this heading')).toHaveCount(0)
+
+      // Escape turns comment mode off.
+      await page.keyboard.press('Escape')
+      await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    } finally {
+      if (siteUrl) await archiveSite(page, siteUrl)
+    }
+  })
+})
+

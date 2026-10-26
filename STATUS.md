@@ -12,8 +12,16 @@ named rounds with five viewport ticks per page (XL 1920, Desktop 1440, Tablet
 768, Mobile L 425, Mobile P 375), live frames through the new sandbox proxy
 worker workers/qa-view, and axe accessibility, link, SEO, launch and
 performance checks, issue to internal request, and a printable report.
-Waits on Liam: QA_VIEW_SECRET on both workers and QA_VIEW_ORIGIN on the
-dashboard, all as wrangler secrets, then the live smoke. Logged
+All three secrets set and the viewer verified (bad token 403, scanner 200)
+on 2026-10-27; live smoke on a client staging site still open.
+
+v1.1 (SQA.1 to SQA.3, plan docs/superpowers/plans/2026-10-27-site-qa-wide-pages-comments.md),
+committed 2026-10-27: Wide mode (full window, Fit width, Actual size when 1:1
+fits at about 4992 CSS px), page discovery (bulk paths, crawl, another
+sitemap URL; MCP add_qa_pages, crawl_qa_site, sitemap_url), and element
+comments with pins (migration 0116 qa_comments, which must be applied on
+production BEFORE the push). Verified locally in Chromium by two Opus
+reviews; not yet on production. Logged
 flake: app/api/__tests__/t1-6-org-routes.test.ts ("GET admin/conversations
 refuses a denied scoped seat ... returns 403 before business queries") failed
 in 2 of 4 full parallel runs on 2026-10-26 and passes alone 3 of 3; untouched

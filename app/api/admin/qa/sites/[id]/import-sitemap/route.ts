@@ -16,15 +16,33 @@ type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 const INSERT_CHUNK = 10
 /** 3 SET values plus 90 ids stays under D1's 100 bound parameters per statement. */
 const ID_CHUNK = 90
+const SITEMAP_URL_ERROR = 'sitemapUrl must be a public https URL'
+
+/** Returns the trimmed URL when it is an absolute https URL that passes the SSRF guard, else null. */
+function publicHttpsUrl(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const raw = v.trim()
+  try {
+    if (new URL(raw).protocol !== 'https:') return null
+  } catch {
+    return null
+  }
+  return isSafePublicUrl(raw) ? raw : null
+}
 
 /**
- * POST /api/admin/qa/sites/[id]/import-sitemap  body { target: 'staging' | 'live' }
+ * POST /api/admin/qa/sites/[id]/import-sitemap  body { target: 'staging' | 'live', sitemapUrl? }
  *
  * Reads the sitemap for one target and upserts its pages. Sitemap-sourced
  * pages that vanish from the sitemap are flagged removed (never deleted).
  * Manual pages are never flagged. If the sitemap is incomplete (a child
  * sitemap cannot be read, or the URL cap truncates the list) nothing is
  * flagged removed, so a partial read cannot hide real pages.
+ *
+ * sitemapUrl (optional, public https; null or blank means not set) is read instead of the target's
+ * /sitemap.xml, for example the live sitemap imported onto a staging site.
+ * The target still must be valid, but the site need not have a URL for it.
+ * A custom sitemap never flags removals, because it is not the site's own list.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { orgId, userId } = await getRequestAuth(req)
@@ -39,16 +57,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!isRecord(body)) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   const target = parseTarget(body.target)
   if (!target) return NextResponse.json({ error: "target must be 'staging' or 'live'" }, { status: 400 })
+  let customSitemap: string | null = null
+  // undefined, null and blank text all mean "not set", so callers can clear it.
+  const sitemapUrlSet = body.sitemapUrl !== undefined && body.sitemapUrl !== null
+    && !(typeof body.sitemapUrl === 'string' && body.sitemapUrl.trim() === '')
+  if (sitemapUrlSet) {
+    customSitemap = publicHttpsUrl(body.sitemapUrl)
+    if (!customSitemap) return NextResponse.json({ error: SITEMAP_URL_ERROR }, { status: 400 })
+  }
 
   const database = (await db()) as D1
   const site = await loadSite(database, id)
   if (!site || site.archivedAt) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const origin = targetOrigin(site, target)
-  if (!origin) return NextResponse.json({ error: 'This site has no URL for that target' }, { status: 400 })
-  if (!isSafePublicUrl(origin)) return NextResponse.json({ error: 'This site has no URL for that target' }, { status: 400 })
+  let rootUrl: string
+  if (customSitemap) {
+    rootUrl = customSitemap
+  } else {
+    const origin = targetOrigin(site, target)
+    if (!origin) return NextResponse.json({ error: 'This site has no URL for that target' }, { status: 400 })
+    if (!isSafePublicUrl(origin)) return NextResponse.json({ error: 'This site has no URL for that target' }, { status: 400 })
+    rootUrl = `${origin}/sitemap.xml`
+  }
 
-  const rootRes = await fetchText(`${origin}/sitemap.xml`)
+  const rootRes = await fetchText(rootUrl)
   if (rootRes === null) return NextResponse.json({ error: 'Could not read sitemap.xml' }, { status: 502 })
 
   // A body cut off at the size cap is a partial read: never flag removals from it.
@@ -127,8 +159,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const staleIds = existing
     .filter(p => p.source === 'sitemap' && !p.removedAt && !newSet.has(p.path))
     .map(p => p.id)
+  // A custom sitemap is never the site's own list, so it never flags removals.
+  const flagRemovals = !truncated && !customSitemap
   let removed = 0
-  if (!truncated) {
+  if (flagRemovals) {
     removed = staleIds.length
     for (let i = 0; i < staleIds.length; i += ID_CHUNK) {
       statements.push(database.update(schema.qaPages)
@@ -142,7 +176,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     added,
     updated,
     removed,
-    total: newPaths.length + keptManualPaths.length + (truncated ? staleIds.length : 0),
+    total: newPaths.length + keptManualPaths.length + (flagRemovals ? 0 : staleIds.length),
     truncated,
   })
 }

@@ -20,6 +20,8 @@ export interface CreateRequestDialogProps {
   pagePath: string
   /** Viewport key the issue came from, if any. */
   viewport?: string
+  /** Title and description to start from when the request comes from something other than an issue (a comment). */
+  prefill?: { title: string; description: string } | null
   /** Resolves with the new request id, or rejects with a readable message. */
   onCreate: (input: CreateRequestInput) => Promise<string>
 }
@@ -29,7 +31,7 @@ export function defaultRequestTitle(pagePath: string, message: string): string {
   return `${pagePath}: ${message.slice(0, 80)}`
 }
 
-export function CreateRequestDialog({ open, onClose, issue, pagePath, viewport, onCreate }: CreateRequestDialogProps) {
+export function CreateRequestDialog({ open, onClose, issue, prefill = null, pagePath, viewport, onCreate }: CreateRequestDialogProps) {
   const titleId = useId()
   const descId = useId()
   const [title, setTitle] = useState('')
@@ -39,13 +41,20 @@ export function CreateRequestDialog({ open, onClose, issue, pagePath, viewport, 
   const [createdId, setCreatedId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!open || !issue) return
-    setTitle(defaultRequestTitle(pagePath, issue.message))
-    setDescription(issue.message)
+    if (!open) return
+    if (prefill) {
+      setTitle(prefill.title)
+      setDescription(prefill.description)
+    } else if (issue) {
+      setTitle(defaultRequestTitle(pagePath, issue.message))
+      setDescription(issue.message)
+    } else {
+      return
+    }
     setError(null)
     setCreatedId(null)
     setSaving(false)
-  }, [open, issue, pagePath])
+  }, [open, issue, prefill, pagePath])
 
   async function submit() {
     if (!title.trim()) {

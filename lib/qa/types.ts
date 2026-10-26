@@ -92,6 +92,67 @@ export interface QaScanMessage {
 export interface QaHighlightMessage { type: 'qa:highlight'; selector: string }
 export interface QaRescanMessage { type: 'qa:rescan' }
 
+/**
+ * Element comments (SQA.2). The dashboard turns comment mode on in a frame;
+ * the scanner lets the user pick an element and reports it with a qa:pick.
+ * The dashboard stores the comment and sends the frame its pins to draw.
+ */
+export interface QaCommentModeMessage { type: 'qa:comment-mode'; on: boolean }
+
+/** One pin to draw in a frame. ox and oy are fractions (0 to 1) of the element box. */
+export interface QaPin { id: string; n: number; selector: string; ox: number; oy: number; resolved: boolean }
+export interface QaPinsMessage { type: 'qa:pins'; pins: QaPin[] }
+export interface QaFocusPinMessage { type: 'qa:focus-pin'; id: string }
+
+/** Frame to dashboard: comment mode was turned off inside the frame (Esc), so the toggle can follow. */
+export interface QaCommentModeChangedMessage { type: 'qa:comment-mode-changed'; version: 1; on: boolean }
+
+/** Frame to dashboard: Esc was pressed inside the frame while comment mode was off, so the dashboard can peel its own layers. */
+export interface QaEscapeMessage { type: 'qa:escape'; version: 1 }
+
+/** Frame to dashboard: the user clicked an element in comment mode. */
+export interface QaPickMessage {
+  type: 'qa:pick'
+  version: 1
+  /** upstream page URL, same shape as QaScanMessage.url */
+  url: string
+  selector: string
+  ox: number
+  oy: number
+  /** tag name, lower case, e.g. 'button' */
+  tag: string
+  /** first 120 characters of the element's visible text, trimmed */
+  text: string
+}
+
+/** Frame to dashboard: the user clicked a pin. */
+export interface QaPinClickMessage { type: 'qa:pin-click'; version: 1; id: string }
+
+export type QaCommentStatus = 'open' | 'resolved'
+
+/** One row of qa_comments as the API returns it. */
+export interface QaComment {
+  id: string
+  roundPageId: string
+  viewport: QaViewportKey
+  selector: string
+  ox: number
+  oy: number
+  elementTag: string | null
+  elementText: string | null
+  body: string
+  status: QaCommentStatus
+  /** request created from this comment, if any */
+  requestId: string | null
+  authorId: string | null
+  authorName: string | null
+  createdAt: string
+  updatedAt: string
+  resolvedAt: string | null
+}
+
+export const QA_COMMENT_BODY_MAX = 4000
+
 export type QaIssueCategory = 'a11y' | 'links' | 'seo' | 'launch' | 'perf'
 export type QaIssueSeverity = 'fail' | 'warn' | 'info'
 

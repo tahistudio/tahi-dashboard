@@ -16,6 +16,7 @@ import { useToast } from '@/components/tahi/toast'
 import type { QaTarget } from '@/lib/qa/types'
 import { AddSiteDialog, type QaSiteFormValue } from '../add-site-dialog'
 import { StartRoundDialog } from './start-round-dialog'
+import { AddPagesDialog } from './add-pages-dialog'
 import { RoundWorkspace } from './workspace/round-workspace'
 
 interface QaSiteDetail {
@@ -60,6 +61,8 @@ export function SiteContent({ siteId }: SiteContentProps) {
   const [roundOpen, setRoundOpen] = useState(false)
   const [importing, setImporting] = useState<QaTarget | null>(null)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [sitemapFailed, setSitemapFailed] = useState(false)
+  const [addPagesOpen, setAddPagesOpen] = useState(false)
   const [pagePath, setPagePath] = useState('')
   const [addingPage, setAddingPage] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
@@ -113,6 +116,7 @@ export function SiteContent({ siteId }: SiteContentProps) {
   async function importFrom(target: QaTarget) {
     setImporting(target)
     setImportResult(null)
+    setSitemapFailed(false)
     try {
       const res = await fetch(apiPath(`/api/admin/qa/sites/${siteId}/import-sitemap`), {
         method: 'POST',
@@ -124,7 +128,9 @@ export function SiteContent({ siteId }: SiteContentProps) {
       setImportResult(json)
       await load()
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Import failed.', 'error')
+      const message = err instanceof Error ? err.message : 'Import failed.'
+      if (message.includes('Could not read sitemap.xml')) setSitemapFailed(true)
+      showToast(message, 'error')
     } finally {
       setImporting(null)
     }
@@ -215,6 +221,7 @@ export function SiteContent({ siteId }: SiteContentProps) {
               {site.stagingUrl ? 'Import pages from live' : 'Import pages'}
             </TahiButton>
           ) : null}
+          <TahiButton variant="secondary" size="md" onClick={() => setAddPagesOpen(true)}>Add pages</TahiButton>
           <TahiButton variant="secondary" size="md" onClick={() => setEditOpen(true)}>Edit</TahiButton>
           <TahiButton variant="ghost" size="md" onClick={() => setArchiveOpen(true)}>Archive</TahiButton>
         </div>
@@ -224,6 +231,13 @@ export function SiteContent({ siteId }: SiteContentProps) {
         <p role="status" className="rounded-[var(--radius-leaf-sm)] bg-[var(--color-brand-50)] px-3 py-2 text-[var(--color-text)]" style={{ fontSize: '0.8125rem' }}>
           Added {importResult.added}, updated {importResult.updated}, flagged {importResult.removed} as removed. {importResult.total} pages in the sitemap.
         </p>
+      ) : null}
+
+      {sitemapFailed ? (
+        <div role="alert" className="flex flex-wrap items-center rounded-[var(--radius-leaf-sm)] bg-[var(--color-warning-bg)] px-3 py-2 text-[var(--color-text)]" style={{ fontSize: '0.8125rem', gap: '0.5rem' }}>
+          <span>Could not read sitemap.xml on this site. Add the pages by path, or crawl the site instead.</span>
+          <TahiButton variant="secondary" size="sm" onClick={() => setAddPagesOpen(true)}>Add pages</TahiButton>
+        </div>
       ) : null}
 
       {activeRoundId ? (
@@ -356,6 +370,14 @@ export function SiteContent({ siteId }: SiteContentProps) {
           void load()
           openRound(id)
         }}
+      />
+      <AddPagesDialog
+        open={addPagesOpen}
+        onClose={() => setAddPagesOpen(false)}
+        siteId={siteId}
+        hasStaging={Boolean(site.stagingUrl)}
+        hasLive={Boolean(site.liveUrl)}
+        onAdded={() => void load()}
       />
       <ConfirmDialog
         open={archiveOpen}

@@ -97,7 +97,28 @@ interface ReportRedirectEntry extends QaLinkResult {
   mappedUrl: string | null
 }
 
+/** One element comment on a round page. Optional on ReportData so older responses still render. */
+export interface ReportComment {
+  roundPageId: string
+  path: string
+  viewport: QaViewportKey
+  n: number
+  body: string
+  status: 'open' | 'resolved'
+  elementTag: string | null
+  elementText: string | null
+  authorName: string | null
+  createdAt: string
+}
+
+interface ReportCommentCounts {
+  open: number
+  resolved: number
+}
+
 interface ReportData {
+  comments?: ReportComment[]
+  commentCounts?: ReportCommentCounts
   round: {
     id: string
     siteId: string
@@ -146,6 +167,29 @@ function isRedirectEntry(value: unknown): value is ReportRedirectEntry {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
   return typeof v.oldUrl === 'string' && (typeof v.mappedUrl === 'string' || v.mappedUrl === null) && typeof v.broken === 'boolean'
+}
+
+function isReportComment(value: unknown): value is ReportComment {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  return typeof v.path === 'string' && typeof v.body === 'string' && typeof v.n === 'number' && (v.status === 'open' || v.status === 'resolved')
+}
+
+/** Groups comments by page path, keeping first-seen path order. Open comments come before resolved ones. */
+function groupCommentsByPath(comments: ReportComment[]): { path: string; items: ReportComment[] }[] {
+  const byPath = new Map<string, ReportComment[]>()
+  for (const comment of comments) {
+    const list = byPath.get(comment.path)
+    if (list) list.push(comment)
+    else byPath.set(comment.path, [comment])
+  }
+  return [...byPath.entries()].map(([path, items]) => ({
+    path,
+    items: [...items].sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'open' ? -1 : 1
+      return a.n - b.n
+    }),
+  }))
 }
 
 function formatDate(iso: string | null): string {
@@ -227,6 +271,8 @@ export function ReportContent({ roundId }: { roundId: string }) {
 
   const siteChecks = (data?.siteChecks ?? []).filter(isSiteCheck)
   const redirectEntries = (data?.redirectMap ?? []).filter(isRedirectEntry)
+  const reportComments = (data?.comments ?? []).filter(isReportComment)
+  const commentGroups = groupCommentsByPath(reportComments)
 
   return (
     <div className="qa-report-root flex flex-col" style={{ gap: '1rem', minWidth: 0 }}>
@@ -476,6 +522,58 @@ export function ReportContent({ roundId }: { roundId: string }) {
                 </div>
               )}
             </SectionCard>
+
+            {data.commentCounts ? (
+              <SectionCard title="Comments">
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                  {`${data.commentCounts.open} open, ${data.commentCounts.resolved} resolved`}
+                </p>
+                {commentGroups.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+                    No comments on this round.
+                  </p>
+                ) : (
+                  commentGroups.map(group => (
+                    <div key={group.path} className="flex flex-col" style={{ gap: '0.5rem' }}>
+                      <h3 style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text)', wordBreak: 'break-all' }}>
+                        {group.path}
+                      </h3>
+                      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {group.items.map(comment => (
+                          <li
+                            key={`${comment.roundPageId}-${comment.n}-${comment.viewport}`}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.25rem',
+                              padding: '0.5rem 0.75rem',
+                              border: '1px solid var(--color-border-subtle)',
+                              borderRadius: 'var(--radius-sm)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                              <span style={{ fontWeight: 700, color: 'var(--color-text)' }}>{`#${comment.n}`}</span>
+                              <span>{TICK_LABELS[comment.viewport] ?? comment.viewport}</span>
+                              <Badge tone={comment.status === 'open' ? 'warning' : 'positive'} size="sm">
+                                {comment.status === 'open' ? 'Open' : 'Resolved'}
+                              </Badge>
+                            </div>
+                            <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                              {comment.body}
+                            </p>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>
+                              {`<${comment.elementTag ?? 'element'}>`}
+                              {comment.elementText ? ` ${comment.elementText}` : ''}
+                              {` | ${comment.authorName ?? 'Unknown author'}`}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))
+                )}
+              </SectionCard>
+            ) : null}
 
           </>
         )}

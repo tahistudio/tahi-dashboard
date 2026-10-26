@@ -1,15 +1,28 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { overlayLayers } from '@/components/tahi/overlay-stack'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
+import { lockBodyScroll, overlayLayers } from '@/components/tahi/overlay-stack'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, Layers } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, Layers, ListChecks } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
-import { QA_VIEWPORTS, type QaIssue, type QaScanResult, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
+import { SlideOver } from '@/components/tahi/slide-over'
+import {
+  QA_VIEWPORTS,
+  type QaCommentModeMessage,
+  type QaFocusPinMessage,
+  type QaHighlightMessage,
+  type QaIssue,
+  type QaPinsMessage,
+  type QaRescanMessage,
+  type QaScanResult,
+  type QaTarget,
+  type QaViewportKey,
+} from '@/lib/qa/types'
 import { QA_RAIL_COLLAPSE_REM, QA_SINGLE_FRAME_REM, narrowerThanRem, useWorkspaceWidth } from './use-workspace-width'
 import { useRound, type QaPagePatch } from './use-round'
 import { useViewToken } from './use-view-token'
@@ -18,6 +31,20 @@ import { PageRail, filterPages, type QaRailFilter } from './page-rail'
 import { ViewportStrip } from './viewport-strip'
 import { QA_FRAME_SANDBOX, type QaViewportDef } from './viewport-frame'
 import { IssuePanel, type IssuePanelTab } from './issue-panel'
+import { CommentComposer } from './comment-composer'
+import { useComments } from './use-comments'
+import { comparablePath } from './comparable-path'
+import {
+  composerHasDraft,
+  composerPlacement,
+  pickAction,
+  parseEscapeMessage,
+  parseModeChangedMessage,
+  parsePickMessage,
+  parsePinClickMessage,
+  viewportForSource,
+  type NumberedComment,
+} from './comments-helpers'
 import { RoundActions } from './round-actions'
 import type { CreateRequestInput } from './create-request-dialog'
 import type { QaRoundPageDetail, QaRoundPageRow, QaRoundRow, QaScanState, QaSiteRow, QaTickMap } from './qa-types'
@@ -28,7 +55,29 @@ const LOADING_SCAN_MS = 20_000
 const DETAIL_DEBOUNCE_MS = 600
 /** Wait after a frame loads before sending it a highlight, so the scanner has attached. */
 const HIGHLIGHT_AFTER_LOAD_MS = 300
+/** Pins are sent again this long after a frame loads, for pages that render their elements late. */
+const LATE_PINS_MS = 2000
+/** A queued pin focus waits this long after the pins go out, so the pin exists to pulse. */
+const FOCUS_AFTER_PINS_MS = 400
+/** Above the wide workspace (40), below the SlideOver scrim (60). */
+const COMPOSER_Z_INDEX = 55
 const MOBILE_DEFAULT: QaViewportKey = 'desktop'
+const WIDE_STORAGE_KEY = 'tahi-qa-wide'
+/**
+ * Stacking level of the wide workspace. The dashboard chrome (sidebar, top nav) sets
+ * no z-index, so 40 sits above it. The overlay primitives sit above this: SlideOver
+ * scrim 60 and panel 70, ConfirmDialog and PromptDialog 70, Popover 1000 (portalled),
+ * toasts 50000. Wide mode is not an overlay and registers nothing.
+ */
+export const QA_WIDE_Z_INDEX = 40
+const WIDE_SECTION_STYLE: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  overflow: 'auto',
+  background: 'var(--color-bg-cream)',
+  padding: '1rem',
+  zIndex: QA_WIDE_Z_INDEX,
+}
 
 function emptyStates(): Record<QaViewportKey, QaScanState> {
   return { xl: 'loading', desktop: 'loading', tablet: 'loading', mobile_l: 'loading', mobile_p: 'loading' }
@@ -52,6 +101,28 @@ function upstreamUrl(site: QaSiteRow, target: QaTarget, path: string): string | 
 /** True while a dialog or slide-over is on screen, so page shortcuts stay quiet. */
 function overlayOpen(): boolean {
   return overlayLayers.size() > 0 || document.querySelector('[role="dialog"]') !== null
+}
+
+/** Like overlayOpen, but the comment composer does not count (it handles Escape itself, first). */
+function otherOverlayOpen(): boolean {
+  return overlayLayers.size() > 0 || document.querySelector('[role="dialog"]:not([data-qa-composer])') !== null
+}
+
+type FrameMessage = QaRescanMessage | QaHighlightMessage | QaCommentModeMessage | QaPinsMessage | QaFocusPinMessage
+
+/** A picked element waiting for its comment text, plus where the card sits. */
+interface ComposerState {
+  /** Changes on every pick so a fresh pick starts with an empty textarea. */
+  key: number
+  viewport: QaViewportKey
+  selector: string
+  ox: number
+  oy: number
+  tag: string
+  text: string
+  left: number
+  top: number
+  width: number
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -133,7 +204,31 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   const [railSheetOpen, setRailSheetOpen] = useState(false)
   const [mobileViewport, setMobileViewport] = useState<QaViewportKey>(MOBILE_DEFAULT)
   const [issuesOpen, setIssuesOpen] = useState(true)
+  // Wide mode is the user's saved choice; it only takes effect on the desktop layout.
+  const [wide, setWide] = useState(false)
+  const wideActive = wide && !isMobile
+  const [issuesDrawerOpen, setIssuesDrawerOpen] = useState(false)
+  const closeIssuesDrawer = useCallback(() => setIssuesDrawerOpen(false), [])
   const [issueTab, setIssueTab] = useState<IssuePanelTab>('a11y')
+  const [commentViewport, setCommentViewport] = useState<QaViewportKey | null>(null)
+  const commentViewportRef = useRef<QaViewportKey | null>(null)
+  const [composer, setComposer] = useState<ComposerState | null>(null)
+  const composerRef = useRef<ComposerState | null>(null)
+  composerRef.current = composer
+  const composerKey = useRef(0)
+  const composerDraft = useRef('')
+  const [composerPulse, setComposerPulse] = useState(0)
+  const handleDraftChange = useCallback((text: string) => {
+    composerDraft.current = text
+  }, [])
+  const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null)
+  // Pin focus waiting for its frame to load, one per viewport.
+  const pendingFocus = useRef<Partial<Record<QaViewportKey, string>>>({})
+  const expandedRef = useRef<QaViewportKey | null>(null)
+  const frameTimers = useRef<number[]>([])
+  // Frames that have finished loading their page. Before that a frame is still the blank
+  // document of the dashboard's own origin, which would refuse a message for the viewer origin.
+  const loadedFrames = useRef(new WeakSet<HTMLIFrameElement>())
   const [detail, setDetail] = useState<QaRoundPageDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -182,6 +277,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
 
   useEffect(() => () => {
     if (detailTimer.current) clearTimeout(detailTimer.current)
+    for (const t of frameTimers.current) window.clearTimeout(t)
   }, [])
 
   // Scan states for the selected page: scanned when stored, otherwise loading until 20 seconds pass.
@@ -217,13 +313,71 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }, [loadDetail])
 
   // Post messages to frames: always to the viewer origin, never '*'.
-  const postToFrames = useCallback((message: { type: 'qa:rescan' } | { type: 'qa:highlight'; selector: string }, key?: QaViewportKey) => {
+  const postToFrames = useCallback((message: FrameMessage, key?: QaViewportKey) => {
     if (!viewOrigin) return
     const keys = key ? [key] : QA_VIEWPORTS.map(v => v.key)
     for (const k of keys) {
       framesRef.current[k]?.contentWindow?.postMessage(message, viewOrigin)
     }
   }, [viewOrigin])
+
+  const comments = useComments(selectedId, readOnly)
+  const pinsForRef = useRef(comments.pinsFor)
+  pinsForRef.current = comments.pinsFor
+  // Latest values for the message listener, so it subscribes once.
+  const latest = useRef({ path: selectedRow?.path ?? '', readOnly, wideActive: false, comments: comments.comments })
+  latest.current = { path: selectedRow?.path ?? '', readOnly, wideActive, comments: comments.comments }
+
+  const frameLoaded = useCallback((key: QaViewportKey) => {
+    const el = framesRef.current[key]
+    return el !== null && el !== undefined && loadedFrames.current.has(el)
+  }, [])
+
+  const sendPins = useCallback((key?: QaViewportKey) => {
+    const keys = key ? [key] : QA_VIEWPORTS.map(v => v.key)
+    for (const k of keys) {
+      if (frameLoaded(k)) postToFrames({ type: 'qa:pins', pins: pinsForRef.current(k) }, k)
+    }
+  }, [postToFrames, frameLoaded])
+
+  // Whenever the comments change, redraw the pins in every visible frame.
+  useEffect(() => {
+    sendPins()
+  }, [comments.pinsFor, sendPins])
+
+  /** One frame at a time is in comment mode; null turns it off everywhere. Closes the composer. */
+  const applyCommentViewport = useCallback((next: QaViewportKey | null, keepComposer = false) => {
+    const prev = commentViewportRef.current
+    if (prev === next) return
+    // A frame that is still loading gets comment mode when it finishes (see handleFrameLoad).
+    if (prev && frameLoaded(prev)) postToFrames({ type: 'qa:comment-mode', on: false }, prev)
+    if (next && frameLoaded(next)) postToFrames({ type: 'qa:comment-mode', on: true }, next)
+    commentViewportRef.current = next
+    setCommentViewport(next)
+    if (!keepComposer) setComposer(null)
+  }, [postToFrames, frameLoaded])
+
+  // A new page reloads every frame, so comment mode, the composer and the selection start clean.
+  useEffect(() => {
+    applyCommentViewport(null)
+    setComposer(null)
+    setSelectedCommentId(null)
+    pendingFocus.current = {}
+  }, [selectedId, applyCommentViewport])
+
+  // A closed round takes no new comments.
+  useEffect(() => {
+    if (readOnly) applyCommentViewport(null)
+  }, [readOnly, applyCommentViewport])
+
+  const handleExpandedChange = useCallback((key: QaViewportKey | null) => {
+    const prev = expandedRef.current
+    expandedRef.current = key
+    if (prev === key) return
+    // Frames remount on expand and collapse, so a card anchored to the old one has nothing to sit on.
+    setComposer(null)
+    if (key && commentViewportRef.current && commentViewportRef.current !== key) applyCommentViewport(null)
+  }, [applyCommentViewport])
 
   const flushHighlight = useCallback((key: QaViewportKey) => {
     const selector = pendingHighlights.current[key]
@@ -250,9 +404,110 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }, [readOnly, selectedRow, submitScan, scheduleDetailReload, flushHighlight, showToast])
 
   const handleFrameLoad = useCallback((key: QaViewportKey) => {
-    if (!pendingHighlights.current[key]) return
-    window.setTimeout(() => flushHighlight(key), HIGHLIGHT_AFTER_LOAD_MS)
-  }, [flushHighlight])
+    const later = (fn: () => void, ms: number) => {
+      frameTimers.current.push(window.setTimeout(fn, ms))
+    }
+    const el = framesRef.current[key]
+    if (el) loadedFrames.current.add(el)
+    if (pendingHighlights.current[key]) later(() => flushHighlight(key), HIGHLIGHT_AFTER_LOAD_MS)
+    // A reloaded frame has lost comment mode and its pins, so send both again.
+    later(() => {
+      if (commentViewportRef.current === key) postToFrames({ type: 'qa:comment-mode', on: true }, key)
+      sendPins(key)
+      const focusId = pendingFocus.current[key]
+      if (focusId) {
+        delete pendingFocus.current[key]
+        later(() => postToFrames({ type: 'qa:focus-pin', id: focusId }, key), FOCUS_AFTER_PINS_MS)
+      }
+    }, HIGHLIGHT_AFTER_LOAD_MS)
+    later(() => sendPins(key), LATE_PINS_MS)
+  }, [flushHighlight, postToFrames, sendPins])
+
+  // Messages from the frames about comments. Same rules as the scan listener: the
+  // viewer origin only, the frame found by its window (never a claimed viewport).
+  useEffect(() => {
+    if (!viewOrigin) return
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== viewOrigin) return
+      const pick = parsePickMessage(event.data)
+      const click = pick ? null : parsePinClickMessage(event.data)
+      const changed = pick || click ? null : parseModeChangedMessage(event.data)
+      const escape = pick || click || changed ? null : parseEscapeMessage(event.data)
+      if (!pick && !click && !changed && !escape) return
+      const key = viewportForSource(framesRef.current, event.source)
+      if (!key) return
+
+      if (escape) {
+        // Focus inside a frame swallows Esc. Replay it on the window so the same ladder runs:
+        // composer, comment mode, expanded frame, then wide mode. A dialog or slide-over wins.
+        // Only while that frame has focus, so a page cannot peel layers (and drop a draft) on its own.
+        if (document.activeElement !== framesRef.current[key]) return
+        if (otherOverlayOpen()) return
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+        return
+      }
+
+      if (changed) {
+        // Esc inside the frame turned comment mode off there. A card with typed text stays open.
+        if (!changed.on && commentViewportRef.current === key) {
+          applyCommentViewport(null, composerHasDraft(composerDraft.current) && composerRef.current !== null)
+        }
+        return
+      }
+      if (click) {
+        const hit = latest.current.comments.find(c => c.id === click.id && c.viewport === key)
+        if (!hit) return
+        setSelectedCommentId(hit.id)
+        setIssueTab('comments')
+        if (latest.current.wideActive) setIssuesDrawerOpen(true)
+        else setIssuesOpen(true)
+        return
+      }
+      if (pick) {
+        // Only the frame in comment mode counts, on an open round, for the page on screen.
+        if (latest.current.readOnly || commentViewportRef.current !== key) return
+        if (comparablePath(pick.url) !== comparablePath(latest.current.path)) return
+        const rect = framesRef.current[key]?.getBoundingClientRect()
+        if (!rect) return
+        if (pickAction(composerRef.current !== null, composerDraft.current) === 'ignore') {
+          setComposerPulse(n => n + 1)
+          return
+        }
+        composerKey.current += 1
+        setComposer({
+          key: composerKey.current,
+          viewport: key,
+          selector: pick.selector,
+          ox: pick.ox,
+          oy: pick.oy,
+          tag: pick.tag,
+          text: pick.text,
+          ...composerPlacement(rect, window.innerWidth, window.innerHeight),
+        })
+      }
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [viewOrigin, applyCommentViewport])
+
+  // Keep the composer on screen when the window resizes or scrolls.
+  const composerViewport = composer?.viewport ?? null
+  useEffect(() => {
+    if (!composerViewport) return
+    function reposition() {
+      if (!composerViewport) return
+      const rect = framesRef.current[composerViewport]?.getBoundingClientRect()
+      if (!rect) return
+      const next = composerPlacement(rect, window.innerWidth, window.innerHeight)
+      setComposer(c => (c && c.viewport === composerViewport && (c.left !== next.left || c.top !== next.top || c.width !== next.width) ? { ...c, ...next } : c))
+    }
+    window.addEventListener('resize', reposition)
+    window.addEventListener('scroll', reposition, true)
+    return () => {
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('scroll', reposition, true)
+    }
+  }, [composerViewport])
 
   const onScanError = useCallback((message: string) => showToast(message, 'error'), [showToast])
   const scanAll = useScanAll({ baseUrl, pages, submitScan, onError: onScanError })
@@ -261,16 +516,76 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     postToFrames({ type: 'qa:rescan' })
   }
 
+  /** Switches the single frame shown on small screens; the frame in comment mode may be the one leaving. */
+  function changeMobileViewport(key: QaViewportKey) {
+    setMobileViewport(key)
+    if (commentViewportRef.current && commentViewportRef.current !== key) applyCommentViewport(null)
+  }
+
   function showIssue(issue: QaIssue) {
     if (!issue.selector) return
     const key: QaViewportKey = issue.viewport ?? 'desktop'
     if (isMobile && mobileViewport !== key) {
       // The other frame has not loaded yet; queue until it loads or scans.
       pendingHighlights.current[key] = issue.selector
-      setMobileViewport(key)
+      changeMobileViewport(key)
       return
     }
     postToFrames({ type: 'qa:highlight', selector: issue.selector }, key)
+  }
+
+  function showComment(comment: NumberedComment) {
+    setSelectedCommentId(comment.id)
+    const key = comment.viewport
+    if (isMobile && mobileViewport !== key) {
+      // The frame for that viewport is not mounted yet; focus the pin once it loads.
+      pendingFocus.current[key] = comment.id
+      changeMobileViewport(key)
+      return
+    }
+    postToFrames({ type: 'qa:focus-pin', id: comment.id }, key)
+  }
+
+  function toggleCommentViewport(key: QaViewportKey) {
+    applyCommentViewport(commentViewportRef.current === key ? null : key)
+  }
+
+  async function saveComment(body: string) {
+    if (!composer) return
+    await comments.add({
+      viewport: composer.viewport,
+      selector: composer.selector,
+      ox: composer.ox,
+      oy: composer.oy,
+      elementTag: composer.tag,
+      elementText: composer.text,
+      body,
+    })
+    // Comment mode stays on for the next pick.
+    setComposer(null)
+  }
+
+  async function resolveComment(id: string, resolved: boolean) {
+    try {
+      await comments.update(id, { status: resolved ? 'resolved' : 'open' })
+    } catch {
+      // The hook already rolled back and toasted.
+    }
+  }
+
+  async function deleteComment(id: string) {
+    await comments.remove(id)
+    setSelectedCommentId(current => (current === id ? null : current))
+  }
+
+  async function createRequestFromComment(comment: NumberedComment, input: CreateRequestInput): Promise<string> {
+    const requestId = await postCreateRequest(comment.viewport, input)
+    try {
+      await comments.update(comment.id, { requestId })
+    } catch {
+      // The request exists; the hook toasted that the link to the comment was not saved.
+    }
+    return requestId
   }
 
   function tick(key: QaViewportKey, value: boolean) {
@@ -309,6 +624,63 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [move])
 
+  // Restore the saved wide choice after mount so server and client markup match.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(WIDE_STORAGE_KEY) === 'true') setWide(true)
+    } catch {
+      // Storage can be blocked; wide mode stays off.
+    }
+  }, [])
+
+  const storeWide = useCallback((next: boolean) => {
+    setWide(next)
+    try {
+      window.localStorage.setItem(WIDE_STORAGE_KEY, next ? 'true' : 'false')
+    } catch {
+      // Not persisted; the choice still applies for this visit.
+    }
+  }, [])
+
+  // The wide workspace owns the window, so the page underneath must not scroll.
+  useEffect(() => {
+    if (!wideActive) return
+    const unlock = lockBodyScroll()
+    // Lets globals.css hide the floating feedback ball, which would sit over the wide workspace.
+    document.body.dataset.qaWide = 'true'
+    return () => {
+      delete document.body.dataset.qaWide
+      unlock()
+    }
+  }, [wideActive])
+
+  // Escape peels one layer at a time: an open comment card, then comment mode, then an
+  // expanded frame, then wide mode. Each layer calls preventDefault so the layers below
+  // (and the expanded frame's own handler in ViewportStrip, which registers later) skip
+  // the same key press. The card also handles Escape itself while its textarea has focus.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.key !== 'Escape') return
+      if (otherOverlayOpen()) return
+      if (composerRef.current) {
+        e.preventDefault()
+        setComposer(null)
+        return
+      }
+      if (commentViewportRef.current) {
+        e.preventDefault()
+        applyCommentViewport(null)
+        return
+      }
+      if (!wideActive) return
+      if (document.querySelector('[data-qa-expanded="true"]') !== null) return
+      e.preventDefault()
+      storeWide(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [wideActive, storeWide, applyCommentViewport])
+
   async function addSamples(groupKey: string) {
     try {
       const res = await fetch(apiPath(`/api/admin/qa/rounds/${round.id}/samples`), {
@@ -338,18 +710,23 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     }
   }
 
-  async function createRequest(issue: QaIssue, input: CreateRequestInput): Promise<string> {
+  async function postCreateRequest(viewport: QaViewportKey | undefined, input: CreateRequestInput): Promise<string> {
     if (!selectedRow) throw new Error('No page selected.')
     const res = await fetch(apiPath(`/api/admin/qa/round-pages/${selectedRow.id}/create-request`), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: input.title, description: input.description, viewport: issue.viewport }),
+      body: JSON.stringify({ title: input.title, description: input.description, viewport }),
     })
     if (!res.ok) throw new Error(await errorText(res))
     const json = (await res.json()) as { requestId?: string }
-    await reloadDetail()
     if (!json.requestId) throw new Error('The request was created but no id came back.')
     return json.requestId
+  }
+
+  async function createRequest(issue: QaIssue, input: CreateRequestInput): Promise<string> {
+    const requestId = await postCreateRequest(issue.viewport, input)
+    await reloadDetail()
+    return requestId
   }
 
   async function setRoundStatus(status: 'open' | 'closed') {
@@ -395,12 +772,49 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     return <LoadingSkeleton rows={4} height={96} />
   }
 
+  // Shared by the inline Issues section and the wide-mode drawer.
+  const issuePanel = selectedRow ? (
+    <IssuePanel
+      detail={detailWithRow}
+      loading={detailLoading}
+      error={detailError}
+      target={round.target as QaTarget}
+      readOnly={readOnly}
+      pagePath={selectedRow.path}
+      tab={issueTab}
+      onTabChange={setIssueTab}
+      onShow={showIssue}
+      onCreateRequest={createRequest}
+      onPatch={patch => void patchPage(selectedRow.id, patch)}
+      onRunPageSpeed={runPageSpeed}
+      comments={{
+        items: comments.comments,
+        loading: comments.loading,
+        error: comments.error,
+        selectedId: selectedCommentId,
+        onSelect: setSelectedCommentId,
+        onShow: showComment,
+        onResolve: resolveComment,
+        onEdit: (id, body) => comments.update(id, { body }),
+        onDelete: deleteComment,
+        onCreateRequest: createRequestFromComment,
+      }}
+    />
+  ) : null
+  // The page rail is a sheet on the single-frame layout and in wide mode.
+  const railAsSheet = isMobile || wideActive
+
   return (
-    <section ref={workspaceRef} aria-label={`${round.name} workspace`} className="flex min-w-0 flex-col" style={{ gap: '1rem' }}>
+    <section
+      ref={workspaceRef}
+      aria-label={`${round.name} workspace`}
+      className="flex min-w-0 flex-col"
+      style={wideActive ? { ...WIDE_SECTION_STYLE, gap: '1rem' } : { gap: '1rem' }}
+    >
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3" style={{ gap: '0.5rem' }}>
         <div className="flex min-w-0 flex-wrap items-center" style={{ gap: '0.5rem' }}>
-          {isMobile ? (
+          {railAsSheet ? (
             <button
               type="button"
               onClick={() => setRailSheetOpen(true)}
@@ -409,6 +823,19 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
             >
               <Layers className="size-4" aria-hidden="true" />
               Pages
+            </button>
+          ) : null}
+          {wideActive ? (
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={issuesDrawerOpen}
+              onClick={() => setIssuesDrawerOpen(true)}
+              className="flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] px-3 transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+              style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
+            >
+              <ListChecks className="size-4" aria-hidden="true" />
+              Issues
             </button>
           ) : null}
           <h2 className="min-w-0 truncate text-[var(--color-text)]" style={{ fontSize: '1rem', fontWeight: 700 }} title={selectedRow?.path ?? ''}>
@@ -495,7 +922,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
           onFilterChange={setFilter}
           collapsed={railCollapsed}
           onToggleCollapsed={() => setRailChoice(!railCollapsed)}
-          singleFrame={isMobile}
+          singleFrame={railAsSheet}
           sheetOpen={railSheetOpen}
           onSheetClose={() => setRailSheetOpen(false)}
           onAddSamples={groupKey => void addSamples(groupKey)}
@@ -508,9 +935,9 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               <span style={{ fontWeight: 600 }}>{doneTicks} / {totalTicks}</span>
             </div>
             {selectedRow ? (
-              <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }} role="group" aria-label="Viewport ticks">
+              <div className="flex min-w-0 flex-wrap items-center" style={{ gap: '0 0.75rem' }} role="group" aria-label="Viewport ticks">
                 {QA_VIEWPORTS.map(v => (
-                  <label key={v.key} className="flex min-h-[2.75rem] items-center text-[var(--color-text)]" style={{ gap: '0.25rem', fontSize: '0.75rem' }}>
+                  <label key={v.key} className="flex min-h-[2.75rem] items-center whitespace-nowrap text-[var(--color-text)]" style={{ gap: '0.25rem', fontSize: '0.75rem' }}>
                     <input
                       type="checkbox"
                       checked={ticks[v.key]}
@@ -536,46 +963,72 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               framesRef={framesRef}
               onFrameLoad={handleFrameLoad}
               mobileViewport={mobileViewport}
-              onMobileViewportChange={setMobileViewport}
+              onMobileViewportChange={changeMobileViewport}
               singleFrame={isMobile}
+              wide={wideActive}
+              onWideChange={storeWide}
+              commentViewport={commentViewport}
+              onCommentToggle={toggleCommentViewport}
+              onExpandedChange={handleExpandedChange}
             />
           ) : (
             <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.875rem' }}>No pages in this round yet.</p>
           )}
-          <section className="flex flex-col rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)]" aria-label="Issues">
-            <button
-              type="button"
-              aria-expanded={issuesOpen}
-              onClick={() => setIssuesOpen(o => !o)}
-              className="flex min-h-[2.75rem] items-center justify-between px-3 text-left transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-brand)]"
-              style={{ fontSize: '0.875rem', fontWeight: 600 }}
-            >
-              Issues
-              {issuesOpen ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}
-            </button>
-            {issuesOpen ? (
-              <div className="h-auto min-w-0 overflow-y-auto p-3 md:h-[18rem]">
-                {selectedRow ? (
-                  <IssuePanel
-                    detail={detailWithRow}
-                    loading={detailLoading}
-                    error={detailError}
-                    target={round.target as QaTarget}
-                    readOnly={readOnly}
-                    pagePath={selectedRow.path}
-                    tab={issueTab}
-                    onTabChange={setIssueTab}
-                    onShow={showIssue}
-                    onCreateRequest={createRequest}
-                    onPatch={patch => void patchPage(selectedRow.id, patch)}
-                    onRunPageSpeed={runPageSpeed}
-                  />
-                ) : null}
-              </div>
-            ) : null}
-          </section>
+          {wideActive ? null : (
+            <section className="flex flex-col rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)]" aria-label="Issues">
+              <button
+                type="button"
+                aria-expanded={issuesOpen}
+                onClick={() => setIssuesOpen(o => !o)}
+                className="flex min-h-[2.75rem] items-center justify-between px-3 text-left transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+                style={{ fontSize: '0.875rem', fontWeight: 600 }}
+              >
+                Issues
+                {issuesOpen ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}
+              </button>
+              {issuesOpen ? (
+                <div className="h-auto min-w-0 overflow-y-auto p-3 md:h-[18rem]">{issuePanel}</div>
+              ) : null}
+            </section>
+          )}
         </div>
       </div>
+
+      {/* Renders nothing unless wide mode is on, so a stale open flag never shows the drawer. */}
+      <SlideOver
+        open={wideActive && issuesDrawerOpen}
+        onClose={closeIssuesDrawer}
+        title="Issues"
+        maxWidth="min(32rem, 100vw)"
+      >
+        <SlideOver.Body>{issuePanel}</SlideOver.Body>
+      </SlideOver>
+
+      {composer && typeof document !== 'undefined'
+        ? createPortal(
+            <CommentComposer
+              key={composer.key}
+              open
+              viewportLabel={QA_VIEWPORTS.find(v => v.key === composer.viewport)?.label ?? composer.viewport}
+              elementTag={composer.tag}
+              elementText={composer.text}
+              onSave={saveComment}
+              onCancel={() => setComposer(null)}
+              onDraftChange={handleDraftChange}
+              pulseSignal={composerPulse}
+              style={{
+                position: 'fixed',
+                left: composer.left,
+                top: composer.top,
+                width: composer.width,
+                maxHeight: 'calc(100vh - 1rem)',
+                overflowY: 'auto',
+                zIndex: COMPOSER_Z_INDEX,
+              }}
+            />,
+            document.body,
+          )
+        : null}
 
       {scanAll.frameSrc ? (
         <div aria-hidden="true" inert>

@@ -1,5 +1,6 @@
 'use client'
 
+import { MessageSquarePlus } from 'lucide-react'
 import type { QaViewportKey } from '@/lib/qa/types'
 import { QA_VIEWPORTS } from '@/lib/qa/types'
 import type { QaScanState } from './qa-types'
@@ -27,11 +28,22 @@ export function frameScale(viewport: QaViewportDef, rowHeightRem: number): numbe
   return (rowHeightRem * 16) / viewport.height
 }
 
+/**
+ * Columns narrower than this use the compact label bar (short code, icon-only Comment,
+ * scan state as a dot). The full bar (name, width, scan text, Comment and Expand) needs
+ * about 23rem, so 26rem leaves room before anything would overlap.
+ */
+const COMPACT_BELOW_REM = 26
+
 /** Short codes for frames too narrow for the full viewport name. */
 const COMPACT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
 
-/** Narrowest a frame's column gets, so the label bar and its controls stay usable. */
-export const MIN_FRAME_REM = 8
+/**
+ * Narrowest a frame's column gets, so the label bar and its controls stay usable.
+ * The compact bar needs room for the checkbox, the short code, the scan dot and two
+ * 2.75rem buttons (Comment and Max): about 8.9rem, so 9.5rem leaves some slack.
+ */
+export const MIN_FRAME_REM = 9.5
 
 /** Width of the whole column (label bar plus frame) for a given row height. */
 export function frameOuterWidthRem(viewport: QaViewportDef, rowHeightRem: number): number {
@@ -51,6 +63,10 @@ export interface ViewportFrameProps {
   frameRef: (el: HTMLIFrameElement | null) => void
   readOnly?: boolean
   onLoad?: () => void
+  /** Comment mode is on in this frame. */
+  commenting?: boolean
+  /** Toggles comment mode for this frame. Omit to hide the control. */
+  onCommentToggle?: () => void
   /** Overrides the column width (mobile: the label bar spans the whole screen width). */
   columnWidthRem?: number
 }
@@ -67,12 +83,14 @@ export function ViewportFrame({
   frameRef,
   readOnly = false,
   onLoad,
+  commenting = false,
+  onCommentToggle,
   columnWidthRem,
 }: ViewportFrameProps) {
   const scale = frameScale(viewport, rowHeightRem)
   const boxWidthRem = (viewport.width * scale) / 16
   const outerWidthRem = columnWidthRem ?? frameOuterWidthRem(viewport, rowHeightRem)
-  const compact = outerWidthRem < 16
+  const compact = outerWidthRem < COMPACT_BELOW_REM
   const label = viewport.label
   // In the single-frame layout the Expand button leads the bar, away from the floating chat button.
   const expandFirst = columnWidthRem !== undefined
@@ -90,6 +108,30 @@ export function ViewportFrame({
     </button>
   )
 
+  const commentButton = onCommentToggle ? (
+    <button
+      type="button"
+      onClick={onCommentToggle}
+      disabled={readOnly}
+      aria-pressed={commenting}
+      aria-label={`Comment on ${label}`}
+      title={readOnly ? 'This round is closed' : `Comment on ${label}`}
+      className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)] disabled:cursor-not-allowed disabled:opacity-60"
+      style={{
+        gap: '0.25rem',
+        padding: compact ? 0 : '0 0.5rem',
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        background: commenting ? 'var(--color-brand-50)' : 'var(--color-bg)',
+        borderColor: commenting ? 'var(--color-brand)' : undefined,
+        color: commenting ? 'var(--color-brand-dark)' : undefined,
+      }}
+    >
+      <MessageSquarePlus className="size-4 shrink-0" aria-hidden="true" />
+      {compact ? null : <span>Comment</span>}
+    </button>
+  ) : null
+
   return (
     <div
       data-viewport={viewport.key as QaViewportKey}
@@ -98,7 +140,7 @@ export function ViewportFrame({
     >
       <div
         className={`flex min-w-0 flex-nowrap items-center ${expandFirst ? 'justify-start' : 'justify-between'}`}
-        style={{ gap: expandFirst ? '0.5rem' : '0.25rem', height: '2.75rem' }}
+        style={{ gap: expandFirst ? '0.5rem' : compact ? '0.125rem' : '0.25rem', height: '2.75rem' }}
       >
         {expandFirst ? expandButton : null}
         <label
@@ -128,7 +170,7 @@ export function ViewportFrame({
             </span>
           )}
         </label>
-        <div className="flex shrink-0 items-center" style={{ gap: '0.5rem' }}>
+        <div className="flex shrink-0 items-center" style={{ gap: compact ? '0.125rem' : '0.5rem' }}>
           <span className="flex items-center text-[var(--color-text-muted)]" style={{ gap: '0.25rem', fontSize: '0.75rem' }} title={SCAN_LABEL[scanState]}>
             <span
               aria-hidden="true"
@@ -137,12 +179,13 @@ export function ViewportFrame({
             />
             {compact ? <span className="sr-only">{SCAN_LABEL[scanState]}</span> : SCAN_LABEL[scanState]}
           </span>
+          {commentButton}
           {expandFirst ? null : expandButton}
         </div>
       </div>
       <div
         className="relative mx-auto overflow-hidden rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)]"
-        style={{ width: `${boxWidthRem}rem`, height: `${rowHeightRem}rem` }}
+        style={{ width: `${boxWidthRem}rem`, height: `${rowHeightRem}rem`, borderColor: commenting ? 'var(--color-brand)' : undefined }}
       >
         <iframe
           ref={frameRef}

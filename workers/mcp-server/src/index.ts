@@ -1707,9 +1707,10 @@ export const TOOLS: ToolDef[] = [
     live_url: prop('string', 'Live site URL, public https. Only the origin is kept.'),
     notes: prop('string', 'Free-text notes about the site'),
   }, ['org_id', 'name']),
-  tool('import_qa_sitemap', 'Read the sitemap.xml of a QA site on its staging or live URL and add its pages to the site page list.', {
+  tool('import_qa_sitemap', 'Read the sitemap.xml of a QA site on its staging or live URL and add its pages to the site page list. Pass sitemap_url to read another sitemap instead, such as the live domain\'s sitemap when the staging site has none; its paths are applied to this site.', {
     site_id: prop('string', 'QA site ID'),
     target: prop('string', 'Which URL to read the sitemap from', { enum: ['staging', 'live'] }),
+    sitemap_url: prop('string', 'Optional absolute https URL of the sitemap to read instead of the target site sitemap.xml, for example the live domain sitemap when staging has none'),
   }, ['site_id', 'target']),
   tool('list_qa_rounds', 'List the QA rounds for one site, newest first, with tick and pass, fail and untested counts.', {
     site_id: prop('string', 'QA site ID'),
@@ -1782,6 +1783,37 @@ export const TOOLS: ToolDef[] = [
     round_id: prop('string', 'QA round ID'),
     urls: prop('array', 'Old URLs or paths to map, 1 to 150 of them'),
   }, ['round_id', 'urls']),
+  tool('add_qa_pages', 'Add many page paths to a QA site at once, up to 500 per call. The assistant can pass the page list it read from the client\'s Webflow site: the static page slugs plus the CMS item slugs under their collection path (for example /blog/my-post). Paths already on the site are skipped and removed ones are restored.', {
+    site_id: prop('string', 'QA site ID'),
+    paths: { type: 'array', items: { type: 'string' }, description: 'Page paths such as /about or /blog/my-post, 1 to 500 of them. Full URLs are reduced to their paths.' },
+  }, ['site_id', 'paths']),
+  tool('crawl_qa_site', 'Find the pages of a QA site by following links from its homepage on the staging or live URL. Only pages on the same site are followed, up to 150 pages per call (default 100). Found pages are added to the site page list.', {
+    site_id: prop('string', 'QA site ID'),
+    target: prop('string', 'Which URL to crawl from', { enum: ['staging', 'live'] }),
+    max_pages: prop('number', 'Most pages to find, 1 to 150 (default 100)'),
+  }, ['site_id', 'target']),
+  tool('list_qa_comments', 'List the element comments on one page of a QA round, oldest first, with their viewport, element, status and linked request.', {
+    round_page_id: prop('string', 'QA round page ID'),
+  }, ['round_page_id']),
+  tool('add_qa_comment', 'Add an element comment to one page of a QA round, pinned to a CSS selector on one viewport. Refused when the round is closed.', {
+    round_page_id: prop('string', 'QA round page ID'),
+    viewport: prop('string', 'Viewport the comment is pinned on', { enum: ['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'] }),
+    selector: prop('string', 'CSS selector of the element the comment is about, 1 to 1000 characters'),
+    body: prop('string', 'Comment text, 1 to 4000 characters after trimming'),
+    ox: prop('number', 'Horizontal pin position inside the element, 0 (left edge) to 1 (right edge). Default 0.5.'),
+    oy: prop('number', 'Vertical pin position inside the element, 0 (top edge) to 1 (bottom edge). Default 0.5.'),
+    element_tag: prop('string', 'Tag name of the element, such as h1 or a (optional)'),
+    element_text: prop('string', 'Short text snippet of the element (optional)'),
+  }, ['round_page_id', 'viewport', 'selector', 'body']),
+  tool('update_qa_comment', 'Edit a QA element comment: change its text, mark it resolved or open, or link it to a request. Send only the fields to change. Refused when the round is closed.', {
+    comment_id: prop('string', 'QA comment ID'),
+    body: prop('string', 'New comment text'),
+    status: prop('string', 'Comment status', { enum: ['open', 'resolved'] }),
+    request_id: prop('string', 'Request ID to link the comment to'),
+  }, ['comment_id']),
+  tool('delete_qa_comment', 'Delete a QA element comment permanently. Confirm with the user before calling. Refused when the round is closed.', {
+    comment_id: prop('string', 'QA comment ID'),
+  }, ['comment_id']),
 
   // ── Messaging ─────────────────────────────────────────────────────────
   // The inbox is ONE surface over TWO stores: an org channel (the standing

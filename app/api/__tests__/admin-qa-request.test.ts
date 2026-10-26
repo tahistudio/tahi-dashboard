@@ -33,16 +33,20 @@ updateSet.mockImplementation(() => ({ where: updateWhere }))
 // .orderBy(...) (round pages). Rows are set per test.
 let orgRows: { name: string }[] = []
 let pageRows: unknown[] = []
+// Rows of the comments join ({ comment }), also set per test.
+let commentRows: { comment: unknown }[] = []
 
 vi.mock('@/lib/db', () => ({
   db: vi.fn(async () => ({
     update: vi.fn(() => ({ set: updateSet })),
-    select: vi.fn(() => {
+    select: vi.fn((cols?: Record<string, unknown>) => {
+      const isCommentJoin = cols !== undefined && 'comment' in cols
       const chain: Record<string, unknown> = {}
       chain.from = vi.fn(() => chain)
+      chain.innerJoin = vi.fn(() => chain)
       chain.where = vi.fn(() => chain)
       chain.limit = vi.fn(async () => orgRows)
-      chain.orderBy = vi.fn(async () => pageRows)
+      chain.orderBy = vi.fn(async () => (isCommentJoin ? commentRows : pageRows))
       return chain
     }),
   })),
@@ -52,6 +56,7 @@ vi.mock('@/db/d1', () => ({
   schema: {
     qaRoundPages: { id: 'id', roundId: 'round_id', sortOrder: 'sort_order', requestIds: 'request_ids' },
     organisations: { id: 'id', name: 'name' },
+    qaComments: { id: 'id', roundPageId: 'round_page_id', createdAt: 'created_at' },
   },
 }))
 
@@ -243,6 +248,8 @@ interface ReportBody {
   siteChecks: unknown
   redirectMap: unknown
   totals: Record<string, number>
+  comments: { roundPageId: string; path: string | null; n: number; body: string; status: string }[]
+  commentCounts: { open: number; resolved: number }
   pages: { ticks: Record<string, boolean>; counts: Record<string, number> | null; note: string | null; requestIds: string[] }[]
 }
 
@@ -258,6 +265,7 @@ describe('GET /api/admin/qa/rounds/[id]/report', () => {
       site: { ...SITE },
     } as never)
     orgRows = [{ name: 'Acme Ltd' }]
+    commentRows = []
     pageRows = [
       {
         id: 'rp_1', path: '/', status: 'pass', note: null, requestIds: null,
@@ -335,5 +343,26 @@ describe('GET /api/admin/qa/rounds/[id]/report', () => {
     expect(body.pages[1].note).toBe('Hero overflows')
     expect(body.pages[2].counts).toBeNull()
     expect(body.pages[2].requestIds).toEqual([])
+    expect(body.comments).toEqual([])
+    expect(body.commentCounts).toEqual({ open: 0, resolved: 0 })
+  })
+
+  it('returns comments open before resolved per page, with pin numbers and counts', async () => {
+    const base = {
+      viewport: 'desktop', selector: 'h1', ox: 0.5, oy: 0.5, elementTag: 'h1', elementText: 'Hi',
+      authorName: 'Liam', updatedAt: '', resolvedAt: null,
+    }
+    // Pin numbers follow created_at per page: c_a is pin 1 on rp_2 (resolved), c_b is pin 2 (open).
+    commentRows = [
+      { comment: { ...base, id: 'c_a', roundPageId: 'rp_2', body: 'Old issue', status: 'resolved', createdAt: '2026-10-20T01:00:00.000Z' } },
+      { comment: { ...base, id: 'c_b', roundPageId: 'rp_2', body: 'New issue', status: 'open', createdAt: '2026-10-20T02:00:00.000Z' } },
+    ]
+    const res = await GET(getRequest(), reportParams())
+    const body = (await res.json()) as ReportBody
+    expect(body.commentCounts).toEqual({ open: 1, resolved: 1 })
+    expect(body.comments.map(c => [c.body, c.status, c.n, c.path])).toEqual([
+      ['New issue', 'open', 2, '/about'],
+      ['Old issue', 'resolved', 1, '/about'],
+    ])
   })
 })

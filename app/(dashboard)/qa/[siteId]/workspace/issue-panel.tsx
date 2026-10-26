@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
@@ -12,8 +12,10 @@ import type { QaRoundPageDetail } from './qa-types'
 import type { QaPagePatch } from './use-round'
 import { CreateRequestDialog, type CreateRequestInput } from './create-request-dialog'
 import { PerformancePanel, SeoSummary } from './issue-panel-detail'
+import { CommentsTab, commentsTabLabel } from './comments-tab'
+import { commentRequestPrefill, type NumberedComment } from './comments-helpers'
 
-export type IssuePanelTab = 'a11y' | 'links' | 'seo' | 'launch' | 'perf' | 'notes'
+export type IssuePanelTab = 'a11y' | 'links' | 'seo' | 'launch' | 'perf' | 'comments' | 'notes'
 
 const TABS: { value: IssuePanelTab; label: string; category?: QaIssueCategory }[] = [
   { value: 'a11y', label: 'Accessibility', category: 'a11y' },
@@ -21,6 +23,7 @@ const TABS: { value: IssuePanelTab; label: string; category?: QaIssueCategory }[
   { value: 'seo', label: 'SEO', category: 'seo' },
   { value: 'launch', label: 'Launch', category: 'launch' },
   { value: 'perf', label: 'Performance', category: 'perf' },
+  { value: 'comments', label: 'Comments' },
   { value: 'notes', label: 'Notes' },
 ]
 
@@ -51,6 +54,21 @@ function parsePagespeed(raw: string | null): { mobile?: PsiSummary; desktop?: Ps
   }
 }
 
+/** Everything the Comments tab needs. The workspace owns the data because the pins live in the frames. */
+export interface IssuePanelComments {
+  items: NumberedComment[]
+  loading: boolean
+  error: string | null
+  selectedId: string | null
+  onSelect: (id: string) => void
+  onShow: (comment: NumberedComment) => void
+  onResolve: (id: string, resolved: boolean) => void | Promise<void>
+  onEdit: (id: string, body: string) => void | Promise<void>
+  onDelete: (id: string) => void | Promise<void>
+  /** Creates the request and links it to the comment. Resolves with the request id. */
+  onCreateRequest: (comment: NumberedComment, input: CreateRequestInput) => Promise<string>
+}
+
 export interface IssuePanelProps {
   detail: QaRoundPageDetail | null
   loading: boolean
@@ -64,11 +82,29 @@ export interface IssuePanelProps {
   onCreateRequest: (issue: QaIssue, input: CreateRequestInput) => Promise<string>
   onPatch: (patch: QaPagePatch) => void
   onRunPageSpeed: (strategy: 'mobile' | 'desktop') => Promise<void>
+  comments: IssuePanelComments
 }
 
 export function IssuePanel(props: IssuePanelProps) {
   const { detail, loading, error, tab, onTabChange, readOnly } = props
   const [requestFor, setRequestFor] = useState<QaIssue | null>(null)
+  const [requestForComment, setRequestForComment] = useState<NumberedComment | null>(null)
+  const { comments } = props
+  const tabsRef = useRef<HTMLDivElement>(null)
+
+  // The tab row scrolls sideways in a narrow panel (the wide drawer); keep the active tab on screen.
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      ?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' })
+  }, [tab])
+
+  const commentPrefill = useMemo(
+    () => (requestForComment
+      ? commentRequestPrefill(requestForComment, viewportLabel(requestForComment.viewport) ?? requestForComment.viewport, props.pagePath)
+      : null),
+    [requestForComment, props.pagePath],
+  )
 
   if (error) {
     return <PanelMessage tone="danger" text={`Could not load the issues. ${error}`} />
@@ -87,7 +123,7 @@ export function IssuePanel(props: IssuePanelProps) {
   return (
     <div className="flex min-h-0 flex-col" style={{ gap: '0.75rem' }}>
       {/* min-w-max keeps every tab on one line; the wrapper scrolls sideways instead of the labels colliding. */}
-      <div className="w-full min-w-0 overflow-x-auto">
+      <div ref={tabsRef} className="w-full min-w-0 overflow-x-auto">
         <SegmentedControl<IssuePanelTab>
           value={tab}
           onChange={onTabChange}
@@ -97,7 +133,9 @@ export function IssuePanel(props: IssuePanelProps) {
           className="min-w-max"
           options={TABS.map(t => ({
             value: t.value,
-            label: t.category ? `${t.label} (${detail.issues.filter(i => i.category === t.category).length})` : t.label,
+            label: t.value === 'comments'
+              ? commentsTabLabel(comments.items)
+              : t.category ? `${t.label} (${detail.issues.filter(i => i.category === t.category).length})` : t.label,
           }))}
         />
       </div>
@@ -109,6 +147,21 @@ export function IssuePanel(props: IssuePanelProps) {
             note={detail.roundPage.note}
             readOnly={readOnly}
             onPatch={props.onPatch}
+          />
+        ) : null}
+        {tab === 'comments' ? (
+          <CommentsTab
+            comments={comments.items}
+            loading={comments.loading}
+            error={comments.error}
+            readOnly={readOnly}
+            selectedId={comments.selectedId}
+            onSelect={comments.onSelect}
+            onShow={comments.onShow}
+            onResolve={comments.onResolve}
+            onEdit={comments.onEdit}
+            onDelete={comments.onDelete}
+            onCreateRequest={setRequestForComment}
           />
         ) : null}
         {tab === 'perf' ? (
@@ -151,12 +204,17 @@ export function IssuePanel(props: IssuePanelProps) {
         ) : null}
       </div>
       <CreateRequestDialog
-        open={requestFor !== null}
-        onClose={() => setRequestFor(null)}
+        open={requestFor !== null || requestForComment !== null}
+        onClose={() => {
+          setRequestFor(null)
+          setRequestForComment(null)
+        }}
         issue={requestFor}
+        prefill={commentPrefill}
         pagePath={props.pagePath}
-        viewport={requestFor?.viewport}
+        viewport={requestFor?.viewport ?? requestForComment?.viewport}
         onCreate={async input => {
+          if (requestForComment) return comments.onCreateRequest(requestForComment, input)
           if (!requestFor) throw new Error('No issue selected.')
           return props.onCreateRequest(requestFor, input)
         }}

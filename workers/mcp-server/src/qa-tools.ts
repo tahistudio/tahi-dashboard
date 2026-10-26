@@ -58,6 +58,18 @@ function viewportTicks(value: unknown): Record<string, boolean> | undefined {
   return Object.keys(out).length ? out : undefined
 }
 
+/** A required non-empty array of non-empty strings, named in the error the way required() names its key. */
+function requiredStringList(args: Record<string, unknown>, key: string): string[] {
+  const value: unknown = args[key]
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${key} is required`)
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || item === '') throw new Error(`${key} must contain only non-empty strings`)
+    out.push(item)
+  }
+  return out
+}
+
 /**
  * The dashboard call one QA tool maps to, or null when the name belongs to
  * another block of the switch.
@@ -88,11 +100,10 @@ export function qaToolCall(
     case 'import_qa_sitemap': {
       const siteId = required(args, 'site_id')
       assertSafeIdArgs({ site_id: siteId })
-      return {
-        path: `/api/admin/qa/sites/${siteId}/import-sitemap`,
-        method: 'POST',
-        body: { target: required(args, 'target') },
-      }
+      const body: Record<string, unknown> = { target: required(args, 'target') }
+      const sitemapUrl = str(args, 'sitemap_url')
+      if (sitemapUrl) body.sitemapUrl = sitemapUrl
+      return { path: `/api/admin/qa/sites/${siteId}/import-sitemap`, method: 'POST', body }
     }
     case 'list_qa_rounds': {
       const siteId = required(args, 'site_id')
@@ -221,6 +232,61 @@ export function qaToolCall(
       const urls = Array.isArray(args.urls) ? args.urls.filter((u): u is string => typeof u === 'string' && u !== '') : []
       if (urls.length === 0) throw new Error('urls is required')
       return { path: `/api/admin/qa/rounds/${roundId}/redirect-map`, method: 'POST', body: { urls } }
+    }
+    case 'add_qa_pages': {
+      const siteId = required(args, 'site_id')
+      assertSafeIdArgs({ site_id: siteId })
+      return { path: `/api/admin/qa/sites/${siteId}/pages`, method: 'POST', body: { paths: requiredStringList(args, 'paths') } }
+    }
+    case 'crawl_qa_site': {
+      const siteId = required(args, 'site_id')
+      assertSafeIdArgs({ site_id: siteId })
+      const body: Record<string, unknown> = { target: required(args, 'target') }
+      if (typeof args.max_pages === 'number') body.maxPages = args.max_pages
+      return { path: `/api/admin/qa/sites/${siteId}/crawl`, method: 'POST', body }
+    }
+    case 'list_qa_comments': {
+      const roundPageId = required(args, 'round_page_id')
+      assertSafeIdArgs({ round_page_id: roundPageId })
+      return { path: `/api/admin/qa/round-pages/${roundPageId}/comments`, method: 'GET' }
+    }
+    case 'add_qa_comment': {
+      const roundPageId = required(args, 'round_page_id')
+      assertSafeIdArgs({ round_page_id: roundPageId })
+      const viewport = required(args, 'viewport')
+      if (!(VIEWPORT_KEYS as readonly string[]).includes(viewport)) {
+        throw new Error('viewport must be one of xl, desktop, tablet, mobile_l, mobile_p')
+      }
+      const body: Record<string, unknown> = {
+        viewport,
+        selector: required(args, 'selector'),
+        ox: typeof args.ox === 'number' ? args.ox : 0.5,
+        oy: typeof args.oy === 'number' ? args.oy : 0.5,
+        body: required(args, 'body'),
+      }
+      const elementTag = str(args, 'element_tag')
+      const elementText = str(args, 'element_text')
+      if (elementTag) body.elementTag = elementTag
+      if (elementText) body.elementText = elementText
+      return { path: `/api/admin/qa/round-pages/${roundPageId}/comments`, method: 'POST', body }
+    }
+    case 'update_qa_comment': {
+      const commentId = required(args, 'comment_id')
+      const requestId = str(args, 'request_id')
+      assertSafeIdArgs({ comment_id: commentId, request_id: requestId })
+      const body: Record<string, unknown> = {}
+      const text = str(args, 'body')
+      const status = str(args, 'status')
+      if (text) body.body = text
+      if (status) body.status = status
+      if (requestId) body.requestId = requestId
+      if (Object.keys(body).length === 0) throw new Error('body, status or request_id is required')
+      return { path: `/api/admin/qa/comments/${commentId}`, method: 'PATCH', body }
+    }
+    case 'delete_qa_comment': {
+      const commentId = required(args, 'comment_id')
+      assertSafeIdArgs({ comment_id: commentId })
+      return { path: `/api/admin/qa/comments/${commentId}`, method: 'DELETE', body: {} }
     }
     default:
       return null

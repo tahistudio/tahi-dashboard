@@ -1421,6 +1421,15 @@ scheduled; each needs a scope before building.
   Follow-ups, not v1: optional script-tag mode for sites the proxy renders
   badly; password-protected Webflow staging; screenshots on created
   requests; scheduled re-scans for retainers; spell check and visual diff.
+- [ ] SQA.1-3 - [BE/FE] Site QA v1.1 (Liam, 2026-10-27: wide mode for "the 57
+  inch dual 4k samsung monitor ... 2/3 of the screen", pages for webflow.io
+  sites with no sitemap "with mcp", and "comments directly onto elements").
+  Plan docs/superpowers/plans/2026-10-27-site-qa-wide-pages-comments.md.
+  Built and committed; local Chromium e2e 4/4 and two Opus reviews. Open
+  before [x]: migration 0116 on production, push, live smoke on Liam's
+  monitor plus 375px and dark. Follow-ups noted by review, not done: pins
+  skip elements hidden when pins arrive (tabs, accordions); the feedback ball
+  covers comment actions at 375px (pre-existing).
 - [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
   build Next 15 since its support window ended (21 Oct 2026); the first
   dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build

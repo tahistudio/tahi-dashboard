@@ -2813,3 +2813,29 @@ html.reduce-motion *::after {
     }
   }
 }
+
+/* Site QA: wide mode owns the window, so the floating feedback ball (z 1399) steps aside. */
+body[data-qa-wide="true"] button[data-feedback-ball="true"] {
+  /* !important: the ball sets display inline. */
+  display: none !important;
+}
+
+/* Site QA: flash the open comment card when a new pick is ignored so the user saves or cancels first. */
+.qa-composer-pulse {
+  outline: 0.125rem solid transparent;
+  outline-offset: 0.125rem;
+  animation: qa-composer-pulse 1.1s ease-in-out 1;
+}
+@keyframes qa-composer-pulse {
+  0%, 100% { outline-color: transparent; }
+  20%, 60% { outline-color: var(--color-brand); }
+  40% { outline-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qa-composer-pulse {
+    animation: qa-composer-hold 1.1s linear 1;
+  }
+  @keyframes qa-composer-hold {
+    0%, 100% { outline-color: var(--color-brand); }
+  }
+}

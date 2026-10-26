@@ -36,6 +36,12 @@ const QA_TOOL_NAMES = [
   'create_qa_request',
   'run_qa_pagespeed',
   'check_qa_redirect_map',
+  'add_qa_pages',
+  'crawl_qa_site',
+  'list_qa_comments',
+  'add_qa_comment',
+  'update_qa_comment',
+  'delete_qa_comment',
 ] as const
 
 function call(name: string, args: Record<string, unknown> = {}) {
@@ -95,6 +101,12 @@ describe('import_qa_sitemap', () => {
     expect(mapped.path).toBe('/api/admin/qa/sites/site_1/import-sitemap')
     expect(mapped.method).toBe('POST')
     expect(mapped.body).toEqual({ target: 'live' })
+  })
+
+  it('passes an optional sitemap_url as sitemapUrl', () => {
+    const mapped = call('import_qa_sitemap', { site_id: 'site_1', target: 'staging', sitemap_url: 'https://acme.test/sitemap.xml' })
+    expect(mapped.body).toEqual({ target: 'staging', sitemapUrl: 'https://acme.test/sitemap.xml' })
+    expect(call('import_qa_sitemap', { site_id: 'site_1', target: 'staging', sitemap_url: '' }).body).toEqual({ target: 'staging' })
   })
 
   it('requires site_id and target', () => {
@@ -316,6 +328,132 @@ describe('URL caps in the tool text', () => {
     expect(links?.description).toContain('unchecked')
     expect(map?.description).toContain('150')
     expect(map?.description).toContain('unchecked')
+  })
+})
+
+describe('add_qa_pages', () => {
+  it('posts the paths in one bulk call', () => {
+    const mapped = call('add_qa_pages', { site_id: 'site_1', paths: ['/about', '/blog/my-post'] })
+    expect(mapped.path).toBe('/api/admin/qa/sites/site_1/pages')
+    expect(mapped.method).toBe('POST')
+    expect(mapped.body).toEqual({ paths: ['/about', '/blog/my-post'] })
+  })
+
+  it('requires a non-empty array of non-empty strings', () => {
+    expect(() => call('add_qa_pages', { paths: ['/a'] })).toThrow('site_id is required')
+    expect(() => call('add_qa_pages', { site_id: 'site_1' })).toThrow('paths is required')
+    expect(() => call('add_qa_pages', { site_id: 'site_1', paths: [] })).toThrow('paths is required')
+    expect(() => call('add_qa_pages', { site_id: 'site_1', paths: '/about' })).toThrow('paths is required')
+    expect(() => call('add_qa_pages', { site_id: 'site_1', paths: ['/a', 3] })).toThrow('paths must contain only non-empty strings')
+    expect(() => call('add_qa_pages', { site_id: 'site_1', paths: ['/a', ''] })).toThrow('paths must contain only non-empty strings')
+  })
+
+  it('describes the Webflow page list use and the 500 cap', () => {
+    const tool = TOOLS.find((t) => t.name === 'add_qa_pages')
+    expect(tool?.description).toContain('many')
+    expect(tool?.description).toContain('500')
+    expect(tool?.description).toContain('Webflow')
+    expect(tool?.description).toContain('/blog/my-post')
+  })
+})
+
+describe('crawl_qa_site', () => {
+  it('posts the target and camel case maxPages', () => {
+    const mapped = call('crawl_qa_site', { site_id: 'site_1', target: 'staging', max_pages: 150 })
+    expect(mapped.path).toBe('/api/admin/qa/sites/site_1/crawl')
+    expect(mapped.method).toBe('POST')
+    expect(mapped.body).toEqual({ target: 'staging', maxPages: 150 })
+  })
+
+  it('omits maxPages when not given', () => {
+    expect(call('crawl_qa_site', { site_id: 'site_1', target: 'live' }).body).toEqual({ target: 'live' })
+  })
+
+  it('requires site_id and target', () => {
+    expect(() => call('crawl_qa_site', { target: 'live' })).toThrow('site_id is required')
+    expect(() => call('crawl_qa_site', { site_id: 'site_1' })).toThrow('target is required')
+  })
+})
+
+describe('element comment tools', () => {
+  it('list_qa_comments gets the comments of one round page', () => {
+    const mapped = call('list_qa_comments', { round_page_id: 'rp_1' })
+    expect(mapped.path).toBe('/api/admin/qa/round-pages/rp_1/comments')
+    expect(mapped.method).toBe('GET')
+    expect(() => call('list_qa_comments', {})).toThrow('round_page_id is required')
+  })
+
+  it('add_qa_comment posts camel case body keys and defaults ox and oy to 0.5', () => {
+    const mapped = call('add_qa_comment', {
+      round_page_id: 'rp_1',
+      viewport: 'mobile_p',
+      selector: '#hero h1',
+      body: 'Heading wraps badly',
+      element_tag: 'h1',
+      element_text: 'Welcome',
+    })
+    expect(mapped.path).toBe('/api/admin/qa/round-pages/rp_1/comments')
+    expect(mapped.method).toBe('POST')
+    expect(mapped.body).toEqual({
+      viewport: 'mobile_p',
+      selector: '#hero h1',
+      ox: 0.5,
+      oy: 0.5,
+      body: 'Heading wraps badly',
+      elementTag: 'h1',
+      elementText: 'Welcome',
+    })
+  })
+
+  it('add_qa_comment passes ox and oy through and omits the optional element fields', () => {
+    const mapped = call('add_qa_comment', { round_page_id: 'rp_1', viewport: 'xl', selector: 'a.cta', body: 'x', ox: 0.25, oy: 0.9 })
+    expect(mapped.body).toEqual({ viewport: 'xl', selector: 'a.cta', ox: 0.25, oy: 0.9, body: 'x' })
+  })
+
+  it('add_qa_comment accepts only the five viewport keys', () => {
+    for (const viewport of ['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p']) {
+      expect(() => call('add_qa_comment', { round_page_id: 'rp_1', viewport, selector: 'a', body: 'x' })).not.toThrow()
+    }
+    expect(() => call('add_qa_comment', { round_page_id: 'rp_1', viewport: 'phone', selector: 'a', body: 'x' })).toThrow(
+      'viewport must be one of',
+    )
+  })
+
+  it('add_qa_comment requires round_page_id, viewport, selector and body', () => {
+    expect(() => call('add_qa_comment', { viewport: 'xl', selector: 'a', body: 'x' })).toThrow('round_page_id is required')
+    expect(() => call('add_qa_comment', { round_page_id: 'rp_1', selector: 'a', body: 'x' })).toThrow('viewport is required')
+    expect(() => call('add_qa_comment', { round_page_id: 'rp_1', viewport: 'xl', body: 'x' })).toThrow('selector is required')
+    expect(() => call('add_qa_comment', { round_page_id: 'rp_1', viewport: 'xl', selector: 'a' })).toThrow('body is required')
+  })
+
+  it('update_qa_comment patches only the given fields', () => {
+    const mapped = call('update_qa_comment', { comment_id: 'qc_1', status: 'resolved', request_id: 'req_1' })
+    expect(mapped.path).toBe('/api/admin/qa/comments/qc_1')
+    expect(mapped.method).toBe('PATCH')
+    expect(mapped.body).toEqual({ status: 'resolved', requestId: 'req_1' })
+    expect(call('update_qa_comment', { comment_id: 'qc_1', body: 'New text' }).body).toEqual({ body: 'New text' })
+  })
+
+  it('update_qa_comment refuses an empty update and requires comment_id', () => {
+    expect(() => call('update_qa_comment', { comment_id: 'qc_1' })).toThrow('body, status or request_id is required')
+    expect(() => call('update_qa_comment', { status: 'open' })).toThrow('comment_id is required')
+  })
+
+  it('delete_qa_comment deletes the comment', () => {
+    const mapped = call('delete_qa_comment', { comment_id: 'qc_1' })
+    expect(mapped.path).toBe('/api/admin/qa/comments/qc_1')
+    expect(mapped.method).toBe('DELETE')
+    expect(() => call('delete_qa_comment', {})).toThrow('comment_id is required')
+  })
+
+  it('delete_qa_comment says to confirm with the user first', () => {
+    const tool = TOOLS.find((t) => t.name === 'delete_qa_comment')
+    expect(tool?.description).toContain('Confirm with the user')
+  })
+
+  it('refuses a comment id that would steer the path', () => {
+    expect(() => call('delete_qa_comment', { comment_id: '../invoices/X' })).toThrow('comment_id is not a valid id')
+    expect(() => call('update_qa_comment', { comment_id: 'qc_1', request_id: 'a/../b' })).toThrow('request_id is not a valid id')
   })
 })
 

@@ -135,6 +135,7 @@ export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
   'get_qa_round', 'update_qa_round_page', 'check_qa_round_links', 'run_qa_site_checks', 'get_qa_round_report',
   'update_qa_site', 'archive_qa_site', 'add_qa_page', 'remove_qa_page', 'update_qa_round',
   'add_qa_round_samples', 'get_qa_round_page', 'create_qa_request', 'run_qa_pagespeed', 'check_qa_redirect_map',
+  'add_qa_pages', 'crawl_qa_site', 'list_qa_comments', 'add_qa_comment', 'update_qa_comment', 'delete_qa_comment',
 ])
 
 const INTERNAL_WHEN_FLAGGED: ReadonlySet<string> = new Set(['post_request_message', 'post_message', 'send_message'])

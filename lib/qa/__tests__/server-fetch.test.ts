@@ -5,7 +5,7 @@ import type { FetchLike } from '@/lib/qa/link-check'
 describe('fetchText', () => {
   it('returns the body of a 200', async () => {
     const f: FetchLike = async () => new Response('<urlset/>', { status: 200 })
-    expect(await fetchText('https://a.com/sitemap.xml', f)).toEqual({ status: 200, text: '<urlset/>', truncated: false })
+    expect(await fetchText('https://a.com/sitemap.xml', f)).toEqual({ status: 200, text: '<urlset/>', truncated: false, finalUrl: 'https://a.com/sitemap.xml' })
   })
   it('returns null on a non-2xx answer', async () => {
     const f: FetchLike = async () => new Response('no', { status: 500 })
@@ -36,6 +36,31 @@ describe('fetchText', () => {
     const f = vi.fn<FetchLike>(async () => new Response(null, { status: 302, headers: { location: 'https://a.com/again' } }))
     expect(await fetchText('https://a.com/start', f)).toBeNull()
     expect(f).toHaveBeenCalledTimes(6)
+  })
+  it('reports the final URL after redirects and counts every hop', async () => {
+    const f: FetchLike = async url => url === 'https://a.com/old'
+      ? new Response(null, { status: 301, headers: { location: '/new' } })
+      : new Response('ok', { status: 200 })
+    let hops = 0
+    const out = await fetchText('https://a.com/old', f, { onHop: () => { hops++ } })
+    expect(out?.finalUrl).toBe('https://a.com/new')
+    expect(hops).toBe(2)
+  })
+  it('with sameOrigin, does not fetch a redirect that leaves the origin', async () => {
+    const fetched: string[] = []
+    const f: FetchLike = async url => {
+      fetched.push(url)
+      return new Response(null, { status: 302, headers: { location: 'https://www.a.com/' } })
+    }
+    let hops = 0
+    expect(await fetchText('https://a.com/', f, { sameOrigin: 'https://a.com', onHop: () => { hops++ } })).toBeNull()
+    expect(fetched).toEqual(['https://a.com/'])
+    expect(hops).toBe(1)
+  })
+  it('with sameOrigin, refuses a start URL on another origin without fetching', async () => {
+    const f = vi.fn<FetchLike>(async () => new Response('x', { status: 200 }))
+    expect(await fetchText('https://b.com/', f, { sameOrigin: 'https://a.com' })).toBeNull()
+    expect(f).not.toHaveBeenCalled()
   })
   it('caps the body at 5 MB and reports truncation', async () => {
     const chunk = new Uint8Array(1024 * 1024).fill(97)

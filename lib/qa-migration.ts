@@ -14,3 +14,9 @@ export const SITE_QA_MIGRATION = [
   `CREATE TABLE IF NOT EXISTS qa_link_results (id text PRIMARY KEY NOT NULL, round_id text NOT NULL, url text NOT NULL, final_url text, status integer, hops text, broken integer NOT NULL DEFAULT 0, redirect_chain integer NOT NULL DEFAULT 0, staging_on_live integer NOT NULL DEFAULT 0, error text, checked_at text NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_link_results_round_url ON qa_link_results(round_id, url)`,
 ] as const
+
+/** Element comments (SQA.2) migration, mirrored in drizzle/migrations/0116_qa_comments.sql. */
+export const QA_COMMENTS_MIGRATION = [
+  `CREATE TABLE IF NOT EXISTS qa_comments (id text PRIMARY KEY NOT NULL, round_page_id text NOT NULL, viewport text NOT NULL, selector text NOT NULL, ox real NOT NULL DEFAULT 0.5, oy real NOT NULL DEFAULT 0.5, element_tag text, element_text text, body text NOT NULL, status text NOT NULL DEFAULT 'open', request_id text, author_id text, author_name text, created_at text NOT NULL, updated_at text NOT NULL, resolved_at text)`,
+  `CREATE INDEX IF NOT EXISTS idx_qa_comments_round_page ON qa_comments(round_page_id)`,
+] as const
