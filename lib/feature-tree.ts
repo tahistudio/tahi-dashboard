@@ -89,6 +89,7 @@ export const FEATURE_TREE: ReadonlyArray<FeatureNode> = [
   { key: 'clients', label: 'Clients', description: 'Client / organisation management.', parent: null, appliesTo: ['team'], route: '/clients' },
   { key: 'clients.billing_card', label: 'Client billing card', description: 'MRR / billing details on the client detail.', parent: 'clients', appliesTo: ['team'] },
   { key: 'clients.engagement_health', label: 'Client engagement health card', description: 'Live delivery rollup on the client.', parent: 'clients', appliesTo: ['team'] },
+  { key: 'qa_tester', label: 'Site QA', description: 'QA client websites: page checklist, viewports, link, accessibility and SEO checks.', parent: null, appliesTo: ['team'], route: '/qa' },
   { key: 'content_studio', label: 'Content studio', description: 'Blog / content engine.', parent: null, appliesTo: ['team'], route: '/content-studio' },
   { key: 'sitemap', label: 'Sitemap', description: 'Sitemap planning tool.', parent: null, appliesTo: ['team'], route: '/sitemap' },
   { key: 'social', label: 'Social', description: 'Social scheduling (Buffer).', parent: null, appliesTo: ['team'], route: '/social' },

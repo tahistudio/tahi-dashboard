@@ -23,7 +23,7 @@ const TEAM_GROUPS: ReadonlyArray<{ label: string; keys: string[] }> = [
     label: 'Sales',
     keys: ['leads', 'calls', 'deals', 'proposals', 'schedules', 'contracts', 'calculator', 'sales_analytics'],
   },
-  { label: 'Clients', keys: ['clients'] },
+  { label: 'Clients', keys: ['clients', 'qa_tester'] },
   { label: 'Marketing', keys: ['content_studio', 'sitemap', 'social', 'reviews', 'announcements'] },
   { label: 'Finance', keys: ['invoices', 'billing', 'time', 'financial_reports', 'reports'] },
   { label: 'Operations', keys: ['capacity', 'team'] },

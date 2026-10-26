@@ -4312,3 +4312,113 @@ export const slackDigests = sqliteTable('slack_digests', {
   uniqueIndex('idx_slack_digests_week_user').on(table.weekKey, table.slackUserId),
 ])
 
+
+// ── Site QA (SQA, migration 0115) ─────────────────────────────────────────
+// Client-website QA: sites per client, pages imported from sitemap.xml, named
+// rounds with five viewport ticks per page, stored scan results and link checks.
+// See docs/superpowers/specs/2026-10-26-site-qa-tester-design.md.
+
+export const qaSites = sqliteTable('qa_sites', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  orgId: text('org_id').notNull(),
+  name: text('name').notNull(),
+  stagingUrl: text('staging_url'),
+  liveUrl: text('live_url'),
+  notes: text('notes'),
+  createdBy: text('created_by'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  archivedAt: text('archived_at'),
+}, (table) => [index('idx_qa_sites_org').on(table.orgId)])
+
+export const qaPages = sqliteTable('qa_pages', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  siteId: text('site_id').notNull(),
+  path: text('path').notNull(),
+  title: text('title'),
+  groupKey: text('group_key'),
+  // 'sitemap' | 'manual'
+  source: text('source').notNull().default('sitemap'),
+  removedAt: text('removed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [uniqueIndex('idx_qa_pages_site_path').on(table.siteId, table.path)])
+
+export const qaRounds = sqliteTable('qa_rounds', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  siteId: text('site_id').notNull(),
+  name: text('name').notNull(),
+  // 'staging' | 'live'
+  target: text('target').notNull(),
+  // 'open' | 'closed'
+  status: text('status').notNull().default('open'),
+  // JSON QaSiteCheck[]
+  siteChecks: text('site_checks'),
+  siteChecksAt: text('site_checks_at'),
+  // JSON QaLinkResult[] for the pasted old-site URLs
+  redirectMap: text('redirect_map'),
+  redirectMapAt: text('redirect_map_at'),
+  createdBy: text('created_by'),
+  createdAt: text('created_at').notNull(),
+  closedAt: text('closed_at'),
+}, (table) => [index('idx_qa_rounds_site').on(table.siteId)])
+
+export const qaRoundPages = sqliteTable('qa_round_pages', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  roundId: text('round_id').notNull(),
+  pageId: text('page_id').notNull(),
+  path: text('path').notNull(),
+  groupKey: text('group_key'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  vpXl: integer('vp_xl').notNull().default(0),
+  vpDesktop: integer('vp_desktop').notNull().default(0),
+  vpTablet: integer('vp_tablet').notNull().default(0),
+  vpMobileL: integer('vp_mobile_l').notNull().default(0),
+  vpMobileP: integer('vp_mobile_p').notNull().default(0),
+  // 'untested' | 'pass' | 'fail'
+  status: text('status').notNull().default('untested'),
+  note: text('note'),
+  // JSON string[] of request ids created from this page's issues
+  requestIds: text('request_ids'),
+  a11yCritical: integer('a11y_critical'),
+  a11ySerious: integer('a11y_serious'),
+  a11yModerate: integer('a11y_moderate'),
+  a11yMinor: integer('a11y_minor'),
+  brokenLinks: integer('broken_links'),
+  seoIssues: integer('seo_issues'),
+  launchIssues: integer('launch_issues'),
+  perfIssues: integer('perf_issues'),
+  scannedAt: text('scanned_at'),
+  // JSON { mobile?: PsiSummary, desktop?: PsiSummary }
+  pagespeed: text('pagespeed'),
+  pagespeedAt: text('pagespeed_at'),
+  updatedBy: text('updated_by'),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_qa_round_pages_round_page').on(table.roundId, table.pageId),
+  index('idx_qa_round_pages_page').on(table.pageId),
+])
+
+export const qaScanResults = sqliteTable('qa_scan_results', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  roundPageId: text('round_page_id').notNull(),
+  // QaViewportKey
+  viewport: text('viewport').notNull(),
+  // JSON QaScanResult
+  result: text('result').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [uniqueIndex('idx_qa_scan_results_page_vp').on(table.roundPageId, table.viewport)])
+
+export const qaLinkResults = sqliteTable('qa_link_results', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  roundId: text('round_id').notNull(),
+  url: text('url').notNull(),
+  finalUrl: text('final_url'),
+  status: integer('status'),
+  hops: text('hops'),
+  broken: integer('broken').notNull().default(0),
+  redirectChain: integer('redirect_chain').notNull().default(0),
+  stagingOnLive: integer('staging_on_live').notNull().default(0),
+  error: text('error'),
+  checkedAt: text('checked_at').notNull(),
+}, (table) => [uniqueIndex('idx_qa_link_results_round_url').on(table.roundId, table.url)])

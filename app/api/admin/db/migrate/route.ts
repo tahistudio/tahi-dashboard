@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm'
 import { requireMigrationAccess } from '@/lib/require-migration-access'
 import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
 import { RECORDER_DEVICES_MIGRATION } from '@/lib/recorder-devices-migration'
+import { SITE_QA_MIGRATION } from '@/lib/qa-migration'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -2475,6 +2476,11 @@ const MIGRATIONS: Migration[] = [
     name: '0114',
     description: 'Apply BEFORE deploying the tray recorder server code.',
     statements: [...RECORDER_DEVICES_MIGRATION],
+  },
+  {
+    name: '0115',
+    description: 'Site QA (SQA): qa_sites, qa_pages, qa_rounds, qa_round_pages, qa_scan_results, qa_link_results. Additive, IF NOT EXISTS. Apply BEFORE deploying the /qa routes.',
+    statements: [...SITE_QA_MIGRATION],
   },
 ]
 
