@@ -125,6 +125,22 @@ export interface QaPickMessage {
   text: string
 }
 
+/**
+ * Synced scrolling. A frame reports only scrolls its user caused, and only while the
+ * dashboard has turned reporting on with qa:scroll-sync. The anchor is the section-like element
+ * under a probe line near the top of the frame, with frac the fraction of that element already
+ * above the line, so frames of different widths land on the same content. ratio is the whole
+ * page fraction, the fallback when the anchor does not resolve.
+ */
+export interface QaScrollAnchor { selector: string; frac: number }
+export interface QaScrollMessage { type: 'qa:scroll'; version: 1; url: string; anchor: QaScrollAnchor | null; ratio: number }
+
+/** Dashboard to frame: scroll to this place. Never reported back as a user scroll. */
+export interface QaScrollToMessage { type: 'qa:scroll-to'; anchor: QaScrollAnchor | null; ratio: number }
+
+/** Dashboard to frame: whether the frame should report user scrolls at all. Off until told otherwise. */
+export interface QaScrollSyncMessage { type: 'qa:scroll-sync'; on: boolean }
+
 /** Frame to dashboard: the user clicked a pin. */
 export interface QaPinClickMessage { type: 'qa:pin-click'; version: 1; id: string }
 

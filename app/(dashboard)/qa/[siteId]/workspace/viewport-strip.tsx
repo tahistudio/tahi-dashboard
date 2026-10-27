@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
-import { Maximize2, Minimize2 } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { Link2, Maximize2, Minimize2, Unlink2 } from 'lucide-react'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
-import { QA_VIEWPORTS, type QaScanResult, type QaViewportKey } from '@/lib/qa/types'
+import { QA_VIEWPORTS, type QaScanResult, type QaScrollMessage, type QaScrollSyncMessage, type QaScrollToMessage, type QaViewportKey } from '@/lib/qa/types'
 import { ViewportFrame, frameOuterWidthRem, type QaViewportDef } from './viewport-frame'
 import { comparablePath } from './comparable-path'
+import { createRelayQueue, parseScrollMessage, relayTargets, scrollToFor, syncActive, type RelayQueue } from './scroll-helpers'
+import { viewportForSource } from './comments-helpers'
 import type { QaScanState, QaTickMap } from './qa-types'
 
 const ROW_REM = 28
@@ -22,6 +24,9 @@ const FRAME_LABEL_BAR_REM = 3
 /** Bottom padding of the wide workspace, kept clear under the frames. */
 const WIDE_BOTTOM_PAD_REM = 1
 const ZOOM_STORAGE_KEY = 'tahi-qa-zoom'
+const SYNC_STORAGE_KEY = 'tahi-qa-sync-scroll'
+/** The sync state is sent again this long after a frame loads, in case the scanner attached late. */
+const SYNC_RESEND_MS = 500
 
 /** Stored choice. 'fit' is the stored value for what the UI calls "Fit width". */
 export type QaZoom = 'fit' | 'actual' | 'medium' | 'large'
@@ -171,6 +176,15 @@ export function ViewportStrip({
   pathRef.current = path
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
+  // Synced scrolling: on by default, restored after mount like the other prefs.
+  const [syncOn, setSyncOnState] = useState(true)
+  const syncIsActive = syncActive(syncOn, isMobile, expandedKey)
+  const syncActiveRef = useRef(syncIsActive)
+  syncActiveRef.current = syncIsActive
+  // Frames that have loaded their page. Before that a frame is the dashboard's own blank document.
+  const loadedFrames = useRef(new WeakSet<HTMLIFrameElement>())
+  // One resend timer per viewport, so a frame that reloads often never piles timers up.
+  const syncTimers = useRef<Partial<Record<QaViewportKey, number>>>({})
 
   // Restore the saved zoom after mount so server and client markup match.
   useEffect(() => {
@@ -181,6 +195,24 @@ export function ViewportStrip({
       // Storage can be blocked; the default stands.
     }
   }, [])
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SYNC_STORAGE_KEY)
+      if (saved === 'true' || saved === 'false') setSyncOnState(saved === 'true')
+    } catch {
+      // Storage can be blocked; the default stands.
+    }
+  }, [])
+
+  function setSyncOn(next: boolean) {
+    setSyncOnState(next)
+    try {
+      window.localStorage.setItem(SYNC_STORAGE_KEY, String(next))
+    } catch {
+      // Not persisted; the choice still applies for this visit.
+    }
+  }
 
   function setZoom(next: QaZoom) {
     setZoomState(next)
@@ -233,6 +265,62 @@ export function ViewportStrip({
     return () => window.removeEventListener('message', onMessage)
   }, [viewOrigin, framesRef])
 
+  const postToFrame = useCallback((key: QaViewportKey, message: QaScrollSyncMessage | QaScrollToMessage) => {
+    if (!viewOrigin) return
+    const el = framesRef.current[key]
+    if (!el || !loadedFrames.current.has(el)) return
+    el.contentWindow?.postMessage(message, viewOrigin)
+  }, [viewOrigin, framesRef])
+
+  // Frames only report scrolls while the dashboard says so, so hidden frames stay silent.
+  const sendSyncState = useCallback((key?: QaViewportKey) => {
+    const keys = key ? [key] : QA_VIEWPORTS.map(v => v.key)
+    for (const k of keys) postToFrame(k, { type: 'qa:scroll-sync', on: syncActiveRef.current })
+  }, [postToFrame])
+
+  useEffect(() => {
+    sendSyncState()
+  }, [sendSyncState, syncIsActive, path, isMobile, expandedKey])
+
+  useEffect(() => {
+    const timers = syncTimers.current
+    return () => {
+      for (const t of Object.values(timers)) window.clearTimeout(t)
+    }
+  }, [])
+
+  // Relay a user scroll in one frame to the others. Same rules as the scan listener: the viewer
+  // origin only, the frame found by its window, and only for the page on screen.
+  useEffect(() => {
+    if (!viewOrigin) return
+    // Trailing coalescing: the newest report per sender is relayed on the next animation frame.
+    const queue: RelayQueue<QaScrollMessage> = createRelayQueue<QaScrollMessage>(
+      (sender, report) => {
+        if (!syncActiveRef.current) return
+        const visible = QA_VIEWPORTS.map(v => v.key).filter(k => framesRef.current[k])
+        const command = scrollToFor(report)
+        for (const target of relayTargets(visible, sender)) postToFrame(target, command)
+      },
+      cb => window.requestAnimationFrame(cb),
+      id => window.cancelAnimationFrame(id),
+    )
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== viewOrigin) return
+      const scroll = parseScrollMessage(event.data)
+      if (!scroll) return
+      if (!syncActiveRef.current) return
+      const sender = viewportForSource(framesRef.current, event.source)
+      if (!sender) return
+      if (comparablePath(scroll.url) !== comparablePath(pathRef.current)) return
+      queue.push(sender, scroll)
+    }
+    window.addEventListener('message', onMessage)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      queue.clear()
+    }
+  }, [viewOrigin, framesRef, postToFrame])
+
   // Escape leaves expanded mode (unless something else already used the key).
   // Claiming the key here stops the workspace's Escape handler from leaving wide mode too.
   useEffect(() => {
@@ -284,7 +372,17 @@ export function ViewportStrip({
       readOnly,
       commenting: commentViewport === v.key,
       onCommentToggle: () => onCommentToggle(v.key),
-      onLoad: () => onFrameLoad?.(v.key),
+      onLoad: () => {
+        const el = framesRef.current[v.key]
+        if (el) {
+          loadedFrames.current.add(el)
+          sendSyncState(v.key)
+          const earlier = syncTimers.current[v.key]
+          if (earlier !== undefined) window.clearTimeout(earlier)
+          syncTimers.current[v.key] = window.setTimeout(() => sendSyncState(v.key), SYNC_RESEND_MS)
+        }
+        onFrameLoad?.(v.key)
+      },
       frameRef: (el: HTMLIFrameElement | null) => {
         framesRef.current[v.key] = el
       },
@@ -350,6 +448,18 @@ export function ViewportStrip({
           size="sm"
           options={zoomOptions}
         />
+        <button
+          type="button"
+          onClick={() => setSyncOn(!syncOn)}
+          aria-pressed={syncOn}
+          title={syncOn ? 'All frames scroll together. Click to scroll each frame on its own.' : 'Frames scroll independently. Click to scroll them together.'}
+          className={`flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border px-3 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)] ${syncOn ? 'border-[var(--color-brand)] bg-[var(--color-brand-50)]' : 'border-[var(--color-border)] bg-[var(--color-bg)]'}`}
+          style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
+        >
+          {syncOn ? <Link2 className="size-4" aria-hidden="true" /> : <Unlink2 className="size-4" aria-hidden="true" />}
+          {/* Constant text so the visible label is the accessible name; the pressed fill and icon show the state. */}
+          Sync scroll
+        </button>
         <button
           type="button"
           onClick={() => onWideChange(!wide)}

@@ -291,3 +291,76 @@ test.describe('Site QA element comments', () => {
   })
 })
 
+
+test.describe('Site QA synced scroll', () => {
+  test('scrolling one frame moves the others, and the toggle frees them', async ({ page }) => {
+    test.setTimeout(300_000)
+    await page.setViewportSize({ width: 4600, height: 1400 })
+    let siteUrl: string | null = null
+    try {
+      siteUrl = await startRound(page, 'sync')
+      // Every visible frame has scanned, so its scanner is attached and has heard the sync state.
+      for (const name of ['Desktop', 'Tablet']) {
+        const bar = page.getByRole('button', { name: new RegExp(`(Expand|Collapse) ${name} preview`) }).locator('..')
+        await expect(bar).toContainText('Scanned', { timeout: 120_000 })
+      }
+      await page.getByRole('button', { name: 'Wide', exact: true }).click()
+      const sync = page.getByRole('button', { name: 'Sync scroll' })
+      await expect(sync).toHaveAttribute('aria-pressed', 'true')
+
+      const scrollY = (title: string) => page.frameLocator(`iframe[title="${title}"]`).locator('html').evaluate(() => window.scrollY)
+      const wheelOver = async (title: string, dy: number) => {
+        const box = await page.getByTitle(title).boundingBox()
+        if (!box) throw new Error(`no box for ${title}`)
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+        await page.mouse.wheel(0, dy)
+      }
+
+      expect(await scrollY('Tablet preview')).toBe(0)
+      await wheelOver('Desktop preview', 700)
+      await expect.poll(() => scrollY('Tablet preview'), { timeout: 2000 }).toBeGreaterThan(0)
+      await expect.poll(() => scrollY('Mobile P preview'), { timeout: 2000 }).toBeGreaterThan(0)
+      // Aligned: the section under each frame's probe line (15% down) has the same index in all five.
+      const sectionIndex = (title: string) => page.frameLocator(`iframe[title="${title}"]`).locator('html').evaluate(() => {
+        const hits = document.elementsFromPoint(window.innerWidth / 2, window.innerHeight * 0.15)
+        for (const el of hits) {
+          let node: Element | null = el
+          let fixed = false
+          while (node && node !== document.body && node !== document.documentElement) {
+            const pos = getComputedStyle(node).position
+            if (pos === 'fixed' || pos === 'sticky') fixed = true
+            node = node.parentElement
+          }
+          if (fixed) continue
+          const section = el.closest('section')
+          return section ? Array.from(document.querySelectorAll('section')).indexOf(section) : -1
+        }
+        return -1
+      })
+      const titles = ['XL preview', 'Desktop preview', 'Tablet preview', 'Mobile L preview', 'Mobile P preview']
+      await expect.poll(async () => {
+        const indexes = await Promise.all(titles.map(sectionIndex))
+        return new Set(indexes).size === 1 && indexes[0] >= 0 ? 'aligned' : indexes.join(',')
+      }, { timeout: 5000 }).toBe('aligned')
+      await shot(page, 'sync-scroll-on')
+
+      // Free scrolling: the other frames stay where they are.
+      await sync.click()
+      await expect(sync).toHaveAttribute('aria-pressed', 'false')
+      const tabletBefore = await scrollY('Tablet preview')
+      await wheelOver('Desktop preview', 700)
+      await page.waitForTimeout(1500)
+      expect(await scrollY('Tablet preview')).toBe(tabletBefore)
+      await shot(page, 'sync-scroll-off')
+
+      // The choice is remembered.
+      expect(await page.evaluate(() => window.localStorage.getItem('tahi-qa-sync-scroll'))).toBe('false')
+    } finally {
+      await page.evaluate(() => {
+        window.localStorage.removeItem('tahi-qa-wide')
+        window.localStorage.removeItem('tahi-qa-sync-scroll')
+      }).catch(() => undefined)
+      if (siteUrl) await archiveSite(page, siteUrl)
+    }
+  })
+})

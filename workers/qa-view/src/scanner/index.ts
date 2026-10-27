@@ -3,6 +3,7 @@ import type { QaA11yViolation, QaPin, QaScanMessage, QaScanResult } from '../../
 import { decodeViewTokenPayload } from '../../../../lib/qa/token'
 import { collectContent, collectLayout, collectLinks, collectPerf, collectSeo } from './collect'
 import { createCommentLayer } from './comments'
+import { createScrollSync, parseScrollTo } from './scroll-sync'
 
 const script = document.currentScript as HTMLScriptElement | null
 const token = script ? new URL(script.src).searchParams.get('t') ?? '' : ''
@@ -15,6 +16,15 @@ function pagePath(): string {
 
 const commentLayer = payload
   ? createCommentLayer({
+      win: window,
+      doc: document,
+      post: msg => window.parent.postMessage(msg, payload.p),
+      pageUrl: () => `${payload.o}${pagePath()}${location.search}`,
+    })
+  : null
+
+const scrollSync = payload
+  ? createScrollSync({
       win: window,
       doc: document,
       post: msg => window.parent.postMessage(msg, payload.p),
@@ -90,6 +100,11 @@ window.addEventListener('message', (e: MessageEvent) => {
   if (data.type === 'qa:comment-mode' && typeof data.on === 'boolean') commentLayer?.setMode(data.on)
   if (data.type === 'qa:pins') commentLayer?.setPins(parsePins(data.pins))
   if (data.type === 'qa:focus-pin' && typeof data.id === 'string') commentLayer?.focusPin(data.id)
+  if (data.type === 'qa:scroll-sync' && typeof data.on === 'boolean') scrollSync?.setReporting(data.on)
+  if (data.type === 'qa:scroll-to') {
+    const target = parseScrollTo(data)
+    if (target) scrollSync?.scrollTo(target)
+  }
 })
 
 window.addEventListener('load', () => { setTimeout(() => { void scan() }, 1500) })
