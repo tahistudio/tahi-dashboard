@@ -1427,3 +1427,57 @@ Revision 4, 2026-10-27, after the third fresh Opus review:
 - Still open before phase 1: the Chrome Local Network Access test from
   portal.tahi.studio (Liam), and re-running the WebKit screencast case on
   webkit-2248 with Playwright 1.58.2.
+
+### Phase 0 re-run on webkit-2248
+
+2026-10-27, Opus. Same harness as the measurements appendix (webflow.com through
+the local qa-view viewer, five live pages, 30 s wheel scroll on the focused
+Desktop 1440 frame, refusing proxy, headless Chromium dashboard stand-in), now
+driven by the repo's Playwright 1.58.2 against webkit-2248 (WebKit 26.0) and
+firefox-1509 (Firefox 146.0.1), both extracted by hand from the official
+archives. Screencast runs use flow control: each page's engine ack is held
+until the dashboard acked that page's previous frame, 30 fps global cap,
+focused page first. Raw output: %TEMP%/qa-engine-spike/matrix3.log and
+results/*-w2248r1.json, *-w2248r2.json, webkit-png-dsf1-f1-w2248.json,
+sc70flow-firefox-dsf1-f1-pw158.json.
+
+| Run (dsf 1) | Focused fps | Others fps | Aggregate fps | Input to visible p50 / p90 / max ms | Dashboard main thread p90 ms | Engine CPU cores | Result |
+|---|---|---|---|---|---|---|---|
+| WebKit screencast, flow, run 1 | 14.75 | 2.56 to 2.66 | 25.2 | 102 / 145 / 425 | 0.8 | 2.6 | PASS |
+| WebKit screencast, flow, run 2 | 14.69 | 2.66 to 2.73 | 25.4 | 105 / 146 / 415 | 0.8 | 2.6 | PASS |
+| WebKit screenshot png (baseline) | 4.33 | 3.06 to 4.42 | 20.6 | 254 / 391 / 728 | 0.8 | 4.1 | FAIL (focused fps, p90) |
+| Firefox screencast, flow | 18.61 | 1.56 to 1.60 | 24.9 | 53 / 97 / 288 | 0.7 | 2.7 | PASS |
+
+Thresholds: focused at least 5 fps, input to visible p90 at most 300 ms, others
+at least 1 fps, dashboard under 8 ms per frame. Every wheel was matched to a
+frame (531, 531, 401 and 530 samples), no dashboard long tasks, wheel events
+trusted on every run, scanner qa:scroll reports 389 to 436 per run. The
+webkit-2248 results match or slightly beat the 2227 runs under Playwright 1.57
+(focused 14.6 to 14.8 fps, p90 152 to 153 ms), and the screenshot path still
+fails, so the phase 0 decisions stand unchanged: WebKit engine GO on screencast
+capture only.
+
+Internal path used on 1.58.2 (the adapter's contract; both engines identical):
+- Server page: `const sp = page._connection.toImpl(page)` (in-process
+  Playwright only; `toImpl` is set by the in-process factory).
+- Start: `await sp.screencast._startScreencast(client, { width, height, quality })`
+  where `client` is any object identity; stop with
+  `await sp.screencast._stopScreencast(client)` (present in the 1.58.2 source,
+  not exercised by the spike, which closed the browser instead).
+- Frames: `sp.on('screencastframe', f => ...)` with `f.buffer` (JPEG),
+  `f.width`, `f.height`, `f.frameSwapWallTime` (the event name is
+  Page.Events.ScreencastFrame).
+- Flow control: replace `sp.screencast.throttleFrameAck` with a function that
+  stores the ack and calls it when the dashboard acks; both
+  ffPage._onScreencastFrame and wkPage._onScreencastFrame call
+  `this._page.screencast.throttleFrameAck(ack)`. The wire calls underneath are
+  WebKit `Screencast.startScreencast` and `Screencast.screencastFrameAck
+  { generation }`, and Juggler `Page.startScreencast` and
+  `Page.screencastFrameAck`.
+- Feature detection for the adapter: `typeof sp?.screencast?._startScreencast
+  === 'function'` and `typeof sp.screencast.throttleFrameAck === 'function'`,
+  plus the exact Playwright version check. 1.57 differs
+  (`sp.delegate.setScreencastOptions`, `sp.throttleScreencastFrameAck`), so the
+  detection is not optional.
+- WebKit at deviceScaleFactor 1 sends frames at the viewport size (1440x900
+  for Desktop); at dsf above 1 it sends device pixel frames (measured on 2227).
