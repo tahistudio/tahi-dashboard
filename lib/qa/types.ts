@@ -16,6 +16,29 @@ export const QA_VIEWPORT_KEYS: readonly QaViewportKey[] = QA_VIEWPORTS.map(v => 
 /** The viewport whose scan supplies the non-layout results (SEO, links, a11y). */
 export const QA_PRIMARY_VIEWPORT: QaViewportKey = 'desktop'
 
+/**
+ * The rendering engines a round can cover. A page always renders with the engine of the browser it
+ * is open in, so every tick, scan and comment is recorded against one of these. Chromium ticks stay
+ * in the qa_round_pages.vp_* columns; the other engines live in qa_browser_ticks.
+ */
+export const QA_BROWSERS = [
+  { key: 'chromium', label: 'Chrome', shortLabel: 'Chr' },
+  { key: 'firefox', label: 'Firefox', shortLabel: 'Fx' },
+  { key: 'webkit', label: 'Safari', shortLabel: 'Saf' },
+] as const
+
+export type QaBrowserKey = (typeof QA_BROWSERS)[number]['key']
+export const QA_BROWSER_KEYS: readonly QaBrowserKey[] = QA_BROWSERS.map(b => b.key)
+export const QA_DEFAULT_BROWSER: QaBrowserKey = 'chromium'
+
+export function isQaBrowserKey(value: unknown): value is QaBrowserKey {
+  return typeof value === 'string' && (QA_BROWSER_KEYS as readonly string[]).includes(value)
+}
+
+export function browserLabel(key: QaBrowserKey): string {
+  return QA_BROWSERS.find(b => b.key === key)?.label ?? key
+}
+
 export type QaTarget = 'staging' | 'live'
 export type QaPageStatus = 'untested' | 'pass' | 'fail'
 
@@ -181,6 +204,9 @@ export interface QaComment {
   id: string
   roundPageId: string
   viewport: QaViewportKey
+  /** the engine the comment was made in */
+  browser: QaBrowserKey
+  browserLabel: string
   selector: string
   ox: number
   oy: number
@@ -235,6 +261,10 @@ export interface QaIssue {
   selector?: string
   viewport?: QaViewportKey
   url?: string
+  /** the first browser that showed this issue; absent when the issue is not tied to a scan */
+  browser?: QaBrowserKey
+  /** every browser that showed the identical issue (see issueDedupeKey in lib/qa/browsers.ts) */
+  browsers?: QaBrowserKey[]
 }
 
 export interface QaLinkResult {

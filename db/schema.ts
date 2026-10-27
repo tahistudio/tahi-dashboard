@@ -4361,6 +4361,8 @@ export const qaRounds = sqliteTable('qa_rounds', {
   createdBy: text('created_by'),
   createdAt: text('created_at').notNull(),
   closedAt: text('closed_at'),
+  // JSON QaBrowserKey[] the round covers, never empty (migration 0118)
+  browsers: text('browsers').notNull().default('["chromium"]'),
 }, (table) => [index('idx_qa_rounds_site').on(table.siteId)])
 
 export const qaRoundPages = sqliteTable('qa_round_pages', {
@@ -4404,10 +4406,26 @@ export const qaScanResults = sqliteTable('qa_scan_results', {
   roundPageId: text('round_page_id').notNull(),
   // QaViewportKey
   viewport: text('viewport').notNull(),
+  // QaBrowserKey (migration 0118)
+  browser: text('browser').notNull().default('chromium'),
   // JSON QaScanResult
   result: text('result').notNull(),
   createdAt: text('created_at').notNull(),
-}, (table) => [uniqueIndex('idx_qa_scan_results_page_vp').on(table.roundPageId, table.viewport)])
+}, (table) => [uniqueIndex('idx_qa_scan_results_page_vp_browser').on(table.roundPageId, table.viewport, table.browser)])
+
+// Firefox and WebKit ticks per round page and viewport (migration 0118). Chromium ticks stay in the
+// qa_round_pages.vp_* columns so rounds made before browsers existed read the same.
+export const qaBrowserTicks = sqliteTable('qa_browser_ticks', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  roundPageId: text('round_page_id').notNull(),
+  // QaBrowserKey, 'firefox' | 'webkit'
+  browser: text('browser').notNull(),
+  // QaViewportKey
+  viewport: text('viewport').notNull(),
+  ticked: integer('ticked').notNull().default(0),
+  updatedBy: text('updated_by'),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [uniqueIndex('idx_qa_browser_ticks_page_browser_vp').on(table.roundPageId, table.browser, table.viewport)])
 
 export const qaLinkResults = sqliteTable('qa_link_results', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -4428,6 +4446,8 @@ export const qaComments = sqliteTable('qa_comments', {
   roundPageId: text('round_page_id').notNull(),
   // QaViewportKey
   viewport: text('viewport').notNull(),
+  // QaBrowserKey the comment was made in (migration 0118)
+  browser: text('browser').notNull().default('chromium'),
   selector: text('selector').notNull(),
   // 0..1 inside the element box
   ox: real('ox').notNull().default(0.5),

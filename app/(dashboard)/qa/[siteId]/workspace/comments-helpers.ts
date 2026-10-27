@@ -1,5 +1,6 @@
 import {
   QA_VIEWPORTS,
+  type QaBrowserKey,
   type QaComment,
   type QaCommentModeChangedMessage,
   type QaCommentStatus,
@@ -36,10 +37,18 @@ export function numberComments(comments: QaComment[]): NumberedComment[] {
   return sorted.map((comment, index) => ({ ...comment, n: index + 1 }))
 }
 
-/** Pins to draw in one frame. Only comments on that viewport, in number order. */
-export function pinsFor(comments: NumberedComment[], viewport: QaViewportKey): QaPin[] {
+/** The comments made in one browser. A null browser keeps them all ("All browsers"). */
+export function commentsForBrowser(comments: NumberedComment[], browser: QaBrowserKey | null): NumberedComment[] {
+  return browser === null ? comments : comments.filter(c => c.browser === browser)
+}
+
+/**
+ * Pins to draw in one frame. Only comments on that viewport made in the browser being tested
+ * (every browser when none is given), in number order.
+ */
+export function pinsFor(comments: NumberedComment[], viewport: QaViewportKey, browser?: QaBrowserKey): QaPin[] {
   return comments
-    .filter(c => c.viewport === viewport)
+    .filter(c => c.viewport === viewport && (browser === undefined || c.browser === browser))
     .map(c => ({
       id: c.id,
       n: c.n,

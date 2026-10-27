@@ -92,3 +92,66 @@ describe('POST round-pages/[id]/comments size cap', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('POST round-pages/[id]/comments browser', () => {
+  function roundWith(browsers: string | undefined) {
+    vi.mocked(loadRoundPage).mockResolvedValue({
+      roundPage: { id: 'rp_1', path: '/' },
+      round: { id: 'r_1', status: 'open', browsers },
+      site: { id: 's_1' },
+    } as unknown as Awaited<ReturnType<typeof loadRoundPage>>)
+  }
+
+  it('stores Chrome when no browser is sent, and returns the browser with its label', async () => {
+    const res = await POST(post(JSON.stringify(valid)), params)
+    expect(res.status).toBe(201)
+    expect(inserted[0].browser).toBe('chromium')
+    const json = (await res.json()) as { comment: { browser: string; browserLabel: string } }
+    expect(json.comment).toMatchObject({ browser: 'chromium', browserLabel: 'Chrome' })
+  })
+
+  it('stores the browser the comment was made in when the round covers it', async () => {
+    roundWith('["chromium","firefox"]')
+    const res = await POST(post(JSON.stringify({ ...valid, browser: 'firefox' })), params)
+    expect(res.status).toBe(201)
+    expect(inserted[0].browser).toBe('firefox')
+    const json = (await res.json()) as { comment: { browser: string; browserLabel: string } }
+    expect(json.comment).toMatchObject({ browser: 'firefox', browserLabel: 'Firefox' })
+  })
+
+  it('400s a browser that is not part of the round and stores nothing', async () => {
+    roundWith('["chromium"]')
+    const res = await POST(post(JSON.stringify({ ...valid, browser: 'webkit' })), params)
+    expect(res.status).toBe(400)
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('400s an unknown browser', async () => {
+    const res = await POST(post(JSON.stringify({ ...valid, browser: 'edge' })), params)
+    expect(res.status).toBe(400)
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('409s a closed round before it checks the browser', async () => {
+    vi.mocked(loadRoundPage).mockResolvedValue({
+      roundPage: { id: 'rp_1', path: '/' },
+      round: { id: 'r_1', status: 'closed', browsers: '["chromium"]' },
+      site: { id: 's_1' },
+    } as unknown as Awaited<ReturnType<typeof loadRoundPage>>)
+    const res = await POST(post(JSON.stringify({ ...valid, browser: 'webkit' })), params)
+    expect(res.status).toBe(409)
+  })
+})
+
+describe('POST round-pages/[id]/comments default browser', () => {
+  it('uses the first browser of the round when none is sent', async () => {
+    vi.mocked(loadRoundPage).mockResolvedValue({
+      roundPage: { id: 'rp_1', path: '/' },
+      round: { id: 'r_1', status: 'open', browsers: '["firefox","webkit"]' },
+      site: { id: 's_1' },
+    } as unknown as Awaited<ReturnType<typeof loadRoundPage>>)
+    const res = await POST(post(JSON.stringify(valid)), params)
+    expect(res.status).toBe(201)
+    expect(inserted[0].browser).toBe('firefox')
+  })
+})

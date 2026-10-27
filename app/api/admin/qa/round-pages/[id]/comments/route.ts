@@ -8,6 +8,7 @@ import { requireAdmin } from '@/lib/require-admin'
 import { loadRoundPage } from '@/lib/qa/server'
 import { numberComments, parseCommentInput, rowToComment, toCommentDetail } from '@/lib/qa/comments'
 import { targetOrigin } from '@/lib/qa/server'
+import { parseRoundBrowsers } from '@/lib/qa/browsers'
 import type { QaTarget } from '@/lib/qa/types'
 
 /** A comment body is at most 4000 characters and its context 8 KB, so 64 KB is generous. */
@@ -83,6 +84,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const loaded = await loadRoundPage(database, id)
   if (!loaded) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (loaded.round.status === 'closed') return NextResponse.json({ error: 'This round is closed' }, { status: 409 })
+  // No browser named: the round's first one, so dashboard and MCP callers behave the same.
+  const roundBrowsers = parseRoundBrowsers(loaded.round.browsers)
+  const browser = parsed.value.browser ?? roundBrowsers[0]
+  if (!roundBrowsers.includes(browser)) {
+    return NextResponse.json({ error: 'That browser is not part of this round' }, { status: 400 })
+  }
 
   let authorName: string | null = null
   if (userId) {
@@ -99,6 +106,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     id: crypto.randomUUID(),
     roundPageId: loaded.roundPage.id,
     viewport: parsed.value.viewport,
+    browser,
     selector: parsed.value.selector,
     ox: parsed.value.ox,
     oy: parsed.value.oy,

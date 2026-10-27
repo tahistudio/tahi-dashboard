@@ -10,6 +10,5 @@ CREATE TABLE IF NOT EXISTS qa_round_pages (id text PRIMARY KEY NOT NULL, round_i
 CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_round_pages_round_page ON qa_round_pages(round_id, page_id);
 CREATE INDEX IF NOT EXISTS idx_qa_round_pages_page ON qa_round_pages(page_id);
 CREATE TABLE IF NOT EXISTS qa_scan_results (id text PRIMARY KEY NOT NULL, round_page_id text NOT NULL, viewport text NOT NULL, result text NOT NULL, created_at text NOT NULL);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_scan_results_page_vp ON qa_scan_results(round_page_id, viewport);
 CREATE TABLE IF NOT EXISTS qa_link_results (id text PRIMARY KEY NOT NULL, round_id text NOT NULL, url text NOT NULL, final_url text, status integer, hops text, broken integer NOT NULL DEFAULT 0, redirect_chain integer NOT NULL DEFAULT 0, staging_on_live integer NOT NULL DEFAULT 0, error text, checked_at text NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_link_results_round_url ON qa_link_results(round_id, url);

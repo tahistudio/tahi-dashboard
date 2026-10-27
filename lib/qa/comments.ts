@@ -4,6 +4,7 @@
  */
 import {
   QA_COMMENT_BODY_MAX,
+  QA_DEFAULT_BROWSER,
   QA_CONTEXT_CLASS_MAX,
   QA_CONTEXT_HTML_MAX,
   QA_CONTEXT_MAX_ANCESTORS,
@@ -11,6 +12,9 @@ import {
   QA_CONTEXT_MAX_CLASSES,
   QA_VIEWPORTS,
   QA_VIEWPORT_KEYS,
+  browserLabel,
+  isQaBrowserKey,
+  type QaBrowserKey,
   type QaComment,
   type QaCommentDetail,
   type QaCommentStatus,
@@ -31,6 +35,8 @@ export interface CommentRow {
   id: string
   roundPageId: string
   viewport: string
+  /** QaBrowserKey; an unknown value reads as Chrome */
+  browser: string
   selector: string
   ox: number
   oy: number
@@ -50,6 +56,8 @@ export interface CommentRow {
 
 export interface CommentInput {
   viewport: QaViewportKey
+  /** null when the request names none: the route then uses the round's first browser */
+  browser: QaBrowserKey | null
   selector: string
   ox: number
   oy: number
@@ -89,10 +97,13 @@ function optionalText(v: unknown, max: number): { ok: true; value: string | null
 }
 
 export function rowToComment(row: CommentRow): QaComment {
+  const browser: QaBrowserKey = isQaBrowserKey(row.browser) ? row.browser : QA_DEFAULT_BROWSER
   return {
     id: row.id,
     roundPageId: row.roundPageId,
     viewport: row.viewport as QaViewportKey,
+    browser,
+    browserLabel: browserLabel(browser),
     selector: row.selector,
     ox: row.ox,
     oy: row.oy,
@@ -251,6 +262,12 @@ export function parseCommentInput(body: unknown): ParseResult<CommentInput> {
     return { ok: false, error: 'viewport is not a known QA viewport' }
   }
 
+  let browser: QaBrowserKey | null = null
+  if (body.browser !== undefined && body.browser !== null) {
+    if (!isQaBrowserKey(body.browser)) return { ok: false, error: 'browser must be chromium, firefox or webkit' }
+    browser = body.browser
+  }
+
   if (typeof body.selector !== 'string') return { ok: false, error: 'selector must be text' }
   const selector = body.selector.trim()
   if (selector.length < 1 || selector.length > COMMENT_SELECTOR_MAX) {
@@ -276,6 +293,7 @@ export function parseCommentInput(body: unknown): ParseResult<CommentInput> {
     ok: true,
     value: {
       viewport: body.viewport as QaViewportKey,
+      browser,
       selector,
       ox: clampUnit(body.ox),
       oy: clampUnit(body.oy),

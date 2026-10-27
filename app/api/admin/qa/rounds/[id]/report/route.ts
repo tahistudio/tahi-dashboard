@@ -6,7 +6,8 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { loadRound } from '@/lib/qa/server'
-import { numberComments } from '@/lib/qa/comments'
+import { numberComments, rowToComment } from '@/lib/qa/comments'
+import { countTicks, mergeBrowserTicks, parseRoundBrowsers } from '@/lib/qa/browsers'
 import { QA_VIEWPORT_KEYS, type QaPageCounts, type QaPageStatus, type QaViewportKey } from '@/lib/qa/types'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -68,7 +69,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .where(eq(schema.qaRoundPages.roundId, round.id))
     .orderBy(asc(schema.qaRoundPages.sortOrder))
 
+  const browsers = parseRoundBrowsers(round.browsers)
+  // Firefox and WebKit ticks for the whole round in one query (one bound parameter).
+  const tickRows = browsers.some(b => b !== 'chromium')
+    ? await database
+      .select({
+        roundPageId: schema.qaBrowserTicks.roundPageId,
+        browser: schema.qaBrowserTicks.browser,
+        viewport: schema.qaBrowserTicks.viewport,
+        ticked: schema.qaBrowserTicks.ticked,
+      })
+      .from(schema.qaBrowserTicks)
+      .innerJoin(schema.qaRoundPages, eq(schema.qaBrowserTicks.roundPageId, schema.qaRoundPages.id))
+      .where(eq(schema.qaRoundPages.roundId, round.id))
+    : []
+  const browserTicks = mergeBrowserTicks(rows, tickRows, browsers)
+
   const pages = rows.map(row => {
+    // Chromium ticks, kept as they were before browsers existed; browserTicks has every browser of the round.
     const ticks: Record<QaViewportKey, boolean> = {
       xl: row.vpXl === 1,
       desktop: row.vpDesktop === 1,
@@ -81,6 +99,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       path: row.path,
       status: row.status as QaPageStatus,
       ticks,
+      browserTicks: browserTicks.get(row.id) ?? {},
       counts: countsFor(row),
       note: row.note,
       requestIds: parseRequestIds(row.requestIds),
@@ -89,15 +108,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const sumCounts = (pick: (c: QaPageCounts) => number) =>
     pages.reduce((total, p) => total + (p.counts ? pick(p.counts) : 0), 0)
-  const ticksDone = pages.reduce(
-    (total, p) => total + QA_VIEWPORT_KEYS.filter(key => p.ticks[key]).length,
-    0,
-  )
+  const ticksDone = pages.reduce((total, p) => total + countTicks(p.browserTicks, browsers), 0)
 
   const totals = {
     pages: pages.length,
     ticksDone,
-    ticksTotal: pages.length * QA_VIEWPORT_KEYS.length,
+    ticksTotal: pages.length * QA_VIEWPORT_KEYS.length * browsers.length,
     pass: pages.filter(p => p.status === 'pass').length,
     fail: pages.filter(p => p.status === 'fail').length,
     untested: pages.filter(p => p.status === 'untested').length,
@@ -134,6 +150,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       roundPageId: c.roundPageId,
       path: pagePath.get(c.roundPageId) ?? null,
       viewport: c.viewport,
+      browser: rowToComment(c).browser,
+      browserLabel: rowToComment(c).browserLabel,
       n,
       body: c.body,
       status: c.status,
@@ -156,6 +174,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       name: round.name,
       target: round.target,
       status: round.status,
+      browsers,
       createdAt: round.createdAt,
       closedAt: round.closedAt,
       siteChecksAt: round.siteChecksAt,

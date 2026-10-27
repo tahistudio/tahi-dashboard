@@ -3,9 +3,10 @@
  * stored on qa_round_pages. Pure. Rules are listed in the SQA spec.
  */
 import type {
-  QaContent, QaIssue, QaLinkResult, QaPageCounts, QaPerf, QaScanResult, QaSeo, QaTarget, QaViewportKey, QaA11yViolation,
+  QaBrowserKey, QaContent, QaIssue, QaLinkResult, QaPageCounts, QaPerf, QaScanResult, QaSeo, QaTarget, QaViewportKey, QaA11yViolation,
 } from './types'
-import { QA_PRIMARY_VIEWPORT } from './types'
+import { QA_BROWSER_KEYS, QA_PRIMARY_VIEWPORT } from './types'
+import { mergeBrowserIssues } from './browsers'
 
 const LEGACY_FORMATS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp'])
 const HEAVY_IMAGE_BYTES = 500_000
@@ -120,6 +121,30 @@ export function pageIssues(
     ...launchIssues(scans),
     ...perfDeduped,
   ]
+}
+
+/** Stored scans of one page: browser, then viewport. */
+export type QaScansByBrowser = Partial<Record<QaBrowserKey, Partial<Record<QaViewportKey, QaScanResult>>>>
+
+/**
+ * Issues for a page scanned in one or more browsers. Each browser's scans run
+ * through pageIssues on their own (its desktop scan is that browser's primary),
+ * then identical issues merge across browsers (see mergeBrowserIssues), so the
+ * page counts do not grow with the number of browsers.
+ */
+export function browserPageIssues(
+  scansByBrowser: QaScansByBrowser,
+  target: QaTarget,
+  targetHost: string,
+  linkResults: Map<string, QaLinkResult>,
+): QaIssue[] {
+  const perBrowser: (readonly [QaBrowserKey, QaIssue[]])[] = []
+  for (const browser of QA_BROWSER_KEYS) {
+    const scans = scansByBrowser[browser]
+    if (!scans || Object.keys(scans).length === 0) continue
+    perBrowser.push([browser, pageIssues(scans, target, targetHost, linkResults)])
+  }
+  return mergeBrowserIssues(perBrowser)
 }
 
 export function countIssues(issues: QaIssue[]): QaPageCounts {

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type RefCallback } from 'react'
-import { viewportByWidth, type QaScanResult, type QaViewportKey } from '@/lib/qa/types'
+import { viewportByWidth, type QaBrowserKey, type QaScanResult, type QaViewportKey } from '@/lib/qa/types'
 import type { QaRoundPageRow } from './qa-types'
 import { comparablePath } from './comparable-path'
 
@@ -34,7 +34,9 @@ export interface UseScanAllOptions {
   baseUrl: string | null
   /** Round pages in workspace order. */
   pages: QaRoundPageRow[]
-  submitScan: (roundPageId: string, viewport: QaViewportKey, result: QaScanResult) => Promise<void>
+  submitScan: (roundPageId: string, viewport: QaViewportKey, result: QaScanResult, browser: QaBrowserKey) => Promise<void>
+  /** The browser the hidden frames render with, so the scans are stored against it. */
+  browser: QaBrowserKey
   onError: (message: string) => void
 }
 
@@ -57,7 +59,7 @@ export interface UseScanAllState {
  * scan also runs the link check inside submitScan. Cancel stops after the current
  * page. The tab must stay open while it runs (beforeunload warns).
  */
-export function useScanAll({ baseUrl, pages, submitScan, onError }: UseScanAllOptions): UseScanAllState {
+export function useScanAll({ baseUrl, pages, submitScan, browser, onError }: UseScanAllOptions): UseScanAllState {
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(0)
   const [currentPath, setCurrentPath] = useState<string | null>(null)
@@ -142,7 +144,7 @@ export function useScanAll({ baseUrl, pages, submitScan, onError }: UseScanAllOp
         for (const { v, result } of results) {
           if (!result || cancelled.current) continue
           try {
-            await submitScan(page.id, v, result)
+            await submitScan(page.id, v, result, browser)
           } catch (err) {
             onError(err instanceof Error ? `${page.path}: ${err.message}` : `${page.path}: scan could not be saved.`)
           }
@@ -155,7 +157,7 @@ export function useScanAll({ baseUrl, pages, submitScan, onError }: UseScanAllOp
       setRunning(false)
       runningRef.current = false
     })()
-  }, [baseUrl, pages, submitScan, onError, waitFor])
+  }, [baseUrl, pages, submitScan, browser, onError, waitFor])
 
   useEffect(() => () => cancel(), [cancel])
 

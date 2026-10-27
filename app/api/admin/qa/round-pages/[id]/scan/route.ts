@@ -1,7 +1,8 @@
 /**
  * POST /api/admin/qa/round-pages/[id]/scan
- *      Body: { viewport: QaViewportKey, result: QaScanResult }. Stores one
- *      viewport's normalised scan (replacing any earlier scan for that viewport), stamps
+ *      Body: { viewport: QaViewportKey, browser?: QaBrowserKey (default: the round's first browser), result: QaScanResult }.
+ *      Stores one viewport's normalised scan for one browser (replacing any earlier scan for that
+ *      viewport and browser; 400 when the browser is not part of the round), stamps
  *      scannedAt on the round page and recomputes its issue counts.
  *      413 when the serialised result is over 512 KB.
  */
@@ -14,7 +15,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { loadRoundPage, recomputeCounts } from '@/lib/qa/server'
 import { normaliseScanResult } from '@/lib/qa/normalise-scan'
-import { QA_VIEWPORT_KEYS, type QaViewportKey } from '@/lib/qa/types'
+import { parseRoundBrowsers } from '@/lib/qa/browsers'
+import { QA_VIEWPORT_KEYS, isQaBrowserKey, type QaBrowserKey, type QaViewportKey } from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -38,6 +40,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (typeof viewport !== 'string' || !(QA_VIEWPORT_KEYS as readonly string[]).includes(viewport)) {
     return NextResponse.json({ error: `viewport must be one of ${QA_VIEWPORT_KEYS.join(', ')}` }, { status: 400 })
   }
+  let requestedBrowser: QaBrowserKey | null = null
+  if (body.browser !== undefined && body.browser !== null) {
+    if (!isQaBrowserKey(body.browser)) {
+      return NextResponse.json({ error: 'browser must be chromium, firefox or webkit' }, { status: 400 })
+    }
+    requestedBrowser = body.browser
+  }
   if (!isRecord(body.result)) {
     return NextResponse.json({ error: 'result is not a scan result' }, { status: 400 })
   }
@@ -52,13 +61,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const loaded = await loadRoundPage(database, id)
   if (!loaded) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (loaded.round.status === 'closed') return NextResponse.json({ error: 'This round is closed' }, { status: 409 })
+  // No browser named: the round's first one.
+  const roundBrowsers = parseRoundBrowsers(loaded.round.browsers)
+  const browser = requestedBrowser ?? roundBrowsers[0]
+  if (!roundBrowsers.includes(browser)) {
+    return NextResponse.json({ error: 'That browser is not part of this round' }, { status: 400 })
+  }
 
   const now = new Date().toISOString()
   const vp: QaViewportKey = viewport as QaViewportKey
   await database.insert(schema.qaScanResults)
-    .values({ roundPageId: id, viewport: vp, result: serialised, createdAt: now })
+    .values({ roundPageId: id, viewport: vp, browser, result: serialised, createdAt: now })
     .onConflictDoUpdate({
-      target: [schema.qaScanResults.roundPageId, schema.qaScanResults.viewport],
+      target: [schema.qaScanResults.roundPageId, schema.qaScanResults.viewport, schema.qaScanResults.browser],
       set: { result: serialised, createdAt: now },
     })
   await database.update(schema.qaRoundPages)

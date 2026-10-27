@@ -7,7 +7,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { createRequestRecord, type RequestCreateInput } from '@/lib/request-writes'
 import { loadRoundPage, targetOrigin } from '@/lib/qa/server'
-import { QA_VIEWPORTS, QA_VIEWPORT_KEYS, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
+import { QA_VIEWPORTS, QA_VIEWPORT_KEYS, browserLabel, isQaBrowserKey, type QaBrowserKey, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
 
 const TITLE_MAX = 200
 const DESCRIPTION_MAX = 4000
@@ -54,6 +54,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     viewport = fields.viewport as QaViewportKey
   }
 
+  let browser: QaBrowserKey | null = null
+  if (fields.browser !== undefined && fields.browser !== null) {
+    if (!isQaBrowserKey(fields.browser)) {
+      return NextResponse.json({ error: 'browser must be chromium, firefox or webkit' }, { status: 400 })
+    }
+    browser = fields.browser
+  }
+
   const database = await db() as Drizzle
   const loaded = await loadRoundPage(database, id)
   if (!loaded) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -70,6 +78,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   lines.push(`Page: ${origin}${roundPage.path}`)
   const vp = viewport ? QA_VIEWPORTS.find(v => v.key === viewport) : undefined
   if (vp) lines.push(`Viewport: ${vp.label} (${vp.width}px)`)
+  if (browser) lines.push(`Browser: ${browserLabel(browser)}`)
   lines.push(`From QA round: ${round.name}`)
 
   // The client org comes from the site, never the body. isInternal keeps the

@@ -14,6 +14,8 @@ import { PageHeader } from '@/components/tahi/page-header'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import {
   QA_VIEWPORTS,
+  browserLabel,
+  type QaBrowserKey,
   type QaLinkResult,
   type QaPageCounts,
   type QaPageStatus,
@@ -81,6 +83,8 @@ interface ReportPage {
   path: string
   status: QaPageStatus
   ticks: Record<QaViewportKey, boolean>
+  /** Ticks per browser of the round. Absent in older responses, which carry only the Chrome ticks. */
+  browserTicks?: Partial<Record<QaBrowserKey, Record<QaViewportKey, boolean>>>
   counts: QaPageCounts | null
   note: string | null
   requestIds: string[]
@@ -102,6 +106,8 @@ export interface ReportComment {
   roundPageId: string
   path: string
   viewport: QaViewportKey
+  browser?: QaBrowserKey
+  browserLabel?: string
   n: number
   body: string
   status: 'open' | 'resolved'
@@ -125,6 +131,7 @@ interface ReportData {
     name: string
     target: 'staging' | 'live'
     status: 'open' | 'closed'
+    browsers?: QaBrowserKey[]
     createdAt: string
     closedAt: string | null
     siteChecksAt: string | null
@@ -190,6 +197,17 @@ function groupCommentsByPath(comments: ReportComment[]): { path: string; items: 
       return a.n - b.n
     }),
   }))
+}
+
+/** The browsers a report covers. Older responses name none, which means Chrome. */
+function reportBrowsers(data: ReportData): QaBrowserKey[] {
+  const named = data.round.browsers
+  return named && named.length > 0 ? named : ['chromium']
+}
+
+/** One page's ticks for one browser. */
+function ticksOf(page: ReportPage, browser: QaBrowserKey): Record<QaViewportKey, boolean> {
+  return page.browserTicks?.[browser] ?? (browser === 'chromium' ? page.ticks : { xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false })
 }
 
 function formatDate(iso: string | null): string {
@@ -294,6 +312,7 @@ export function ReportContent({ roundId }: { roundId: string }) {
                 data.orgName,
                 data.round.name,
                 `${targetLabel(data.round.target)} target`,
+                reportBrowsers(data).map(browserLabel).join(', '),
                 data.round.closedAt
                   ? `Closed ${formatDate(data.round.closedAt)}`
                   : `Started ${formatDate(data.round.createdAt)}`,
@@ -324,7 +343,7 @@ export function ReportContent({ roundId }: { roundId: string }) {
                 icon={ListChecks}
                 label="Ticks done"
                 value={`${data.totals.ticksDone} / ${data.totals.ticksTotal}`}
-                sub="Page by viewport"
+                sub={reportBrowsers(data).length > 1 ? 'Page by viewport by browser' : 'Page by viewport'}
               />
               <KPICell
                 icon={XCircle}
@@ -449,43 +468,60 @@ export function ReportContent({ roundId }: { roundId: string }) {
                   description="Add pages to the site, then start a new round."
                 />
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '48rem' }}>
+                <div style={{ overflowX: 'auto', position: 'relative' /* containing block for the header's sr-only labels, so they scroll with the table */ }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: `${48 + Math.max(0, reportBrowsers(data).length - 1) * 22}rem` }}>
                     <thead>
                       <tr>
-                        <th scope="col" style={TH_STYLE}>Path</th>
-                        <th scope="col" style={TH_STYLE}>Status</th>
-                        {QA_VIEWPORTS.map(vp => (
-                          <th key={vp.key} scope="col" style={{ ...TH_STYLE, textAlign: 'center' }}>
-                            {TICK_LABELS[vp.key]}
-                          </th>
-                        ))}
-                        <th scope="col" style={TH_STYLE}>Counts</th>
-                        <th scope="col" style={TH_STYLE}>Note</th>
-                        <th scope="col" style={TH_STYLE}>Requests</th>
+                        <th scope="col" rowSpan={reportBrowsers(data).length > 1 ? 2 : 1} style={{ ...TH_STYLE, minWidth: '10rem' }}>Path</th>
+                        <th scope="col" rowSpan={reportBrowsers(data).length > 1 ? 2 : 1} style={TH_STYLE}>Status</th>
+                        {reportBrowsers(data).length > 1
+                          ? reportBrowsers(data).map(browser => (
+                            <th key={browser} scope="colgroup" colSpan={QA_VIEWPORTS.length} style={{ ...TH_STYLE, textAlign: 'center' }}>
+                              {browserLabel(browser)}
+                            </th>
+                          ))
+                          : QA_VIEWPORTS.map(vp => (
+                            <th key={vp.key} scope="col" style={{ ...TH_STYLE, textAlign: 'center' }}>
+                              {TICK_LABELS[vp.key]}
+                            </th>
+                          ))}
+                        <th scope="col" rowSpan={reportBrowsers(data).length > 1 ? 2 : 1} style={TH_STYLE}>Counts</th>
+                        <th scope="col" rowSpan={reportBrowsers(data).length > 1 ? 2 : 1} style={TH_STYLE}>Note</th>
+                        <th scope="col" rowSpan={reportBrowsers(data).length > 1 ? 2 : 1} style={TH_STYLE}>Requests</th>
                       </tr>
+                      {reportBrowsers(data).length > 1 ? (
+                        <tr>
+                          {reportBrowsers(data).flatMap(browser => QA_VIEWPORTS.map(vp => (
+                            <th key={`${browser}-${vp.key}`} scope="col" style={{ ...TH_STYLE, textAlign: 'center' }}>
+                              <span className="sr-only">{browserLabel(browser)} </span>
+                              {TICK_LABELS[vp.key]}
+                            </th>
+                          )))}
+                        </tr>
+                      ) : null}
                     </thead>
                     <tbody>
                       {data.pages.map((page, pageIndex) => (
                         <tr key={page.id} style={rowBackground(pageIndex)}>
-                          <td style={{ ...TD_STYLE, fontWeight: 600, wordBreak: 'break-all' }}>{page.path}</td>
+                          <td style={{ ...TD_STYLE, fontWeight: 600, wordBreak: 'break-all', minWidth: '10rem' }}>{page.path}</td>
                           <td style={TD_STYLE}>
                             <Badge tone={PAGE_STATUS_TONE[page.status]} size="sm">
                               {PAGE_STATUS_LABEL[page.status]}
                             </Badge>
                           </td>
-                          {QA_VIEWPORTS.map(vp => {
-                            const done = page.ticks[vp.key]
+                          {reportBrowsers(data).flatMap(browser => QA_VIEWPORTS.map(vp => {
+                            const done = ticksOf(page, browser)[vp.key]
+                            const name = `${browserLabel(browser)} ${TICK_LABELS[vp.key]}`
                             return (
-                              <td key={vp.key} style={{ ...TD_STYLE, textAlign: 'center' }}>
+                              <td key={`${browser}-${vp.key}`} style={{ ...TD_STYLE, textAlign: 'center' }}>
                                 {done ? (
-                                  <Check className="w-4 h-4 inline-block" role="img" aria-label={`${TICK_LABELS[vp.key]} done`} style={{ color: 'var(--color-brand)' }} />
+                                  <Check className="w-4 h-4 inline-block" role="img" aria-label={`${name} done`} style={{ color: 'var(--color-brand)' }} />
                                 ) : (
-                                  <Minus className="w-4 h-4 inline-block" role="img" aria-label={`${TICK_LABELS[vp.key]} not done`} style={{ color: 'var(--color-text-subtle)' }} />
+                                  <Minus className="w-4 h-4 inline-block" role="img" aria-label={`${name} not done`} style={{ color: 'var(--color-text-subtle)' }} />
                                 )}
                               </td>
                             )
-                          })}
+                          }))}
                           <td style={{ ...TD_STYLE, fontSize: '0.75rem', color: 'var(--color-text-muted)', minWidth: '12rem' }}>
                             {countsLine(page.counts)}
                           </td>
@@ -554,6 +590,7 @@ export function ReportContent({ roundId }: { roundId: string }) {
                             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                               <span style={{ fontWeight: 700, color: 'var(--color-text)' }}>{`#${comment.n}`}</span>
                               <span>{TICK_LABELS[comment.viewport] ?? comment.viewport}</span>
+                              {comment.browser ? <span>{comment.browserLabel ?? browserLabel(comment.browser)}</span> : null}
                               <Badge tone={comment.status === 'open' ? 'warning' : 'positive'} size="sm">
                                 {comment.status === 'open' ? 'Open' : 'Resolved'}
                               </Badge>

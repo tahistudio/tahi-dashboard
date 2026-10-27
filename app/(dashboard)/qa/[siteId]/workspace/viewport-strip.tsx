@@ -102,6 +102,8 @@ export interface ViewportStripProps {
   scanStates: Record<QaViewportKey, QaScanState>
   ticks: QaTickMap
   readOnly: boolean
+  /** Why the strip is read only when that is not a closed round (for example the browser is not part of the round). */
+  readOnlyReason?: string
   onTick: (viewport: QaViewportKey, value: boolean) => void
   /** Called for a scan from one of the visible frames. Never called on a closed round. */
   onScan: (viewport: QaViewportDef, result: QaScanResult) => void
@@ -143,6 +145,7 @@ export function ViewportStrip({
   scanStates,
   ticks,
   readOnly,
+  readOnlyReason,
   onTick,
   onScan,
   onFrameLoad,
@@ -370,6 +373,7 @@ export function ViewportStrip({
       expanded,
       onExpand: () => setExpandedKey(expanded ? null : v.key),
       readOnly,
+      readOnlyReason,
       commenting: commentViewport === v.key,
       onCommentToggle: () => onCommentToggle(v.key),
       onLoad: () => {

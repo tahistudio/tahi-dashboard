@@ -41,13 +41,15 @@ export interface RoundActionsProps {
   round: QaRoundRow
   readOnly: boolean
   scanRunning: boolean
+  /** Scan all is off, for example when the browser being tested is not part of the round. */
+  scanAllDisabled?: boolean
   onScanAll: () => void
   onRoundChanged: () => Promise<void>
   onCloseRound: () => void
   onReopenRound: () => void
 }
 
-export function RoundActions({ round, readOnly, scanRunning, onScanAll, onRoundChanged, onCloseRound, onReopenRound }: RoundActionsProps) {
+export function RoundActions({ round, readOnly, scanRunning, scanAllDisabled = false, onScanAll, onRoundChanged, onCloseRound, onReopenRound }: RoundActionsProps) {
   const { showToast } = useToast()
   const [checks, setChecks] = useState<QaSiteCheck[] | null>(round.siteChecks)
   const [checksOpen, setChecksOpen] = useState(false)
@@ -130,7 +132,7 @@ export function RoundActions({ round, readOnly, scanRunning, onScanAll, onRoundC
         <Menu.Item onClick={() => void runSiteChecks()} disabled={readOnly}>
           Run site checks
         </Menu.Item>
-        <Menu.Item onClick={onScanAll} disabled={readOnly || scanRunning}>
+        <Menu.Item onClick={onScanAll} disabled={readOnly || scanRunning || scanAllDisabled}>
           Scan all pages
         </Menu.Item>
         <Menu.Item onClick={() => setMapOpen(true)} disabled={!live || readOnly}>

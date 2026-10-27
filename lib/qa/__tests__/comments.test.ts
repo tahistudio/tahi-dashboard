@@ -30,6 +30,7 @@ function row(overrides: Partial<CommentRow> = {}): CommentRow {
     id: 'c1',
     roundPageId: 'rp1',
     viewport: 'desktop',
+    browser: 'chromium',
     selector: 'div.card',
     ox: 0.5,
     oy: 0.5,
@@ -183,6 +184,8 @@ describe('rowToComment', () => {
       id: 'c1',
       roundPageId: 'rp1',
       viewport: 'desktop',
+      browser: 'chromium',
+      browserLabel: 'Chrome',
       selector: 'div.card',
       ox: 0.5,
       oy: 0.5,
@@ -208,6 +211,7 @@ describe('parseCommentInput', () => {
       ok: true,
       value: {
         viewport: 'desktop',
+        browser: null,
         selector: '#hero > h1',
         ox: 0.25,
         oy: 0.75,
@@ -402,5 +406,37 @@ describe('numberComments', () => {
 
   it('returns an empty map for no rows', () => {
     expect(numberComments([]).size).toBe(0)
+  })
+})
+
+describe('comment browser', () => {
+  it('rowToComment carries the browser and its label, and reads an unknown value as Chrome', () => {
+    const firefox = rowToComment(row({ browser: 'firefox' }))
+    expect(firefox.browser).toBe('firefox')
+    expect(firefox.browserLabel).toBe('Firefox')
+    const odd = rowToComment(row({ browser: 'netscape' }))
+    expect(odd.browser).toBe('chromium')
+    expect(odd.browserLabel).toBe('Chrome')
+  })
+
+  it('toCommentDetail keeps the browser', () => {
+    const detail = toCommentDetail(row({ browser: 'webkit' }), 1, '/about', {
+      roundId: 'r1', roundName: 'Round', siteName: 'Site', target: 'staging', siteUrl: 'https://x.webflow.io',
+    })
+    expect(detail.browser).toBe('webkit')
+    expect(detail.browserLabel).toBe('Safari')
+  })
+
+  it('parseCommentInput leaves the browser null when none is sent (the route uses the round first browser) and accepts the known ones', () => {
+    const base = { viewport: 'desktop', selector: '#a', ox: 0.5, oy: 0.5, body: 'x' }
+    const plain = parseCommentInput(base)
+    expect(plain.ok && plain.value.browser).toBeNull()
+    const ff = parseCommentInput({ ...base, browser: 'firefox' })
+    expect(ff.ok && ff.value.browser).toBe('firefox')
+  })
+
+  it('parseCommentInput rejects an unknown browser', () => {
+    const bad = parseCommentInput({ viewport: 'desktop', selector: '#a', ox: 0.5, oy: 0.5, body: 'x', browser: 'edge' })
+    expect(bad.ok).toBe(false)
   })
 })

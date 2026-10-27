@@ -14,6 +14,7 @@ interface Write { op: 'insert' | 'update'; table: string; rows: Row[]; set?: Row
 const state = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   writes: [] as Write[],
+  reads: [] as string[],
 }))
 
 vi.mock('@/lib/server-auth', () => ({
@@ -36,6 +37,8 @@ vi.mock('@/lib/db', () => {
         return Promise.resolve(value()).then(resolve, reject)
       },
       onConflictDoUpdate: () => builder,
+      innerJoin: () => builder,
+      groupBy: () => builder,
       where: () => builder,
       orderBy: () => builder,
       limit: () => builder,
@@ -46,6 +49,7 @@ vi.mock('@/lib/db', () => {
     select: () => ({
       from: (table: unknown) => {
         const name = getTableName(table as Parameters<typeof getTableName>[0])
+        state.reads.push(name)
         return thenable(() => [...(state.tables[name] ?? [])])
       },
     }),
@@ -112,7 +116,7 @@ function seedSite(overrides: Row = {}): Row {
 function seedRound(overrides: Row = {}): Row {
   return {
     id: 'round1', siteId: 'site1', name: 'Launch', target: 'staging', status: 'open',
-    siteChecks: null, siteChecksAt: null, redirectMap: null, redirectMapAt: null,
+    browsers: '["chromium"]', siteChecks: null, siteChecksAt: null, redirectMap: null, redirectMapAt: null,
     createdBy: 'user_liam', createdAt: NOW, closedAt: null, ...overrides,
   }
 }
@@ -154,6 +158,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   state.tables = {}
   state.writes = []
+  state.reads = []
   vi.mocked(getRequestAuth).mockResolvedValue(ADMIN)
 })
 
@@ -362,6 +367,302 @@ describe('POST scan on a closed round', () => {
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'This round is closed' })
     expect(writesFor('qa_scan_results')).toHaveLength(0)
+    expect(writesFor('qa_round_pages', 'update')).toHaveLength(0)
+  })
+})
+
+describe('browsers per round', () => {
+  const both = JSON.stringify(['chromium', 'firefox'])
+
+  describe('POST /api/admin/qa/sites/[id]/rounds', () => {
+    beforeEach(() => {
+      seed('qa_sites', [seedSite()])
+      seed('qa_pages', [seedPage('home', '/', null)])
+    })
+
+    it('defaults to Chrome only', async () => {
+      const res = await roundsPost(jsonReq({ name: 'R', target: 'staging' }), ctx('site1'))
+      expect(res.status).toBe(201)
+      expect(writesFor('qa_rounds')[0].rows[0].browsers).toBe('["chromium"]')
+      expect(((await res.json()) as { item: { browsers: string[] } }).item.browsers).toEqual(['chromium'])
+    })
+
+    it('stores the chosen browsers in canonical order', async () => {
+      const res = await roundsPost(jsonReq({ name: 'R', target: 'staging', browsers: ['webkit', 'chromium', 'webkit'] }), ctx('site1'))
+      expect(res.status).toBe(201)
+      expect(writesFor('qa_rounds')[0].rows[0].browsers).toBe('["chromium","webkit"]')
+    })
+
+    it('400s an empty, unknown or non-list browsers value and writes nothing', async () => {
+      for (const browsers of [[], ['edge'], 'firefox', [3]]) {
+        const res = await roundsPost(jsonReq({ name: 'R', target: 'staging', browsers }), ctx('site1'))
+        expect(res.status).toBe(400)
+      }
+      expect(state.writes).toHaveLength(0)
+    })
+  })
+
+  describe('PATCH /api/admin/qa/rounds/[id]', () => {
+    beforeEach(() => {
+      seed('qa_sites', [seedSite()])
+    })
+
+    it('changes the browsers of an open round', async () => {
+      seed('qa_rounds', [seedRound()])
+      const res = await roundPatch(jsonReq({ browsers: ['firefox', 'chromium'] }), ctx('round1'))
+      expect(res.status).toBe(200)
+      expect(writesFor('qa_rounds', 'update')[0].set).toEqual({ browsers: both })
+      expect(((await res.json()) as { item: { browsers: string[] } }).item.browsers).toEqual(['chromium', 'firefox'])
+    })
+
+    it('409s on a closed round and writes nothing', async () => {
+      seed('qa_rounds', [seedRound({ status: 'closed' })])
+      const res = await roundPatch(jsonReq({ browsers: ['chromium', 'firefox'] }), ctx('round1'))
+      expect(res.status).toBe(409)
+      expect(writesFor('qa_rounds', 'update')).toHaveLength(0)
+    })
+
+    it('400s an empty or unknown list', async () => {
+      seed('qa_rounds', [seedRound()])
+      expect((await roundPatch(jsonReq({ browsers: [] }), ctx('round1'))).status).toBe(400)
+      expect((await roundPatch(jsonReq({ browsers: ['edge'] }), ctx('round1'))).status).toBe(400)
+      expect(writesFor('qa_rounds', 'update')).toHaveLength(0)
+    })
+
+    it('still renames or closes a closed round (reopen) without browsers', async () => {
+      seed('qa_rounds', [seedRound({ status: 'closed', closedAt: NOW })])
+      const res = await roundPatch(jsonReq({ status: 'open' }), ctx('round1'))
+      expect(res.status).toBe(200)
+    })
+  })
+
+  describe('GET /api/admin/qa/rounds/[id]', () => {
+    it('returns the browsers and, per page, ticks per browser from one tick query', async () => {
+      seed('qa_sites', [seedSite()])
+      seed('qa_rounds', [seedRound({ browsers: both })])
+      const pages = Array.from({ length: 25 }, (_, i) => seedRoundPage({ id: `rp${i}`, path: `/p${i}`, sortOrder: i, vpDesktop: i === 0 ? 1 : 0 }))
+      seed('qa_round_pages', pages)
+      seed('qa_pages', [])
+      seed('qa_browser_ticks', [
+        { roundPageId: 'rp0', browser: 'firefox', viewport: 'tablet', ticked: 1 },
+        { roundPageId: 'rp1', browser: 'firefox', viewport: 'xl', ticked: 1 },
+        { roundPageId: 'rp1', browser: 'firefox', viewport: 'desktop', ticked: 0 },
+      ])
+      const res = await roundGet(getReq(), ctx('round1'))
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as {
+        round: { browsers: string[] }
+        pages: { id: string; browserTicks: Record<string, Record<string, boolean>> }[]
+      }
+      expect(json.round.browsers).toEqual(['chromium', 'firefox'])
+      const first = json.pages.find(p => p.id === 'rp0')
+      expect(first?.browserTicks.chromium.desktop).toBe(true)
+      expect(first?.browserTicks.firefox.tablet).toBe(true)
+      expect(first?.browserTicks.firefox.desktop).toBe(false)
+      expect(json.pages.find(p => p.id === 'rp1')?.browserTicks.firefox.xl).toBe(true)
+      expect(json.pages.find(p => p.id === 'rp24')?.browserTicks.firefox.xl).toBe(false)
+      // One query over qa_browser_ticks for the whole round, not one per page.
+      expect(state.reads.filter(t => t === 'qa_browser_ticks')).toHaveLength(1)
+    })
+
+    it('skips the tick query for a Chrome only round and reports Chrome ticks', async () => {
+      seed('qa_sites', [seedSite()])
+      seed('qa_rounds', [seedRound()])
+      seed('qa_round_pages', [seedRoundPage({ vpXl: 1 })])
+      seed('qa_pages', [])
+      const json = (await (await roundGet(getReq(), ctx('round1'))).json()) as {
+        round: { browsers: string[] }
+        pages: { browserTicks: Record<string, Record<string, boolean>> }[]
+      }
+      expect(json.round.browsers).toEqual(['chromium'])
+      expect(json.pages[0].browserTicks).toEqual({ chromium: { xl: true, desktop: false, tablet: false, mobile_l: false, mobile_p: false } })
+      expect(state.reads).not.toContain('qa_browser_ticks')
+    })
+  })
+
+  describe('PATCH /api/admin/qa/round-pages/[id] with a browser', () => {
+    beforeEach(() => {
+      seed('qa_round_pages', [seedRoundPage()])
+      seed('qa_sites', [seedSite()])
+    })
+
+    it('writes Chrome ticks to the vp columns, as before', async () => {
+      seed('qa_rounds', [seedRound({ browsers: both })])
+      const res = await roundPagePatch(jsonReq({ browser: 'chromium', vp: { desktop: true } }), ctx('rp1'))
+      expect(res.status).toBe(200)
+      expect(writesFor('qa_round_pages', 'update')[0].set).toMatchObject({ vpDesktop: 1 })
+      expect(writesFor('qa_browser_ticks')).toHaveLength(0)
+    })
+
+    it('upserts Firefox ticks into qa_browser_ticks and leaves the vp columns alone', async () => {
+      seed('qa_rounds', [seedRound({ browsers: both })])
+      const res = await roundPagePatch(jsonReq({ browser: 'firefox', vp: { desktop: true, tablet: false } }), ctx('rp1'))
+      expect(res.status).toBe(200)
+      const [write] = writesFor('qa_browser_ticks')
+      expect(write.rows).toEqual([
+        expect.objectContaining({ roundPageId: 'rp1', browser: 'firefox', viewport: 'desktop', ticked: 1, updatedBy: 'user_liam' }),
+        expect.objectContaining({ roundPageId: 'rp1', browser: 'firefox', viewport: 'tablet', ticked: 0 }),
+      ])
+      const pageUpdate = writesFor('qa_round_pages', 'update')[0].set ?? {}
+      expect('vpDesktop' in pageUpdate).toBe(false)
+      expect('vpTablet' in pageUpdate).toBe(false)
+    })
+
+    it('keeps each tick write under the D1 parameter cap', async () => {
+      seed('qa_rounds', [seedRound({ browsers: both })])
+      await roundPagePatch(jsonReq({ browser: 'firefox', vp: { xl: true, desktop: true, tablet: true, mobile_l: true, mobile_p: true } }), ctx('rp1'))
+      const [write] = writesFor('qa_browser_ticks')
+      expect(write.rows.length * 7).toBeLessThanOrEqual(100)
+    })
+
+    it('400s a browser that is not part of the round and writes nothing', async () => {
+      seed('qa_rounds', [seedRound()])
+      const res = await roundPagePatch(jsonReq({ browser: 'firefox', vp: { desktop: true } }), ctx('rp1'))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'That browser is not part of this round' })
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('400s an unknown browser and a browser without vp', async () => {
+      seed('qa_rounds', [seedRound({ browsers: both })])
+      expect((await roundPagePatch(jsonReq({ browser: 'edge', vp: { desktop: true } }), ctx('rp1'))).status).toBe(400)
+      expect((await roundPagePatch(jsonReq({ browser: 'firefox', status: 'pass' }), ctx('rp1'))).status).toBe(400)
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('still 409s a closed round before anything else', async () => {
+      seed('qa_rounds', [seedRound({ status: 'closed', browsers: both })])
+      const res = await roundPagePatch(jsonReq({ browser: 'firefox', vp: { desktop: true } }), ctx('rp1'))
+      expect(res.status).toBe(409)
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('a status only patch works on any round, whatever the browsers', async () => {
+      seed('qa_rounds', [seedRound({ browsers: '["firefox"]' })])
+      const res = await roundPagePatch(jsonReq({ status: 'pass' }), ctx('rp1'))
+      expect(res.status).toBe(200)
+    })
+  })
+
+  describe('scan POST with a browser', () => {
+    beforeEach(() => {
+      seed('qa_round_pages', [seedRoundPage()])
+      seed('qa_sites', [seedSite()])
+    })
+
+    it('stores the scan against the browser, defaulting to chromium', async () => {
+      seed('qa_rounds', [seedRound({ browsers: both })])
+      await scanPost(jsonReq({ viewport: 'desktop', result: cleanScan() }), ctx('rp1'))
+      await scanPost(jsonReq({ viewport: 'desktop', browser: 'firefox', result: cleanScan() }), ctx('rp1'))
+      const scans = writesFor('qa_scan_results').map(w => w.rows[0])
+      expect(scans[0]).toMatchObject({ viewport: 'desktop', browser: 'chromium' })
+      expect(scans[1]).toMatchObject({ viewport: 'desktop', browser: 'firefox' })
+    })
+
+    it('400s a browser outside the round and an unknown browser', async () => {
+      seed('qa_rounds', [seedRound()])
+      expect((await scanPost(jsonReq({ viewport: 'desktop', browser: 'webkit', result: cleanScan() }), ctx('rp1'))).status).toBe(400)
+      expect((await scanPost(jsonReq({ viewport: 'desktop', browser: 'edge', result: cleanScan() }), ctx('rp1'))).status).toBe(400)
+      expect(writesFor('qa_scan_results')).toHaveLength(0)
+    })
+
+    it('409s a closed round before it checks the browser', async () => {
+      seed('qa_rounds', [seedRound({ status: 'closed' })])
+      const res = await scanPost(jsonReq({ viewport: 'desktop', browser: 'webkit', result: cleanScan() }), ctx('rp1'))
+      expect(res.status).toBe(409)
+    })
+  })
+
+  describe('GET /api/admin/qa/round-pages/[id] with scans from several browsers', () => {
+    it('keys scans by browser then viewport and merges identical issues', async () => {
+      seed('qa_round_pages', [seedRoundPage()])
+      seed('qa_rounds', [seedRound({ browsers: both })])
+      seed('qa_sites', [seedSite()])
+      const overflow = { ...cleanScan(), layout: { horizontalOverflow: true, overflowingElements: [{ selector: '.wide', width: 2000 }] } }
+      const stored = JSON.stringify(normaliseScanResult(overflow))
+      seed('qa_scan_results', [
+        { roundPageId: 'rp1', viewport: 'desktop', browser: 'chromium', result: stored, createdAt: NOW },
+        { roundPageId: 'rp1', viewport: 'desktop', browser: 'firefox', result: stored, createdAt: NOW },
+        { roundPageId: 'rp1', viewport: 'tablet', browser: 'firefox', result: stored, createdAt: NOW },
+      ])
+      seed('qa_link_results', [])
+      seed('qa_browser_ticks', [{ roundPageId: 'rp1', browser: 'firefox', viewport: 'desktop', ticked: 1 }])
+      const res = await roundPageGet(getReq(), ctx('rp1'))
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as {
+        browsers: string[]
+        ticks: Record<string, Record<string, boolean>>
+        scans: Record<string, Record<string, unknown>>
+        issues: { code: string; viewport?: string; browser?: string; browsers?: string[] }[]
+      }
+      expect(json.browsers).toEqual(['chromium', 'firefox'])
+      expect(Object.keys(json.scans)).toEqual(['chromium', 'firefox'])
+      expect(Object.keys(json.scans.firefox).sort()).toEqual(['desktop', 'tablet'])
+      expect(json.ticks.firefox.desktop).toBe(true)
+      const desktopOverflow = json.issues.filter(i => i.code === 'horizontal_overflow' && i.viewport === 'desktop')
+      expect(desktopOverflow).toHaveLength(1)
+      expect(desktopOverflow[0].browsers).toEqual(['chromium', 'firefox'])
+      const tabletOverflow = json.issues.filter(i => i.code === 'horizontal_overflow' && i.viewport === 'tablet')
+      expect(tabletOverflow).toHaveLength(1)
+      expect(tabletOverflow[0].browsers).toEqual(['firefox'])
+    })
+  })
+})
+
+describe('default browser and removed browsers', () => {
+  const ffOnly = '["firefox"]'
+
+  it('ticks with no browser go to the first browser of the round', async () => {
+    seed('qa_round_pages', [seedRoundPage()])
+    seed('qa_rounds', [seedRound({ browsers: ffOnly })])
+    seed('qa_sites', [seedSite()])
+    const res = await roundPagePatch(jsonReq({ vp: { desktop: true } }), ctx('rp1'))
+    expect(res.status).toBe(200)
+    expect(writesFor('qa_browser_ticks')[0].rows[0]).toMatchObject({ browser: 'firefox', viewport: 'desktop', ticked: 1 })
+    expect('vpDesktop' in (writesFor('qa_round_pages', 'update')[0].set ?? {})).toBe(false)
+  })
+
+  it('a scan with no browser is stored for the first browser of the round', async () => {
+    seed('qa_round_pages', [seedRoundPage()])
+    seed('qa_rounds', [seedRound({ browsers: ffOnly })])
+    seed('qa_sites', [seedSite()])
+    const res = await scanPost(jsonReq({ viewport: 'desktop', result: cleanScan() }), ctx('rp1'))
+    expect(res.status).toBe(200)
+    expect(writesFor('qa_scan_results')[0].rows[0]).toMatchObject({ browser: 'firefox' })
+  })
+
+  it('round-page GET hides the scans and issues of a browser removed from the round', async () => {
+    seed('qa_round_pages', [seedRoundPage()])
+    seed('qa_rounds', [seedRound({ browsers: '["chromium"]' })])
+    seed('qa_sites', [seedSite()])
+    const overflow = JSON.stringify(normaliseScanResult({ ...cleanScan(), layout: { horizontalOverflow: true, overflowingElements: [{ selector: '.w', width: 9 }] } }))
+    seed('qa_scan_results', [
+      { roundPageId: 'rp1', viewport: 'desktop', browser: 'chromium', result: JSON.stringify(normaliseScanResult(cleanScan())), createdAt: NOW },
+      { roundPageId: 'rp1', viewport: 'desktop', browser: 'firefox', result: overflow, createdAt: NOW },
+    ])
+    seed('qa_link_results', [])
+    const json = (await (await roundPageGet(getReq(), ctx('rp1'))).json()) as { scans: Record<string, unknown>; issues: { code: string }[] }
+    expect(Object.keys(json.scans)).toEqual(['chromium'])
+    expect(json.issues.some(i => i.code === 'horizontal_overflow')).toBe(false)
+  })
+
+  it('changing the browsers of a round recounts the pages that have scans in a changed browser', async () => {
+    seed('qa_sites', [seedSite()])
+    seed('qa_rounds', [seedRound({ browsers: '["chromium","firefox"]' })])
+    seed('qa_round_pages', [seedRoundPage()])
+    seed('qa_scan_results', [{ roundPageId: 'rp1', viewport: 'desktop', browser: 'firefox', result: JSON.stringify(normaliseScanResult(cleanScan())), createdAt: NOW }])
+    seed('qa_link_results', [])
+    const res = await roundPatch(jsonReq({ browsers: ['chromium'] }), ctx('round1'))
+    expect(res.status).toBe(200)
+    // The only stored scan is Firefox, now hidden, so the page counts are cleared rather than left stale.
+    const cleared = writesFor('qa_round_pages', 'update').find(w => w.set && 'a11yCritical' in w.set)
+    expect(cleared?.set).toMatchObject({ a11yCritical: null, perfIssues: null })
+  })
+
+  it('does not recount when only the name changes', async () => {
+    seed('qa_sites', [seedSite()])
+    seed('qa_rounds', [seedRound()])
+    await roundPatch(jsonReq({ name: 'Renamed' }), ctx('round1'))
     expect(writesFor('qa_round_pages', 'update')).toHaveLength(0)
   })
 })

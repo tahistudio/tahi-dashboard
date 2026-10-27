@@ -35,16 +35,19 @@ let orgRows: { name: string }[] = []
 let pageRows: unknown[] = []
 // Rows of the comments join ({ comment }), also set per test.
 let commentRows: { comment: unknown }[] = []
+// Rows of the Firefox and WebKit tick join, set per test.
+let tickRows: unknown[] = []
 
 vi.mock('@/lib/db', () => ({
   db: vi.fn(async () => ({
     update: vi.fn(() => ({ set: updateSet })),
     select: vi.fn((cols?: Record<string, unknown>) => {
       const isCommentJoin = cols !== undefined && 'comment' in cols
+      const isTickJoin = cols !== undefined && 'browser' in cols
       const chain: Record<string, unknown> = {}
       chain.from = vi.fn(() => chain)
       chain.innerJoin = vi.fn(() => chain)
-      chain.where = vi.fn(() => chain)
+      chain.where = vi.fn(() => (isTickJoin ? Promise.resolve(tickRows) : chain))
       chain.limit = vi.fn(async () => orgRows)
       chain.orderBy = vi.fn(async () => (isCommentJoin ? commentRows : pageRows))
       return chain
@@ -55,6 +58,7 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/db/d1', () => ({
   schema: {
     qaRoundPages: { id: 'id', roundId: 'round_id', sortOrder: 'sort_order', requestIds: 'request_ids' },
+    qaBrowserTicks: { roundPageId: 'round_page_id', browser: 'browser', viewport: 'viewport', ticked: 'ticked' },
     organisations: { id: 'id', name: 'name' },
     qaComments: { id: 'id', roundPageId: 'round_page_id', createdAt: 'created_at' },
   },
@@ -244,13 +248,13 @@ describe('POST /api/admin/qa/round-pages/[id]/create-request', () => {
 interface ReportBody {
   orgName: string | null
   site: { orgId: string }
-  round: { name: string }
   siteChecks: unknown
   redirectMap: unknown
   totals: Record<string, number>
-  comments: { roundPageId: string; path: string | null; n: number; body: string; status: string }[]
+  comments: { roundPageId: string; path: string | null; n: number; body: string; status: string; browser: string; browserLabel: string }[]
   commentCounts: { open: number; resolved: number }
-  pages: { ticks: Record<string, boolean>; counts: Record<string, number> | null; note: string | null; requestIds: string[] }[]
+  round: { name: string; browsers: string[] }
+  pages: { browserTicks: Record<string, Record<string, boolean>>; ticks: Record<string, boolean>; counts: Record<string, number> | null; note: string | null; requestIds: string[] }[]
 }
 
 describe('GET /api/admin/qa/rounds/[id]/report', () => {
@@ -266,6 +270,7 @@ describe('GET /api/admin/qa/rounds/[id]/report', () => {
     } as never)
     orgRows = [{ name: 'Acme Ltd' }]
     commentRows = []
+    tickRows = []
     pageRows = [
       {
         id: 'rp_1', path: '/', status: 'pass', note: null, requestIds: null,
@@ -364,5 +369,81 @@ describe('GET /api/admin/qa/rounds/[id]/report', () => {
       ['New issue', 'open', 2, '/about'],
       ['Old issue', 'resolved', 1, '/about'],
     ])
+  })
+})
+
+describe('browsers in the report and in filed requests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 'sess_1' } as never)
+    vi.mocked(isTahiAdmin).mockImplementation((orgId: string | null) => orgId === 'org_tahi')
+    vi.mocked(requireFeature).mockResolvedValue(null)
+    vi.mocked(requireAdmin).mockResolvedValue(null)
+    orgRows = [{ name: 'Acme Ltd' }]
+    commentRows = []
+    tickRows = []
+    pageRows = [
+      {
+        id: 'rp_1', path: '/', status: 'pass', note: null, requestIds: null,
+        vpXl: 1, vpDesktop: 1, vpTablet: 0, vpMobileL: 0, vpMobileP: 0,
+        a11yCritical: 0, a11ySerious: 0, a11yModerate: 0, a11yMinor: 0, brokenLinks: 0, seoIssues: 0, launchIssues: 0, perfIssues: 0,
+      },
+      {
+        id: 'rp_2', path: '/about', status: 'untested', note: null, requestIds: null,
+        vpXl: 0, vpDesktop: 0, vpTablet: 0, vpMobileL: 0, vpMobileP: 0,
+        a11yCritical: null, a11ySerious: null, a11yModerate: null, a11yMinor: null, brokenLinks: null, seoIssues: null, launchIssues: null, perfIssues: null,
+      },
+    ]
+  })
+
+  it('reports the browsers, the tick grid per browser and ticks across all of them', async () => {
+    vi.mocked(loadRound).mockResolvedValue({ round: { ...ROUND, browsers: '["chromium","firefox"]' }, site: { ...SITE } } as never)
+    tickRows = [
+      { roundPageId: 'rp_1', browser: 'firefox', viewport: 'tablet', ticked: 1 },
+      { roundPageId: 'rp_2', browser: 'firefox', viewport: 'xl', ticked: 1 },
+      { roundPageId: 'rp_2', browser: 'webkit', viewport: 'xl', ticked: 1 },
+    ]
+    const body = (await (await GET(getRequest(), reportParams())).json()) as ReportBody
+    expect(body.round.browsers).toEqual(['chromium', 'firefox'])
+    expect(body.totals.ticksTotal).toBe(2 * 5 * 2)
+    // 2 Chrome ticks on rp_1, 1 Firefox tick on rp_1, 1 Firefox tick on rp_2. The WebKit row is hidden: not in the round.
+    expect(body.totals.ticksDone).toBe(4)
+    expect(Object.keys(body.pages[0].browserTicks)).toEqual(['chromium', 'firefox'])
+    expect(body.pages[0].browserTicks.chromium.desktop).toBe(true)
+    expect(body.pages[0].browserTicks.firefox.tablet).toBe(true)
+    expect(body.pages[1].browserTicks.firefox.xl).toBe(true)
+    expect(body.pages[0].ticks).toEqual({ xl: true, desktop: true, tablet: false, mobile_l: false, mobile_p: false })
+  })
+
+  it('a Chrome only round reports one browser and the old total', async () => {
+    vi.mocked(loadRound).mockResolvedValue({ round: { ...ROUND }, site: { ...SITE } } as never)
+    const body = (await (await GET(getRequest(), reportParams())).json()) as ReportBody
+    expect(body.round.browsers).toEqual(['chromium'])
+    expect(body.totals).toMatchObject({ ticksDone: 2, ticksTotal: 10 })
+  })
+
+  it('returns the browser of each comment', async () => {
+    vi.mocked(loadRound).mockResolvedValue({ round: { ...ROUND, browsers: '["chromium","webkit"]' }, site: { ...SITE } } as never)
+    const base = { viewport: 'desktop', selector: 'h1', ox: 0.5, oy: 0.5, elementTag: 'h1', elementText: 'Hi', authorName: 'Liam', updatedAt: '', resolvedAt: null, status: 'open', roundPageId: 'rp_1', elementContext: null }
+    commentRows = [
+      { comment: { ...base, id: 'c_a', body: 'Chrome one', browser: 'chromium', createdAt: '2026-10-20T01:00:00.000Z' } },
+      { comment: { ...base, id: 'c_b', body: 'Safari one', browser: 'webkit', createdAt: '2026-10-20T02:00:00.000Z' } },
+    ]
+    const body = (await (await GET(getRequest(), reportParams())).json()) as ReportBody
+    expect(body.comments.map(c => [c.body, c.browser, c.browserLabel])).toEqual([
+      ['Chrome one', 'chromium', 'Chrome'],
+      ['Safari one', 'webkit', 'Safari'],
+    ])
+  })
+
+  it('names the browser in the filed request and refuses an unknown one', async () => {
+    vi.mocked(loadRoundPage).mockResolvedValue({ roundPage: { ...ROUND_PAGE }, round: { ...ROUND }, site: { ...SITE } } as never)
+    vi.mocked(createRequestRecord).mockResolvedValue({ ok: true, request: { id: 'req_1' } } as never)
+    const res = await POST(postRequest({ title: 'Safari only bug', viewport: 'mobile_p', browser: 'webkit' }), createParams())
+    expect(res.status).toBe(201)
+    const input = vi.mocked(createRequestRecord).mock.calls[0][1] as { description: string }
+    expect(input.description).toContain('Browser: Safari')
+    const bad = await POST(postRequest({ title: 'x', browser: 'edge' }), createParams())
+    expect(bad.status).toBe(400)
   })
 })

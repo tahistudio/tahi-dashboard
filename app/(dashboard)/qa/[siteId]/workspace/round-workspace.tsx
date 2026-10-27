@@ -13,6 +13,8 @@ import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { SlideOver } from '@/components/tahi/slide-over'
 import {
   QA_VIEWPORTS,
+  browserLabel,
+  type QaBrowserKey,
   type QaCommentModeMessage,
   type QaElementContext,
   type QaFocusPinMessage,
@@ -26,6 +28,7 @@ import {
 } from '@/lib/qa/types'
 import { QA_RAIL_COLLAPSE_REM, QA_SINGLE_FRAME_REM, narrowerThanRem, useWorkspaceWidth } from './use-workspace-width'
 import { useRound, type QaPagePatch } from './use-round'
+import { useActiveBrowser } from './use-active-browser'
 import { useViewToken } from './use-view-token'
 import { useScanAll, SCAN_ALL_VIEWPORTS } from './scan-all'
 import { PageRail, filterPages, type QaRailFilter } from './page-rail'
@@ -48,8 +51,8 @@ import {
 } from './comments-helpers'
 import { RoundActions } from './round-actions'
 import type { CreateRequestInput } from './create-request-dialog'
-import type { QaRoundPageDetail, QaRoundPageRow, QaRoundRow, QaScanState, QaSiteRow, QaTickMap } from './qa-types'
-import { tickCount, ticksFor } from './qa-types'
+import type { QaIssuePanelDetail, QaRoundPageDetail, QaRoundPageRow, QaRoundRow, QaScanState, QaSiteRow } from './qa-types'
+import { emptyTicks, scansForBrowser, tickCount, ticksFor } from './qa-types'
 
 const LOADING_SCAN_MS = 20_000
 /** Quiet period after the last scan before the issues for the page are reloaded once. */
@@ -185,7 +188,7 @@ interface RoundWorkspaceBodyProps {
   refresh: () => Promise<void>
   patchPage: (pageId: string, patch: QaPagePatch) => Promise<void>
   fetchDetail: (pageId: string) => Promise<QaRoundPageDetail>
-  submitScan: (roundPageId: string, viewport: QaViewportKey, result: QaScanResult) => Promise<void>
+  submitScan: (roundPageId: string, viewport: QaViewportKey, result: QaScanResult, browser: QaBrowserKey) => Promise<void>
 }
 
 function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
@@ -199,6 +202,12 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   const viewer = useViewToken(siteId, round.target)
   const baseUrl = viewer.baseUrl
   const viewOrigin = useMemo(() => (baseUrl ? viewerOrigin(baseUrl) : null), [baseUrl])
+  // The browser every tick, scan and comment here is recorded against. Detected from the user agent;
+  // an override can replace detection later without touching what reads activeBrowser.
+  const { activeBrowser } = useActiveBrowser()
+  const roundBrowsers = round.browsers
+  const browserInRound = roundBrowsers.includes(activeBrowser)
+  const activeBrowserLabel = browserLabel(activeBrowser)
 
   const [filter, setFilter] = useState<QaRailFilter>('all')
   // null follows the workspace width (icon rail when narrow); a click pins the user's choice.
@@ -288,10 +297,13 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     if (!detail) return
     const next = emptyStates()
     // A closed round never scans, so a frame is scanned if a scan is stored and has no scan otherwise.
-    const missing: QaScanState = readOnly ? 'no_scan' : 'loading'
-    for (const v of QA_VIEWPORTS) next[v.key] = detail.scans[v.key] ? 'scanned' : missing
+    // A browser outside the round stores nothing either.
+    const stores = !readOnly && browserInRound
+    const missing: QaScanState = stores ? 'loading' : 'no_scan'
+    const activeScans = scansForBrowser(detail.scans, activeBrowser)
+    for (const v of QA_VIEWPORTS) next[v.key] = activeScans[v.key] ? 'scanned' : missing
     setScanStates(next)
-    if (readOnly) return
+    if (!stores) return
     const timer = setTimeout(() => {
       setScanStates(prev => {
         const out = { ...prev }
@@ -300,7 +312,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
       })
     }, LOADING_SCAN_MS)
     return () => clearTimeout(timer)
-  }, [detail, readOnly])
+  }, [detail, readOnly, activeBrowser, browserInRound])
 
   const reloadDetail = useCallback(async () => {
     if (selectedId) await loadDetail(selectedId)
@@ -324,7 +336,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     }
   }, [viewOrigin])
 
-  const comments = useComments(selectedId, readOnly)
+  const comments = useComments(selectedId, readOnly, activeBrowser)
   const pinsForRef = useRef(comments.pinsFor)
   pinsForRef.current = comments.pinsFor
   // Latest values for the message listener, so it subscribes once.
@@ -393,18 +405,18 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     // The frame is loaded and scanned, so a queued highlight can go now.
     flushHighlight(viewport.key)
     // A closed round stores nothing; the stored scans decide what each frame shows.
-    if (readOnly) return
+    if (readOnly || !browserInRound) return
     if (!selectedRow) return
     const pageId = selectedRow.id
     setScanStates(s => ({ ...s, [viewport.key]: 'scanned' }))
     try {
-      await submitScan(pageId, viewport.key, result)
+      await submitScan(pageId, viewport.key, result, activeBrowser)
       scheduleDetailReload()
     } catch (err) {
       setScanStates(s => ({ ...s, [viewport.key]: 'failed' }))
       showToast(err instanceof Error ? err.message : 'The scan could not be saved.', 'error')
     }
-  }, [readOnly, selectedRow, submitScan, scheduleDetailReload, flushHighlight, showToast])
+  }, [readOnly, browserInRound, activeBrowser, selectedRow, submitScan, scheduleDetailReload, flushHighlight, showToast])
 
   const handleFrameLoad = useCallback((key: QaViewportKey) => {
     const later = (fn: () => void, ms: number) => {
@@ -514,7 +526,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }, [composerViewport])
 
   const onScanError = useCallback((message: string) => showToast(message, 'error'), [showToast])
-  const scanAll = useScanAll({ baseUrl, pages, submitScan, onError: onScanError })
+  const scanAll = useScanAll({ baseUrl, pages, submitScan, browser: activeBrowser, onError: onScanError })
 
   function rescan() {
     postToFrames({ type: 'qa:rescan' })
@@ -584,7 +596,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }
 
   async function createRequestFromComment(comment: NumberedComment, input: CreateRequestInput): Promise<string> {
-    const requestId = await postCreateRequest(comment.viewport, input)
+    const requestId = await postCreateRequest(comment.viewport, input, comment.browser)
     try {
       await comments.update(comment.id, { requestId })
     } catch {
@@ -594,9 +606,25 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }
 
   function tick(key: QaViewportKey, value: boolean) {
-    if (!selectedRow) return
+    if (!selectedRow || !browserInRound) return
     const vp: Partial<Record<QaViewportKey, boolean>> = { [key]: value }
-    void patchPage(selectedRow.id, { vp })
+    void patchPage(selectedRow.id, { vp, browser: activeBrowser })
+  }
+
+  /** Adds the browser being tested to the round, so its ticks, scans and comments can be recorded. */
+  async function addActiveBrowser() {
+    try {
+      const res = await fetch(apiPath(`/api/admin/qa/rounds/${round.id}`), {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ browsers: [...roundBrowsers, activeBrowser] }),
+      })
+      if (!res.ok) throw new Error(await errorText(res))
+      await refresh()
+      showToast(`${activeBrowserLabel} added to this round.`, 'success')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not add the browser.', 'error')
+    }
   }
 
   function setStatus(status: 'pass' | 'fail' | 'untested') {
@@ -715,12 +743,12 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     }
   }
 
-  async function postCreateRequest(viewport: QaViewportKey | undefined, input: CreateRequestInput): Promise<string> {
+  async function postCreateRequest(viewport: QaViewportKey | undefined, input: CreateRequestInput, browser: QaBrowserKey): Promise<string> {
     if (!selectedRow) throw new Error('No page selected.')
     const res = await fetch(apiPath(`/api/admin/qa/round-pages/${selectedRow.id}/create-request`), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: input.title, description: input.description, viewport }),
+      body: JSON.stringify({ title: input.title, description: input.description, viewport, browser }),
     })
     if (!res.ok) throw new Error(await errorText(res))
     const json = (await res.json()) as { requestId?: string }
@@ -729,7 +757,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }
 
   async function createRequest(issue: QaIssue, input: CreateRequestInput): Promise<string> {
-    const requestId = await postCreateRequest(issue.viewport, input)
+    const requestId = await postCreateRequest(issue.viewport, input, issue.browser ?? activeBrowser)
     await reloadDetail()
     return requestId
   }
@@ -749,12 +777,15 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     }
   }
 
-  const ticks: QaTickMap = selectedRow ? ticksFor(selectedRow) : { xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false }
+  const ticks = selectedRow ? ticksFor(selectedRow, activeBrowser) : emptyTicks()
   const selectedIndex = selectedRow ? pages.findIndex(p => p.id === selectedRow.id) : -1
   const upstream = selectedRow ? upstreamUrl(site, round.target as QaTarget, selectedRow.path) : null
-  const totalTicks = pages.length * QA_VIEWPORTS.length
-  const doneTicks = pages.reduce((n, p) => n + tickCount(p), 0)
-  const detailWithRow = detail && selectedRow ? { ...detail, roundPage: selectedRow } : detail
+  const totalTicks = pages.length * QA_VIEWPORTS.length * roundBrowsers.length
+  const doneTicks = pages.reduce((n, p) => n + tickCount(p, roundBrowsers), 0)
+  const notInRoundReason = browserInRound ? undefined : `${activeBrowserLabel} is not part of this round`
+  const panelDetail: QaIssuePanelDetail | null = detail
+    ? { ...detail, roundPage: selectedRow ?? detail.roundPage, scans: scansForBrowser(detail.scans, activeBrowser, true) }
+    : null
   const targetLabel = round.target === 'live' ? 'Live' : 'Staging'
 
   if (viewer.error === 'not_configured') {
@@ -780,7 +811,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   // Shared by the inline Issues section and the wide-mode drawer.
   const issuePanel = selectedRow ? (
     <IssuePanel
-      detail={detailWithRow}
+      detail={panelDetail}
       loading={detailLoading}
       error={detailError}
       target={round.target as QaTarget}
@@ -794,6 +825,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
       onRunPageSpeed={runPageSpeed}
       comments={{
         items: comments.comments,
+        browsers: roundBrowsers,
+        activeBrowser,
         loading: comments.loading,
         error: comments.error,
         selectedId: selectedCommentId,
@@ -849,6 +882,12 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
           <span className="rounded-full border border-[var(--color-border)] px-2 text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
             {targetLabel}
           </span>
+          <span
+            className="rounded-full border border-[var(--color-brand)] bg-[var(--color-brand-50)] px-2 text-[var(--color-text)]"
+            style={{ fontSize: '0.75rem', fontWeight: 600 }}
+          >
+            Testing in {activeBrowserLabel}
+          </span>
         </div>
         <div className="flex flex-wrap items-center" style={{ gap: '0.5rem' }}>
           <TahiButton
@@ -896,6 +935,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
             round={round}
             readOnly={readOnly}
             scanRunning={scanAll.running}
+            scanAllDisabled={!browserInRound}
             onScanAll={scanAll.start}
             onRoundChanged={refresh}
             onCloseRound={() => void setRoundStatus('closed')}
@@ -911,6 +951,23 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
         </div>
       ) : null}
 
+      {!browserInRound ? (
+        <div
+          role="note"
+          className="flex flex-wrap items-center justify-between rounded-[var(--radius-leaf-sm)] bg-[var(--color-bg-tertiary)] px-3 py-2 text-[var(--color-text-muted)]"
+          style={{ gap: '0.5rem', fontSize: '0.8125rem' }}
+        >
+          <span>
+            {activeBrowserLabel} is not part of this round, so ticks, scans and comments are not recorded here.
+          </span>
+          {!readOnly ? (
+            <TahiButton variant="secondary" size="sm" onClick={() => void addActiveBrowser()} style={{ minHeight: '2.75rem' }}>
+              Add {activeBrowserLabel} to this round
+            </TahiButton>
+          ) : null}
+        </div>
+      ) : null}
+
       {readOnly ? (
         <div role="note" className="rounded-[var(--radius-leaf-sm)] bg-[var(--color-bg-tertiary)] px-3 py-2 text-[var(--color-text-muted)]" style={{ fontSize: '0.8125rem' }}>
           This round is closed. Ticks, status and notes are read-only.
@@ -920,6 +977,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
       <div className="flex min-w-0 items-stretch" style={{ gap: '1rem' }}>
         <PageRail
           pages={pages}
+          browsers={roundBrowsers}
+          dotBrowser={browserInRound ? activeBrowser : (roundBrowsers[0] ?? activeBrowser)}
           groups={groups}
           selectedId={selectedId}
           onSelect={selectPage}
@@ -946,7 +1005,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
                     <input
                       type="checkbox"
                       checked={ticks[v.key]}
-                      disabled={readOnly}
+                      disabled={readOnly || !browserInRound}
                       onChange={e => tick(v.key, e.target.checked)}
                       className="size-4 accent-[var(--color-brand)] disabled:cursor-not-allowed"
                     />
@@ -962,7 +1021,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               path={selectedRow.path}
               scanStates={scanStates}
               ticks={ticks}
-              readOnly={readOnly}
+              readOnly={readOnly || !browserInRound}
+              readOnlyReason={readOnly ? undefined : notInRoundReason}
               onTick={tick}
               onScan={(v, result) => void handleScan(v, result)}
               framesRef={framesRef}

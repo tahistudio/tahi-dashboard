@@ -9,8 +9,9 @@ import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { RelativeTime } from '@/components/tahi/relative-time'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Textarea } from '@/components/tahi/input'
-import { QA_COMMENT_BODY_MAX, type QaComment } from '@/lib/qa/types'
+import { QA_COMMENT_BODY_MAX, browserLabel, type QaBrowserKey, type QaComment } from '@/lib/qa/types'
 import {
+  commentsForBrowser,
   filterForSelection,
   groupByViewport,
   matchesFilter,
@@ -47,6 +48,10 @@ const ACTION_STYLE: CSSProperties = { minHeight: '2.75rem' }
 
 export interface CommentsTabProps {
   comments: NumberedComment[]
+  /** The browsers the round covers. The browser chips show when there is more than one. */
+  browsers: QaBrowserKey[]
+  /** The browser being tested; the list shows its comments unless All browsers is picked. */
+  activeBrowser: QaBrowserKey
   loading: boolean
   error: string | null
   readOnly: boolean
@@ -62,6 +67,8 @@ export interface CommentsTabProps {
 /** Issues panel tab listing element comments, grouped by viewport. */
 export function CommentsTab({
   comments,
+  browsers,
+  activeBrowser,
   loading,
   error,
   readOnly,
@@ -74,6 +81,8 @@ export function CommentsTab({
   onCreateRequest,
 }: CommentsTabProps) {
   const [filter, setFilter] = useState<CommentFilter>('open')
+  // 'active' shows the comments made in the browser being tested; 'all' shows every browser's.
+  const [browserScope, setBrowserScope] = useState<'active' | 'all'>('active')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
   const [editError, setEditError] = useState<string | null>(null)
@@ -87,10 +96,16 @@ export function CommentsTab({
   commentsRef.current = comments
   useEffect(() => {
     setFilter(current => filterForSelection(commentsRef.current, selectedId, current))
-  }, [selectedId])
+    // The same for a comment made in another browser.
+    const selected = commentsRef.current.find(c => c.id === selectedId)
+    if (selected && selected.browser !== activeBrowser) setBrowserScope('all')
+  }, [selectedId, activeBrowser])
+
+  const shown = commentsForBrowser(comments, browserScope === 'active' ? activeBrowser : null)
+  const showBrowserNames = browsers.length > 1
 
   // Scroll once the selected row is on screen: after a selection, or after the filter widened to show it.
-  const selectedVisible = selectedId !== null && comments.some(c => c.id === selectedId && matchesFilter(c.status, filter))
+  const selectedVisible = selectedId !== null && shown.some(c => c.id === selectedId && matchesFilter(c.status, filter))
   useEffect(() => {
     if (!selectedId || !selectedVisible) return
     const el = listRef.current?.querySelector<HTMLElement>(`[data-comment-id="${selectedId}"]`)
@@ -120,7 +135,7 @@ export function CommentsTab({
     )
   }
 
-  const groups = groupByViewport(comments, filter)
+  const groups = groupByViewport(shown, filter)
 
   function startEdit(comment: NumberedComment) {
     setEditingId(comment.id)
@@ -179,7 +194,7 @@ export function CommentsTab({
               style={{
                 ...CHIP_BASE,
                 background: on ? 'var(--color-brand-50)' : 'var(--color-bg)',
-                color: on ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                color: on ? 'var(--color-brand-on-tint)' : 'var(--color-text-muted)',
                 borderColor: on ? 'var(--color-brand)' : 'var(--color-border)',
               }}
             >
@@ -188,6 +203,31 @@ export function CommentsTab({
           )
         })}
       </div>
+
+      {showBrowserNames ? (
+        <div role="group" aria-label="Filter comments by browser" className="flex flex-wrap" style={{ gap: '0.375rem' }}>
+          {(['active', 'all'] as const).map(scope => {
+            const on = browserScope === scope
+            return (
+              <button
+                key={scope}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setBrowserScope(scope)}
+                className="tahi-focus-ring transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{
+                  ...CHIP_BASE,
+                  background: on ? 'var(--color-brand-50)' : 'var(--color-bg)',
+                  color: on ? 'var(--color-brand-on-tint)' : 'var(--color-text-muted)',
+                  borderColor: on ? 'var(--color-brand)' : 'var(--color-border)',
+                }}
+              >
+                {scope === 'active' ? browserLabel(activeBrowser) : 'All browsers'}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
 
       <div ref={listRef} className="flex min-w-0 flex-col" style={{ gap: '1rem' }}>
         {groups.length === 0 ? (
@@ -260,6 +300,12 @@ export function CommentsTab({
                     <div className="flex flex-wrap items-center text-[var(--color-text-muted)]" style={{ gap: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
                       <span>{comment.authorName ?? 'Unknown author'}</span>
                       <span aria-hidden="true">·</span>
+                      {showBrowserNames || comment.browser !== 'chromium' ? (
+                        <>
+                          <span>{comment.browserLabel}</span>
+                          <span aria-hidden="true">·</span>
+                        </>
+                      ) : null}
                       <RelativeTime date={comment.createdAt} />
                       {resolved ? <span>· Resolved</span> : null}
                     </div>

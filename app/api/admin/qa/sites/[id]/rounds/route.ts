@@ -1,22 +1,25 @@
 /**
  * GET  /api/admin/qa/sites/[id]/rounds
- *      Rounds for one site, newest first, each with tick, status and page counts.
+ *      Rounds for one site, newest first, each with its browsers, tick, status and page counts.
+ *      Ticks count across all of the round's browsers.
  *
  * POST /api/admin/qa/sites/[id]/rounds
  *      Snapshots the site's non-removed pages into a new round. Ungrouped pages
  *      are all included; for each template group only the sample paths are.
- *      Body: { name: string (1 to 120), target: 'staging' | 'live' }.
+ *      Body: { name: string (1 to 120), target: 'staging' | 'live',
+ *              browsers?: ('chromium' | 'firefox' | 'webkit')[] (non-empty, default ['chromium']) }.
  */
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { loadSite, targetOrigin } from '@/lib/qa/server'
 import { pickSamples } from '@/lib/qa/grouping'
-import type { QaTarget } from '@/lib/qa/types'
+import { parseBrowserInput, parseRoundBrowsers } from '@/lib/qa/browsers'
+import { QA_DEFAULT_BROWSER, QA_VIEWPORT_KEYS, type QaBrowserKey, type QaTarget } from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RoundPageRow = typeof schema.qaRoundPages.$inferSelect
@@ -43,18 +46,23 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out
 }
 
-function roundCounts(rows: RoundPageRow[]) {
+/**
+ * Ticks and status counts for one round. Ticks count across the round's browsers: Chromium from the
+ * vp_* columns, the others from the number of ticked qa_browser_ticks rows per browser.
+ */
+function roundCounts(rows: RoundPageRow[], browsers: QaBrowserKey[], tickedByBrowser: Map<string, number>) {
   let ticksDone = 0
   let pass = 0
   let fail = 0
   let untested = 0
   for (const r of rows) {
-    ticksDone += r.vpXl + r.vpDesktop + r.vpTablet + r.vpMobileL + r.vpMobileP
+    if (browsers.includes('chromium')) ticksDone += r.vpXl + r.vpDesktop + r.vpTablet + r.vpMobileL + r.vpMobileP
     if (r.status === 'pass') pass++
     else if (r.status === 'fail') fail++
     else untested++
   }
-  return { ticksDone, ticksTotal: rows.length * 5, pass, fail, untested }
+  for (const b of browsers) if (b !== 'chromium') ticksDone += tickedByBrowser.get(b) ?? 0
+  return { ticksDone, ticksTotal: rows.length * QA_VIEWPORT_KEYS.length * browsers.length, pass, fail, untested }
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -79,9 +87,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     pageRows.push(...await database.select().from(schema.qaRoundPages).where(inArray(schema.qaRoundPages.roundId, ids)))
   }
 
+  // Ticked Firefox and WebKit ticks per round and browser: one grouped query per chunk of rounds.
+  const tickedCounts = new Map<string, Map<string, number>>()
+  for (const ids of chunk(roundIds, ID_QUERY_CHUNK)) {
+    const grouped = await database
+      .select({ roundId: schema.qaRoundPages.roundId, browser: schema.qaBrowserTicks.browser, n: sql<number>`count(*)` })
+      .from(schema.qaBrowserTicks)
+      .innerJoin(schema.qaRoundPages, eq(schema.qaBrowserTicks.roundPageId, schema.qaRoundPages.id))
+      .where(and(inArray(schema.qaRoundPages.roundId, ids), eq(schema.qaBrowserTicks.ticked, 1)))
+      .groupBy(schema.qaRoundPages.roundId, schema.qaBrowserTicks.browser)
+    for (const g of grouped) {
+      const perBrowser = tickedCounts.get(g.roundId) ?? new Map<string, number>()
+      perBrowser.set(g.browser, Number(g.n))
+      tickedCounts.set(g.roundId, perBrowser)
+    }
+  }
+
   const items = rounds.map(round => {
     const own = pageRows.filter(p => p.roundId === round.id)
-    return { ...round, ...roundCounts(own), pages: own.length }
+    const browsers = parseRoundBrowsers(round.browsers)
+    return { ...round, browsers, ...roundCounts(own, browsers, tickedCounts.get(round.id) ?? new Map<string, number>()), pages: own.length }
   })
   return NextResponse.json({ items })
 }
@@ -104,6 +129,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'target must be staging or live' }, { status: 400 })
   }
   const target: QaTarget = body.target
+  let browsers: QaBrowserKey[] = [QA_DEFAULT_BROWSER]
+  if (body.browsers !== undefined) {
+    const parsed = parseBrowserInput(body.browsers)
+    if (!parsed) {
+      return NextResponse.json({ error: 'browsers must be a non-empty list of chromium, firefox or webkit' }, { status: 400 })
+    }
+    browsers = parsed
+  }
 
   const { id } = await params
   const database = (await db()) as D1
@@ -159,11 +192,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     name,
     target,
     status: 'open',
+    browsers: JSON.stringify(browsers),
     createdBy: userId,
     createdAt: now,
   }
   const writes = [database.insert(schema.qaRounds).values(round), ...pageInserts]
   await database.batch([writes[0], ...writes.slice(1)])
 
-  return NextResponse.json({ item: { ...round, pages: planned.length } }, { status: 201 })
+  return NextResponse.json({ item: { ...round, browsers, pages: planned.length } }, { status: 201 })
 }

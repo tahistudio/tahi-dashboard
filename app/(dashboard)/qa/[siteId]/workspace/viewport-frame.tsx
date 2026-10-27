@@ -62,6 +62,8 @@ export interface ViewportFrameProps {
   onExpand: () => void
   frameRef: (el: HTMLIFrameElement | null) => void
   readOnly?: boolean
+  /** Why the frame is read only, shown as the tooltip of the disabled comment button. Defaults to the closed round message. */
+  readOnlyReason?: string
   onLoad?: () => void
   /** Comment mode is on in this frame. */
   commenting?: boolean
@@ -82,6 +84,7 @@ export function ViewportFrame({
   onExpand,
   frameRef,
   readOnly = false,
+  readOnlyReason,
   onLoad,
   commenting = false,
   onCommentToggle,
@@ -115,7 +118,7 @@ export function ViewportFrame({
       disabled={readOnly}
       aria-pressed={commenting}
       aria-label={`Comment on ${label}`}
-      title={readOnly ? 'This round is closed' : `Comment on ${label}`}
+      title={readOnly ? (readOnlyReason ?? 'This round is closed') : `Comment on ${label}`}
       className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)] disabled:cursor-not-allowed disabled:opacity-60"
       style={{
         gap: '0.25rem',

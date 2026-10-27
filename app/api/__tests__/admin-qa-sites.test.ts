@@ -33,8 +33,9 @@ vi.mock('@/db/d1', () => ({
     qaSites: { _table: 'qa_sites', id: 'id', orgId: 'org_id', name: 'name', archivedAt: 'archived_at', createdAt: 'created_at' },
     qaPages: { _table: 'qa_pages', id: 'id', siteId: 'site_id', path: 'path', removedAt: 'removed_at', source: 'source', groupKey: 'group_key' },
     qaRounds: { _table: 'qa_rounds', id: 'id', siteId: 'site_id', status: 'status', createdAt: 'created_at' },
+    qaBrowserTicks: { _table: 'qa_browser_ticks', roundPageId: 'round_page_id', browser: 'browser', ticked: 'ticked' },
     qaRoundPages: {
-      _table: 'qa_round_pages', roundId: 'round_id', status: 'status', vpXl: 'vp_xl', vpDesktop: 'vp_desktop',
+      _table: 'qa_round_pages', id: 'id', roundId: 'round_id', status: 'status', vpXl: 'vp_xl', vpDesktop: 'vp_desktop',
       vpTablet: 'vp_tablet', vpMobileL: 'vp_mobile_l', vpMobileP: 'vp_mobile_p', a11yCritical: 'a11y_critical',
       a11ySerious: 'a11y_serious', a11yModerate: 'a11y_moderate', a11yMinor: 'a11y_minor', brokenLinks: 'broken_links',
       seoIssues: 'seo_issues', launchIssues: 'launch_issues', perfIssues: 'perf_issues',
@@ -229,9 +230,37 @@ describe('GET /api/admin/qa/sites', () => {
     expect(json.items).toHaveLength(1)
     expect(json.items[0].orgName).toBe('Acme Ltd')
     expect(json.items[0].openRound).toEqual({
-      id: 'round_new', name: 'Pre-launch 26 Oct', target: 'staging',
+      id: 'round_new', name: 'Pre-launch 26 Oct', target: 'staging', browsers: ['chromium'],
       ticksDone: 13, ticksTotal: 20, failing: 2, issues: 7,
     })
+  })
+
+  it('counts ticks across the browsers of the round', async () => {
+    store.rows = {
+      organisations: [{ id: 'org_acme', name: 'Acme Ltd' }],
+      qa_sites: [site()],
+      qa_rounds: [
+        { id: 'round_new', siteId: 'site_1', name: 'Cross browser', target: 'staging', status: 'open', browsers: '["chromium","firefox"]', createdAt: '2026-10-20T00:00:00.000Z' },
+      ],
+      qa_round_pages: [{ roundId: 'round_new', pageCount: 4, ticksDone: 13, failing: 0, issues: 0 }],
+      qa_browser_ticks: [{ roundId: 'round_new', browser: 'firefox', n: 6 }],
+    }
+    const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
+    expect(json.items[0].openRound).toMatchObject({ browsers: ['chromium', 'firefox'], ticksDone: 19, ticksTotal: 40 })
+  })
+
+  it('counts only the Firefox ticks when the round has no Chrome', async () => {
+    store.rows = {
+      organisations: [{ id: 'org_acme', name: 'Acme Ltd' }],
+      qa_sites: [site()],
+      qa_rounds: [
+        { id: 'round_new', siteId: 'site_1', name: 'Firefox only', target: 'staging', status: 'open', browsers: '["firefox"]', createdAt: '2026-10-20T00:00:00.000Z' },
+      ],
+      qa_round_pages: [{ roundId: 'round_new', pageCount: 4, ticksDone: 13, failing: 0, issues: 0 }],
+      qa_browser_ticks: [{ roundId: 'round_new', browser: 'firefox', n: 2 }],
+    }
+    const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
+    expect(json.items[0].openRound).toMatchObject({ browsers: ['firefox'], ticksDone: 2, ticksTotal: 20 })
   })
 
   it('returns openRound null when the site has no open round', async () => {

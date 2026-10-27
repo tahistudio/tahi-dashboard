@@ -10,11 +10,14 @@ import {
   openFirst,
   pickAction,
   pinsFor,
+  commentsForBrowser,
 } from '../comments-helpers'
 
 function comment(over: Partial<QaComment> & { id: string; viewport: QaViewportKey }): QaComment {
   return {
     roundPageId: 'rp-1',
+    browser: 'chromium',
+    browserLabel: 'Chrome',
     selector: '#hero',
     ox: 0.5,
     oy: 0.5,
@@ -362,5 +365,25 @@ describe('commentRequestPrefill length cap', () => {
     const out = commentRequestPrefill({ body: 'Short', elementTag: 'p', elementText: null }, 'Desktop', '/')
     expect(out.description.startsWith('Short\n\nViewport: Desktop')).toBe(true)
     expect(out.description).not.toContain('…')
+  })
+})
+
+describe('browser scoping', () => {
+  const mixed = numberComments([
+    comment({ id: 'a', viewport: 'desktop', createdAt: '2026-10-27T10:00:00.000Z' }),
+    comment({ id: 'b', viewport: 'desktop', browser: 'firefox', browserLabel: 'Firefox', createdAt: '2026-10-27T10:01:00.000Z' }),
+    comment({ id: 'c', viewport: 'tablet', browser: 'firefox', browserLabel: 'Firefox', createdAt: '2026-10-27T10:02:00.000Z' }),
+  ])
+
+  it('pinsFor draws only the pins of the browser being tested, keeping the page wide numbers', () => {
+    expect(pinsFor(mixed, 'desktop', 'firefox').map(p => [p.id, p.n])).toEqual([['b', 2]])
+    expect(pinsFor(mixed, 'desktop', 'chromium').map(p => [p.id, p.n])).toEqual([['a', 1]])
+    expect(pinsFor(mixed, 'desktop').map(p => p.id)).toEqual(['a', 'b'])
+  })
+
+  it('commentsForBrowser keeps one browser, or all of them for null', () => {
+    expect(commentsForBrowser(mixed, 'firefox').map(c => c.id)).toEqual(['b', 'c'])
+    expect(commentsForBrowser(mixed, 'webkit')).toEqual([])
+    expect(commentsForBrowser(mixed, null).map(c => c.id)).toEqual(['a', 'b', 'c'])
   })
 })

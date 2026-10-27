@@ -10,7 +10,6 @@ export const SITE_QA_MIGRATION = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_round_pages_round_page ON qa_round_pages(round_id, page_id)`,
   `CREATE INDEX IF NOT EXISTS idx_qa_round_pages_page ON qa_round_pages(page_id)`,
   `CREATE TABLE IF NOT EXISTS qa_scan_results (id text PRIMARY KEY NOT NULL, round_page_id text NOT NULL, viewport text NOT NULL, result text NOT NULL, created_at text NOT NULL)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_scan_results_page_vp ON qa_scan_results(round_page_id, viewport)`,
   `CREATE TABLE IF NOT EXISTS qa_link_results (id text PRIMARY KEY NOT NULL, round_id text NOT NULL, url text NOT NULL, final_url text, status integer, hops text, broken integer NOT NULL DEFAULT 0, redirect_chain integer NOT NULL DEFAULT 0, staging_on_live integer NOT NULL DEFAULT 0, error text, checked_at text NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_link_results_round_url ON qa_link_results(round_id, url)`,
 ] as const
@@ -24,4 +23,19 @@ export const QA_COMMENTS_MIGRATION = [
 /** Element context on comments (SQA.3), mirrored in drizzle/migrations/0117_qa_comment_context.sql. The migrate runner tolerates "duplicate column name", so a rerun is safe. */
 export const QA_COMMENT_CONTEXT_MIGRATION = [
   `ALTER TABLE qa_comments ADD COLUMN element_context text`,
+] as const
+
+/**
+ * Browsers per round (SQA.4), mirrored in drizzle/migrations/0118_qa_browsers.sql. The ALTERs rely on the
+ * migrate runner tolerating "duplicate column name", so a rerun is safe. Order matters: the new scan
+ * index exists before the old one is dropped, so uniqueness never lapses for the scan upsert.
+ */
+export const QA_BROWSERS_MIGRATION = [
+  `ALTER TABLE qa_rounds ADD COLUMN browsers text NOT NULL DEFAULT '["chromium"]'`,
+  `CREATE TABLE IF NOT EXISTS qa_browser_ticks (id text PRIMARY KEY NOT NULL, round_page_id text NOT NULL, browser text NOT NULL, viewport text NOT NULL, ticked integer NOT NULL DEFAULT 0, updated_by text, updated_at text NOT NULL)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_browser_ticks_page_browser_vp ON qa_browser_ticks(round_page_id, browser, viewport)`,
+  `ALTER TABLE qa_scan_results ADD COLUMN browser text NOT NULL DEFAULT 'chromium'`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_scan_results_page_vp_browser ON qa_scan_results(round_page_id, viewport, browser)`,
+  `DROP INDEX IF EXISTS idx_qa_scan_results_page_vp`,
+  `ALTER TABLE qa_comments ADD COLUMN browser text NOT NULL DEFAULT 'chromium'`,
 ] as const

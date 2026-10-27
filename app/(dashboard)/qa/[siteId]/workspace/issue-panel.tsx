@@ -6,9 +6,9 @@ import { Badge, type BadgeTone } from '@/components/tahi/badge'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import { Textarea } from '@/components/tahi/input'
 import { TahiButton } from '@/components/tahi/tahi-button'
-import { QA_VIEWPORTS, type QaIssue, type QaIssueCategory, type QaIssueSeverity, type QaPageStatus, type QaScanResult, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
+import { QA_VIEWPORTS, browserLabel, type QaBrowserKey, type QaIssue, type QaIssueCategory, type QaIssueSeverity, type QaPageStatus, type QaScanResult, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
 import type { PsiSummary } from '@/lib/qa/pagespeed'
-import type { QaRoundPageDetail } from './qa-types'
+import type { QaIssuePanelDetail } from './qa-types'
 import type { QaPagePatch } from './use-round'
 import { CreateRequestDialog, type CreateRequestInput } from './create-request-dialog'
 import { PerformancePanel, SeoSummary } from './issue-panel-detail'
@@ -41,7 +41,7 @@ export function viewportLabel(key: QaViewportKey | undefined): string | null {
 }
 
 /** The scan used for the SEO summary: Desktop when present, otherwise any scanned viewport. */
-export function seoScan(scans: QaRoundPageDetail['scans']): QaScanResult | null {
+export function seoScan(scans: QaIssuePanelDetail['scans']): QaScanResult | null {
   return scans.desktop ?? Object.values(scans)[0] ?? null
 }
 
@@ -57,6 +57,10 @@ function parsePagespeed(raw: string | null): { mobile?: PsiSummary; desktop?: Ps
 /** Everything the Comments tab needs. The workspace owns the data because the pins live in the frames. */
 export interface IssuePanelComments {
   items: NumberedComment[]
+  /** The browsers the round covers. */
+  browsers: QaBrowserKey[]
+  /** The browser being tested. */
+  activeBrowser: QaBrowserKey
   loading: boolean
   error: string | null
   selectedId: string | null
@@ -70,7 +74,7 @@ export interface IssuePanelComments {
 }
 
 export interface IssuePanelProps {
-  detail: QaRoundPageDetail | null
+  detail: QaIssuePanelDetail | null
   loading: boolean
   error: string | null
   target: QaTarget
@@ -119,6 +123,7 @@ export function IssuePanel(props: IssuePanelProps) {
   const scanned = detail.roundPage.scannedAt !== null || Object.keys(detail.scans).length > 0
   const current = TABS.find(t => t.value === tab) ?? TABS[0]
   const seoSource = seoScan(detail.scans)
+  const showBrowsers = comments.browsers.length > 1
 
   return (
     <div className="flex min-h-0 flex-col" style={{ gap: '0.75rem' }}>
@@ -152,6 +157,8 @@ export function IssuePanel(props: IssuePanelProps) {
         {tab === 'comments' ? (
           <CommentsTab
             comments={comments.items}
+            browsers={comments.browsers}
+            activeBrowser={comments.activeBrowser}
             loading={comments.loading}
             error={comments.error}
             readOnly={readOnly}
@@ -172,6 +179,7 @@ export function IssuePanel(props: IssuePanelProps) {
               onShow={props.onShow}
               onRequest={setRequestFor}
               readOnly={readOnly}
+              showBrowsers={showBrowsers}
             />
             <PerformancePanel
               pagespeed={parsePagespeed(detail.roundPage.pagespeed)}
@@ -189,6 +197,7 @@ export function IssuePanel(props: IssuePanelProps) {
               onShow={props.onShow}
               onRequest={setRequestFor}
               readOnly={readOnly}
+              showBrowsers={showBrowsers}
             />
             {seoSource ? <SeoSummary seo={seoSource.seo} /> : null}
           </div>
@@ -200,6 +209,7 @@ export function IssuePanel(props: IssuePanelProps) {
             onShow={props.onShow}
             onRequest={setRequestFor}
             readOnly={readOnly}
+            showBrowsers={showBrowsers}
           />
         ) : null}
       </div>
@@ -245,9 +255,11 @@ interface IssueListProps {
   onShow: (issue: QaIssue) => void
   onRequest: (issue: QaIssue) => void
   readOnly: boolean
+  /** Name the browsers that showed each issue. Only worth it when the round covers more than one. */
+  showBrowsers: boolean
 }
 
-function IssueList({ issues, scanned, onShow, onRequest, readOnly }: IssueListProps) {
+function IssueList({ issues, scanned, onShow, onRequest, readOnly, showBrowsers }: IssueListProps) {
   if (!scanned) {
     return <PanelMessage tone="muted" text="Waiting for the scan" spinner />
   }
@@ -268,6 +280,9 @@ function IssueList({ issues, scanned, onShow, onRequest, readOnly }: IssueListPr
             <div className="flex flex-wrap items-center" style={{ gap: '0.375rem' }}>
               <Badge tone={SEVERITY_TONE[issue.severity]} variant="soft" size="sm">{SEVERITY_LABEL[issue.severity]}</Badge>
               {vp ? <Badge tone="neutral" variant="outline" size="sm">{vp}</Badge> : null}
+              {showBrowsers && issue.browsers && issue.browsers.length > 0 ? (
+                <Badge tone="neutral" variant="outline" size="sm">{issue.browsers.map(browserLabel).join(', ')}</Badge>
+              ) : null}
               <span className="text-[var(--color-text-subtle)]" style={{ fontSize: '0.6875rem' }}>{issue.code}</span>
             </div>
             <p className="text-[var(--color-text)] break-words" style={{ fontSize: '0.8125rem' }}>{issue.message}</p>

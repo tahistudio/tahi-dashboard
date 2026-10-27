@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
-import type { QaLinkResult, QaPageStatus, QaScanResult, QaViewportKey } from '@/lib/qa/types'
-import type { QaRoundPageDetail, QaRoundPageRow, QaRoundResponse } from './qa-types'
+import type { QaBrowserKey, QaLinkResult, QaPageStatus, QaScanResult, QaViewportKey } from '@/lib/qa/types'
+import { ticksFor, type QaRoundPageDetail, type QaRoundPageRow, type QaRoundResponse, type QaTickMap } from './qa-types'
 
 /** The check-links route's per-call URL cap. */
 const LINK_BATCH = 100
@@ -21,6 +21,8 @@ function changedFields(prev: QaRoundPageRow, next: QaRoundPageRow): (keyof QaRou
 
 export interface QaPagePatch {
   vp?: Partial<Record<QaViewportKey, boolean>>
+  /** The browser the vp ticks belong to. Defaults to Chrome. */
+  browser?: QaBrowserKey
   status?: QaPageStatus
   note?: string | null
 }
@@ -29,15 +31,48 @@ export interface QaPagePatch {
 export function applyPagePatch(row: QaRoundPageRow, patch: QaPagePatch): QaRoundPageRow {
   const next: QaRoundPageRow = { ...row }
   if (patch.vp) {
-    if (patch.vp.xl !== undefined) next.vpXl = patch.vp.xl ? 1 : 0
-    if (patch.vp.desktop !== undefined) next.vpDesktop = patch.vp.desktop ? 1 : 0
-    if (patch.vp.tablet !== undefined) next.vpTablet = patch.vp.tablet ? 1 : 0
-    if (patch.vp.mobile_l !== undefined) next.vpMobileL = patch.vp.mobile_l ? 1 : 0
-    if (patch.vp.mobile_p !== undefined) next.vpMobileP = patch.vp.mobile_p ? 1 : 0
+    const browser = patch.browser ?? 'chromium'
+    // Chrome ticks also live in the vp_* columns, which the server writes for Chrome.
+    if (browser === 'chromium') {
+      if (patch.vp.xl !== undefined) next.vpXl = patch.vp.xl ? 1 : 0
+      if (patch.vp.desktop !== undefined) next.vpDesktop = patch.vp.desktop ? 1 : 0
+      if (patch.vp.tablet !== undefined) next.vpTablet = patch.vp.tablet ? 1 : 0
+      if (patch.vp.mobile_l !== undefined) next.vpMobileL = patch.vp.mobile_l ? 1 : 0
+      if (patch.vp.mobile_p !== undefined) next.vpMobileP = patch.vp.mobile_p ? 1 : 0
+    }
+    const ticks: QaTickMap = { ...ticksFor(row, browser) }
+    for (const [key, value] of Object.entries(patch.vp)) {
+      if (typeof value === 'boolean') ticks[key as QaViewportKey] = value
+    }
+    next.browserTicks = { ...row.browserTicks, [browser]: ticks }
   }
   if (patch.status !== undefined) next.status = patch.status
   if (patch.note !== undefined) next.note = patch.note
   return next
+}
+
+/**
+ * Undoes one failed tick patch inside browserTicks[browser]: only the viewports the patch touched,
+ * and only where nothing newer has changed them since. A later tick on another viewport (whose
+ * optimistic write built on this one) is left alone, so tick A then B with A failing keeps B.
+ */
+export function rollbackTickPatch(
+  ticksNow: QaRoundPageRow['browserTicks'],
+  previous: QaRoundPageRow,
+  optimistic: QaRoundPageRow,
+  patch: QaPagePatch,
+): QaRoundPageRow['browserTicks'] {
+  if (!patch.vp) return ticksNow
+  const browser = patch.browser ?? 'chromium'
+  const now = ticksNow?.[browser]
+  if (!now) return ticksNow
+  const before = ticksFor(previous, browser)
+  const wrote = ticksFor(optimistic, browser)
+  const restored: QaTickMap = { ...now }
+  for (const key of Object.keys(patch.vp) as QaViewportKey[]) {
+    if (now[key] === wrote[key]) restored[key] = before[key]
+  }
+  return { ...ticksNow, [browser]: restored }
 }
 
 async function readError(res: Response): Promise<string> {
@@ -124,7 +159,10 @@ export function useRound(roundId: string | null) {
     setData(d => (d ? { ...d, pages: d.pages.map(p => (p.id === pageId ? optimistic : p)) } : d))
 
     const body: Record<string, unknown> = {}
-    if (patch.vp) body.vp = patch.vp
+    if (patch.vp) {
+      body.vp = patch.vp
+      if (patch.browser) body.browser = patch.browser
+    }
     if (patch.status !== undefined) body.status = patch.status
     if (patch.note !== undefined) body.note = patch.note
 
@@ -145,11 +183,16 @@ export function useRound(roundId: string | null) {
           pages: d.pages.map(p => {
             if (p.id !== pageId) return p
             const restored = { ...p } as Record<string, unknown>
-            for (const f of fields) if (p[f] === optimistic[f]) restored[f] = previous[f]
+            // browserTicks is one object for every viewport and browser, so it is rolled back per viewport below.
+            for (const f of fields) if (f !== 'browserTicks' && p[f] === optimistic[f]) restored[f] = previous[f]
+            if (fields.includes('browserTicks')) restored.browserTicks = rollbackTickPatch(p.browserTicks, previous, optimistic, patch)
             return restored as unknown as QaRoundPageRow
           }),
         }
       })
+      // A refresh must not bring the failed tick back from the pending values either.
+      const live = pendingRef.current.get(pageId)
+      if (live?.browserTicks) live.browserTicks = rollbackTickPatch(live.browserTicks, previous, optimistic, patch)
       settle()
       showToast(err instanceof Error ? err.message : 'Could not save that change.', 'error')
     }
@@ -188,14 +231,14 @@ export function useRound(roundId: string | null) {
   }, [roundId])
 
   /**
-   * Stores one viewport scan. The desktop scan also feeds the link checker. The
+   * Stores one viewport scan for one browser. The desktop scan also feeds the link checker. The
    * round refresh is debounced so a burst of scans costs one refresh.
    */
-  const submitScan = useCallback(async (roundPageId: string, viewport: QaViewportKey, result: QaScanResult) => {
+  const submitScan = useCallback(async (roundPageId: string, viewport: QaViewportKey, result: QaScanResult, browser: QaBrowserKey) => {
     const res = await fetch(apiPath(`/api/admin/qa/round-pages/${roundPageId}/scan`), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ viewport, result }),
+      body: JSON.stringify({ viewport, browser, result }),
     })
     if (!res.ok) throw new Error(await readError(res))
     if (viewport === 'desktop') {

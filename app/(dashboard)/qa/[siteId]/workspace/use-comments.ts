@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
-import type { QaComment, QaElementContext, QaPin, QaViewportKey } from '@/lib/qa/types'
+import type { QaBrowserKey, QaComment, QaElementContext, QaPin, QaViewportKey } from '@/lib/qa/types'
 import { numberComments, pinsFor, type NumberedComment } from './comments-helpers'
 
 export interface AddCommentInput {
   viewport: QaViewportKey
+  /** Defaults to the browser the hook was given. */
+  browser?: QaBrowserKey
   selector: string
   ox: number
   oy: number
@@ -49,9 +51,10 @@ function sameIdentity(a: QaComment, b: QaComment): boolean {
 /**
  * Loads the element comments for one round page and keeps them in sync with
  * the API. Pin numbers are computed here so the list and the pins agree.
- * Responses for a previous round page are ignored.
+ * Responses for a previous round page are ignored. Comments are loaded for every browser;
+ * new comments and the pins pinsFor returns belong to the browser being tested.
  */
-export function useComments(roundPageId: string | null, readOnly: boolean): UseCommentsResult {
+export function useComments(roundPageId: string | null, readOnly: boolean, browser: QaBrowserKey): UseCommentsResult {
   const { showToast } = useToast()
   const [comments, setComments] = useState<QaComment[]>([])
   const [loading, setLoading] = useState(false)
@@ -64,6 +67,8 @@ export function useComments(roundPageId: string | null, readOnly: boolean): UseC
   commentsRef.current = comments
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
+  const browserRef = useRef(browser)
+  browserRef.current = browser
 
   const load = useCallback(async (id: string) => {
     setLoading(true)
@@ -105,7 +110,7 @@ export function useComments(roundPageId: string | null, readOnly: boolean): UseC
     const res = await fetch(apiPath(`/api/admin/qa/round-pages/${encodeURIComponent(id)}/comments`), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, browser: input.browser ?? browserRef.current }),
     })
     if (!res.ok) throw new Error(await readError(res))
     const json = (await res.json()) as { comment: QaComment }
@@ -159,8 +164,8 @@ export function useComments(roundPageId: string | null, readOnly: boolean): UseC
   const numbered = useMemo(() => numberComments(comments), [comments])
 
   const pinsForViewport = useCallback(
-    (viewport: QaViewportKey) => pinsFor(numbered, viewport),
-    [numbered],
+    (viewport: QaViewportKey) => pinsFor(numbered, viewport, browser),
+    [numbered, browser],
   )
 
   return {

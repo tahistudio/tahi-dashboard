@@ -137,6 +137,13 @@ describe('start_qa_round', () => {
     expect(mapped.body).toEqual({ name: 'Launch check', target: 'staging' })
   })
 
+  it('passes the browsers of the round through and refuses an unknown one', () => {
+    const mapped = call('start_qa_round', { site_id: 'site_1', name: 'Cross browser', target: 'live', browsers: ['chromium', 'firefox', 'webkit'] })
+    expect(mapped.body).toEqual({ name: 'Cross browser', target: 'live', browsers: ['chromium', 'firefox', 'webkit'] })
+    expect(() => call('start_qa_round', { site_id: 'site_1', name: 'x', target: 'live', browsers: ['opera'] })).toThrow('browsers must be a non-empty list')
+    expect(() => call('start_qa_round', { site_id: 'site_1', name: 'x', target: 'live', browsers: [] })).toThrow('browsers must be a non-empty list')
+  })
+
   it('requires site_id, name and target', () => {
     expect(() => call('start_qa_round', { name: 'x', target: 'live' })).toThrow('site_id is required')
     expect(() => call('start_qa_round', { site_id: 'site_1', target: 'live' })).toThrow('name is required')
@@ -188,6 +195,12 @@ describe('update_qa_round_page', () => {
 
   it('sends an empty body when only the id is given', () => {
     expect(call('update_qa_round_page', { round_page_id: 'rp_1' }).body).toEqual({})
+  })
+
+  it('passes the browser the ticks belong to and refuses an unknown one', () => {
+    const mapped = call('update_qa_round_page', { round_page_id: 'rp_1', browser: 'firefox', viewports: { desktop: true } })
+    expect(mapped.body).toEqual({ vp: { desktop: true }, browser: 'firefox' })
+    expect(() => call('update_qa_round_page', { round_page_id: 'rp_1', browser: 'edge', viewports: { desktop: true } })).toThrow('browser must be one of')
   })
 
   it('requires round_page_id', () => {
@@ -273,7 +286,15 @@ describe('round tools', () => {
     expect(mapped.path).toBe('/api/admin/qa/rounds/round_1')
     expect(mapped.method).toBe('PATCH')
     expect(mapped.body).toEqual({ name: 'R2', status: 'closed' })
-    expect(() => call('update_qa_round', { round_id: 'round_1' })).toThrow('name or status is required')
+    expect(() => call('update_qa_round', { round_id: 'round_1' })).toThrow('name, status or browsers is required')
+  })
+
+  it('update_qa_round changes the browsers of a round and refuses a bad list', () => {
+    const mapped = call('update_qa_round', { round_id: 'round_1', browsers: ['chromium', 'firefox', 'firefox'] })
+    expect(mapped.body).toEqual({ browsers: ['chromium', 'firefox'] })
+    expect(() => call('update_qa_round', { round_id: 'round_1', browsers: [] })).toThrow('browsers must be a non-empty list')
+    expect(() => call('update_qa_round', { round_id: 'round_1', browsers: ['edge'] })).toThrow('browsers must be a non-empty list')
+    expect(() => call('update_qa_round', { round_id: 'round_1', browsers: 'firefox' })).toThrow('browsers must be a non-empty list')
   })
 
   it('add_qa_round_samples posts groupKey and count', () => {
@@ -440,6 +461,33 @@ describe('element comment tools', () => {
       elementTag: 'h1',
       elementText: 'Welcome',
     })
+  })
+
+  it('add_qa_comment passes the browser through and refuses an unknown one', () => {
+    const mapped = call('add_qa_comment', { round_page_id: 'rp_1', viewport: 'xl', selector: 'a.cta', body: 'x', browser: 'webkit' })
+    expect(mapped.body).toEqual({ viewport: 'xl', selector: 'a.cta', ox: 0.5, oy: 0.5, body: 'x', browser: 'webkit' })
+    expect(() => call('add_qa_comment', { round_page_id: 'rp_1', viewport: 'xl', selector: 'a', body: 'x', browser: 'ie' })).toThrow('browser must be one of')
+  })
+
+  it('create_qa_request passes the browser the finding was seen in', () => {
+    const mapped = call('create_qa_request', { round_page_id: 'rp_1', title: 'Broken hero', browser: 'webkit' })
+    expect(mapped.body).toEqual({ title: 'Broken hero', browser: 'webkit' })
+  })
+
+  it('the browser inputs are constrained to the three engines in the tool schemas', () => {
+    const props = (name: string) => (TOOLS.find((t) => t.name === name)?.inputSchema as { properties: Record<string, { enum?: string[]; items?: { enum?: string[] } }> }).properties
+    const engines = ['chromium', 'firefox', 'webkit']
+    expect(props('start_qa_round').browsers.items?.enum).toEqual(engines)
+    expect(props('update_qa_round').browsers.items?.enum).toEqual(engines)
+    for (const name of ['update_qa_round_page', 'add_qa_comment', 'create_qa_request']) expect(props(name).browser.enum, name).toEqual(engines)
+  })
+
+  it('the tool descriptions name the browser fields', () => {
+    const description = (name: string) => TOOLS.find((t) => t.name === name)?.description ?? ''
+    for (const name of ['list_qa_comments', 'list_qa_round_comments', 'get_qa_comment']) expect(description(name), name).toContain('browserLabel')
+    expect(description('get_qa_round')).toContain('browserTicks')
+    expect(description('get_qa_round_report')).toContain('browsers')
+    expect(description('start_qa_round')).toContain('browsers')
   })
 
   it('add_qa_comment passes ox and oy through and omits the optional element fields', () => {

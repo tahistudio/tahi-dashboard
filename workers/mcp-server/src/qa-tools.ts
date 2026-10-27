@@ -31,6 +31,32 @@ export interface McpApiCall {
 /** The five viewport ticks on a round page, in the order the route stores them. */
 const VIEWPORT_KEYS = ['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'] as const
 
+/** The rendering engines a round can cover, as the routes name them (Chrome, Firefox, Safari). */
+const BROWSER_KEYS = ['chromium', 'firefox', 'webkit'] as const
+
+/** An optional browser argument. Undefined when absent, an error when it is not a known engine. */
+function optionalBrowser(args: Record<string, unknown>, key: string): string | undefined {
+  const value = str(args, key)
+  if (value === undefined) return undefined
+  if (!(BROWSER_KEYS as readonly string[]).includes(value)) throw new Error(`${key} must be one of chromium, firefox, webkit`)
+  return value
+}
+
+/** An optional list of browsers. Undefined when absent, an error when it is empty or holds an unknown engine. */
+function optionalBrowserList(args: Record<string, unknown>, key: string): string[] | undefined {
+  const value: unknown = args[key]
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${key} must be a non-empty list of chromium, firefox, webkit`)
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || !(BROWSER_KEYS as readonly string[]).includes(item)) {
+      throw new Error(`${key} must be a non-empty list of chromium, firefox, webkit`)
+    }
+    if (!out.includes(item)) out.push(item)
+  }
+  return out
+}
+
 function str(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key]
   return typeof value === 'string' && value !== '' ? value : undefined
@@ -113,11 +139,10 @@ export function qaToolCall(
     case 'start_qa_round': {
       const siteId = required(args, 'site_id')
       assertSafeIdArgs({ site_id: siteId })
-      return {
-        path: `/api/admin/qa/sites/${siteId}/rounds`,
-        method: 'POST',
-        body: { name: required(args, 'name'), target: required(args, 'target') },
-      }
+      const body: Record<string, unknown> = { name: required(args, 'name'), target: required(args, 'target') }
+      const browsers = optionalBrowserList(args, 'browsers')
+      if (browsers) body.browsers = browsers
+      return { path: `/api/admin/qa/sites/${siteId}/rounds`, method: 'POST', body }
     }
     case 'get_qa_round': {
       const roundId = required(args, 'round_id')
@@ -135,6 +160,9 @@ export function qaToolCall(
       else if (typeof args.note === 'string') body.note = args.note
       const vp = viewportTicks(args.viewports)
       if (vp) body.vp = vp
+      // The browser the viewport ticks belong to; the route defaults to the round's first browser.
+      const browser = optionalBrowser(args, 'browser')
+      if (browser) body.browser = browser
       return { path: `/api/admin/qa/round-pages/${roundPageId}`, method: 'PATCH', body }
     }
     case 'check_qa_round_links': {
@@ -192,7 +220,9 @@ export function qaToolCall(
       const status = str(args, 'status')
       if (roundName) body.name = roundName
       if (status) body.status = status
-      if (Object.keys(body).length === 0) throw new Error('name or status is required')
+      const browsers = optionalBrowserList(args, 'browsers')
+      if (browsers) body.browsers = browsers
+      if (Object.keys(body).length === 0) throw new Error('name, status or browsers is required')
       return { path: `/api/admin/qa/rounds/${roundId}`, method: 'PATCH', body }
     }
     case 'add_qa_round_samples': {
@@ -215,6 +245,8 @@ export function qaToolCall(
       const viewport = str(args, 'viewport')
       if (description) body.description = description
       if (viewport) body.viewport = viewport
+      const browser = optionalBrowser(args, 'browser')
+      if (browser) body.browser = browser
       return { path: `/api/admin/qa/round-pages/${roundPageId}/create-request`, method: 'POST', body }
     }
     case 'run_qa_pagespeed': {
@@ -281,6 +313,8 @@ export function qaToolCall(
       }
       const elementTag = str(args, 'element_tag')
       const elementText = str(args, 'element_text')
+      const browser = optionalBrowser(args, 'browser')
+      if (browser) body.browser = browser
       if (elementTag) body.elementTag = elementTag
       if (elementText) body.elementText = elementText
       return { path: `/api/admin/qa/round-pages/${roundPageId}/comments`, method: 'POST', body }

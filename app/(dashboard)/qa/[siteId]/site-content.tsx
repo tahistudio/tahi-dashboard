@@ -13,7 +13,7 @@ import { Input } from '@/components/tahi/input'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { ConfirmDialog } from '@/components/tahi/confirm-dialog'
 import { useToast } from '@/components/tahi/toast'
-import type { QaTarget } from '@/lib/qa/types'
+import { browserLabel, type QaBrowserKey, type QaTarget } from '@/lib/qa/types'
 import { AddSiteDialog, type QaSiteFormValue } from '../add-site-dialog'
 import { StartRoundDialog } from './start-round-dialog'
 import { AddPagesDialog } from './add-pages-dialog'
@@ -22,7 +22,7 @@ import { RoundWorkspace } from './workspace/round-workspace'
 interface QaSiteDetail {
   item: QaSiteFormValue & { orgName?: string | null; archivedAt?: string | null }
   pages: { id: string; path: string; removedAt: string | null; groupKey: string | null }[]
-  rounds: { id: string; name: string; target: QaTarget; status: 'open' | 'closed'; createdAt: string; closedAt: string | null }[]
+  rounds: { id: string; name: string; target: QaTarget; status: 'open' | 'closed'; browsers: QaBrowserKey[]; createdAt: string; closedAt: string | null }[]
 }
 
 interface ImportResult {
@@ -282,8 +282,11 @@ export function SiteContent({ siteId }: SiteContentProps) {
                       style={{ gap: '0.5rem' }}
                     >
                       <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{r.name}</span>
-                      <span className="flex items-center" style={{ gap: '0.375rem' }}>
+                      <span className="flex flex-wrap items-center" style={{ gap: '0.375rem' }}>
                         <Badge tone={r.target === 'live' ? 'info' : 'neutral'} variant="soft" size="sm">{r.target === 'live' ? 'Live' : 'Staging'}</Badge>
+                        <span className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem' }} aria-label={`Browsers: ${(r.browsers ?? ['chromium']).map(browserLabel).join(', ')}`}>
+                          {(r.browsers ?? ['chromium']).map(browserLabel).join(', ')}
+                        </span>
                         <Badge tone={r.status === 'open' ? 'positive' : 'neutral'} variant="soft" size="sm">{r.status === 'open' ? 'Open' : 'Closed'}</Badge>
                         <span className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem' }}>{fmtDate(r.createdAt)}</span>
                       </span>

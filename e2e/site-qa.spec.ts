@@ -162,8 +162,11 @@ test.describe('Site QA', () => {
   })
 })
 
-/** Adds a site on the public upstream, imports its sitemap and starts a round. Returns the site path. */
-async function startRound(page: Page, label: string): Promise<string> {
+/**
+ * Adds a site on the public upstream, imports its sitemap and starts a round. Returns the site path.
+ * extraBrowsers names browsers to add to the round besides Chrome, such as 'Firefox'.
+ */
+async function startRound(page: Page, label: string, extraBrowsers: string[] = []): Promise<string> {
   await page.goto('/qa')
   await page.getByRole('button', { name: 'Add site' }).first().click()
   const dialog = page.getByRole('dialog', { name: /site/i })
@@ -179,7 +182,16 @@ async function startRound(page: Page, label: string): Promise<string> {
   await page.getByRole('button', { name: 'Import pages', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: /pages in the sitemap/ })).toBeVisible({ timeout: 60_000 })
   await page.getByRole('button', { name: 'Start round' }).first().click()
-  await page.getByRole('dialog', { name: 'Start round' }).getByRole('button', { name: 'Start round' }).click()
+  const roundDialog = page.getByRole('dialog', { name: 'Start round' })
+  if (extraBrowsers.length > 0) {
+    // Chrome is on by default, the others are opt in.
+    await expect(roundDialog.getByRole('checkbox', { name: 'Chrome' })).toBeChecked()
+    await expect(roundDialog.getByRole('checkbox', { name: 'Firefox' })).not.toBeChecked()
+    await expect(roundDialog.getByRole('checkbox', { name: 'Safari' })).not.toBeChecked()
+    await expect(roundDialog.getByText('Open this round in each browser to tick it there.')).toBeVisible()
+    for (const name of extraBrowsers) await roundDialog.getByRole('checkbox', { name }).check()
+  }
+  await roundDialog.getByRole('button', { name: 'Start round' }).click()
   await expect(page).toHaveURL(/round=[^&]+/)
   return siteUrl
 }
@@ -360,6 +372,83 @@ test.describe('Site QA synced scroll', () => {
         window.localStorage.removeItem('tahi-qa-wide')
         window.localStorage.removeItem('tahi-qa-sync-scroll')
       }).catch(() => undefined)
+      if (siteUrl) await archiveSite(page, siteUrl)
+    }
+  })
+})
+
+const FIREFOX_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0'
+const SAFARI_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'
+
+test.describe('Site QA browsers per round', () => {
+  test('Chrome ticks persist, the Firefox column is untouched until a Firefox browser ticks it, and Safari can be added', async ({ page, browser }) => {
+    test.setTimeout(300_000)
+    await page.setViewportSize({ width: 2000, height: 1000 })
+    let siteUrl: string | null = null
+    const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3000'
+    const contexts: { close: () => Promise<void> }[] = []
+    const tickPatch = (p: Page) => p.waitForResponse(r => /\/api\/admin\/qa\/round-pages\/[^/]+$/.test(new URL(r.url()).pathname) && r.request().method() === 'PATCH')
+    const ticks = (p: Page) => p.getByRole('group', { name: 'Viewport ticks' })
+
+    try {
+      siteUrl = await startRound(page, 'browsers', ['Firefox'])
+      // This browser is Chrome, so ticks go to the Chrome column.
+      await expect(page.getByText('Testing in Chrome')).toBeVisible({ timeout: 30_000 })
+      await shot(page, 'browsers-chrome')
+      const row = page.locator('[data-page-id]').first()
+      await expect(row).toContainText('Chrome 0 of 5, Firefox 0 of 5')
+      const saved = tickPatch(page)
+      await ticks(page).getByRole('checkbox', { name: 'XL' }).check()
+      expect((await saved).ok()).toBe(true)
+      await page.reload()
+      await expect(ticks(page).getByRole('checkbox', { name: 'XL' })).toBeChecked({ timeout: 30_000 })
+      // The Firefox column was not touched.
+      await expect(page.locator('[data-page-id]').first()).toContainText('Chrome 1 of 5, Firefox 0 of 5')
+
+      // A Firefox browser (here Chromium with a Firefox user agent) ticks its own column.
+      const firefox = await browser.newContext({ baseURL, storageState: shipStudioStorageState, userAgent: FIREFOX_UA, viewport: { width: 2000, height: 1000 } })
+      contexts.push(firefox)
+      const ff = await firefox.newPage()
+      await primePage(ff)
+      await ff.goto(page.url(), { waitUntil: 'domcontentloaded' })
+      await expect(ff.getByText('Testing in Firefox')).toBeVisible({ timeout: 30_000 })
+      await expect(ticks(ff).getByRole('checkbox', { name: 'XL' })).not.toBeChecked()
+      const ffSaved = tickPatch(ff)
+      await ticks(ff).getByRole('checkbox', { name: 'Tablet' }).check()
+      expect((await ffSaved).ok()).toBe(true)
+      await ff.reload({ waitUntil: 'domcontentloaded' })
+      await expect(ticks(ff).getByRole('checkbox', { name: 'Tablet' })).toBeChecked({ timeout: 30_000 })
+      await expect(ticks(ff).getByRole('checkbox', { name: 'XL' })).not.toBeChecked()
+      await shot(ff, 'browsers-firefox')
+      // Each open dashboard tab holds long-lived connections, and Chromium caps connections per host,
+      // so a finished browser is closed before the next one opens.
+      await firefox.close()
+
+      // Back in Chrome: its own tick is unchanged and both browsers count toward the page.
+      await page.reload()
+      await expect(ticks(page).getByRole('checkbox', { name: 'XL' })).toBeChecked({ timeout: 30_000 })
+      await expect(ticks(page).getByRole('checkbox', { name: 'Tablet' })).not.toBeChecked()
+      await expect(page.locator('[data-page-id]').first()).toContainText('Chrome 1 of 5, Firefox 1 of 5')
+
+      // Safari is not part of this round: ticks are off until it is added.
+      const safari = await browser.newContext({ baseURL, storageState: shipStudioStorageState, userAgent: SAFARI_UA, viewport: { width: 2000, height: 1000 } })
+      contexts.push(safari)
+      const sf = await safari.newPage()
+      await primePage(sf)
+      await sf.goto(page.url(), { waitUntil: 'domcontentloaded' })
+      await expect(sf.getByText('Testing in Safari')).toBeVisible({ timeout: 30_000 })
+      await expect(sf.getByRole('note').filter({ hasText: 'Safari is not part of this round' })).toBeVisible()
+      await expect(ticks(sf).getByRole('checkbox', { name: 'XL' })).toBeDisabled()
+      await sf.getByRole('button', { name: 'Add Safari to this round' }).click()
+      await expect(sf.getByRole('note').filter({ hasText: 'Safari is not part of this round' })).toHaveCount(0, { timeout: 15_000 })
+      await expect(ticks(sf).getByRole('checkbox', { name: 'XL' })).toBeEnabled()
+
+      // The site page lists the browsers of each round.
+      await page.goto(siteUrl)
+      await page.getByRole('button', { name: 'All rounds' }).click().catch(() => undefined)
+      await expect(page.getByRole('region', { name: 'Rounds' }).getByText('Chrome, Firefox, Safari')).toBeVisible({ timeout: 30_000 })
+    } finally {
+      for (const c of contexts) await c.close().catch(() => undefined)
       if (siteUrl) await archiveSite(page, siteUrl)
     }
   })

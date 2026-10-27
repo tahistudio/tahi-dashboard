@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { desc, eq } from 'drizzle-orm'
 import { isRecord, loadOrgNames, loadSite, parseSiteFieldPatch } from '@/lib/qa/server'
+import { parseRoundBrowsers } from '@/lib/qa/browsers'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -37,7 +38,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .orderBy(desc(schema.qaRounds.createdAt))
   const names = await loadOrgNames(database, [site.orgId])
 
-  return NextResponse.json({ item: { ...site, orgName: names.get(site.orgId) ?? null }, pages, rounds })
+  return NextResponse.json({
+    item: { ...site, orgName: names.get(site.orgId) ?? null },
+    pages,
+    rounds: rounds.map(r => ({ ...r, browsers: parseRoundBrowsers(r.browsers) })),
+  })
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

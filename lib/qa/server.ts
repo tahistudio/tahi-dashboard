@@ -1,7 +1,8 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
-import type { QaLinkResult, QaScanResult, QaTarget, QaViewportKey } from '@/lib/qa/types'
-import { countIssues, pageIssues } from '@/lib/qa/issue-rules'
+import { QA_DEFAULT_BROWSER, isQaBrowserKey, type QaBrowserKey, type QaLinkResult, type QaScanResult, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
+import { parseRoundBrowsers } from '@/lib/qa/browsers'
+import { browserPageIssues, countIssues, type QaScansByBrowser } from '@/lib/qa/issue-rules'
 import { parseStoredScan } from '@/lib/qa/normalise-scan'
 import { isSafePublicUrl } from '@/lib/qa/ssrf'
 import { discardBody, MAX_BODY_BYTES, QA_USER_AGENT, readCappedText, type FetchLike } from '@/lib/qa/link-check'
@@ -56,8 +57,37 @@ const LINK_QUERY_CHUNK = 90
 export type LoadedRound = NonNullable<Awaited<ReturnType<typeof loadRound>>>
 
 /**
- * Reads the stored scans and link results for one round page and rewrites its
- * count columns. Pass the already-loaded round and site to skip three queries
+ * Groups stored scan rows by browser, then viewport. A row with an unknown browser counts as Chrome.
+ * With `browsers`, rows from any other browser are left out: a browser removed from a round keeps its
+ * data but no longer feeds counts, issues or badges.
+ */
+export function scansByBrowser(
+  rows: readonly { viewport: string; browser: string; result: string }[],
+  browsers?: readonly QaBrowserKey[],
+): QaScansByBrowser {
+  const out: QaScansByBrowser = {}
+  for (const row of rows) {
+    const browser: QaBrowserKey = isQaBrowserKey(row.browser) ? row.browser : QA_DEFAULT_BROWSER
+    if (browsers && !browsers.includes(browser)) continue
+    const perViewport: Partial<Record<QaViewportKey, QaScanResult>> = out[browser] ?? {}
+    perViewport[row.viewport as QaViewportKey] = parseStoredScan(row.result)
+    out[browser] = perViewport
+  }
+  return out
+}
+
+/** Every link URL found by any stored scan, once. */
+export function scannedLinkUrls(scans: QaScansByBrowser): string[] {
+  const urls = new Set<string>()
+  for (const perViewport of Object.values(scans)) {
+    for (const scan of Object.values(perViewport ?? {})) for (const l of scan.links) urls.add(l.url)
+  }
+  return [...urls]
+}
+
+/**
+ * Reads the stored scans (every browser) and link results for one round page and
+ * rewrites its count columns. Identical issues across browsers count once. Pass the already-loaded round and site to skip three queries
  * per page when recomputing many pages of the same round.
  */
 export async function recomputeCounts(database: D1, roundPageId: string, preloaded?: LoadedRound): Promise<void> {
@@ -66,9 +96,17 @@ export async function recomputeCounts(database: D1, roundPageId: string, preload
   const { round, site } = loaded
   const scanRows = await database.select().from(schema.qaScanResults).where(eq(schema.qaScanResults.roundPageId, roundPageId))
   if (scanRows.length === 0) return
-  const scans: Partial<Record<QaViewportKey, QaScanResult>> = {}
-  for (const row of scanRows) scans[row.viewport as QaViewportKey] = parseStoredScan(row.result)
-  const urls = [...new Set(Object.values(scans).flatMap(s => s.links.map(l => l.url)))]
+  const scans = scansByBrowser(scanRows, parseRoundBrowsers(round.browsers))
+  if (Object.keys(scans).length === 0) {
+    // Every stored scan belongs to a browser that is no longer in the round: the page reads as unscanned.
+    await database.update(schema.qaRoundPages).set({
+      a11yCritical: null, a11ySerious: null, a11yModerate: null, a11yMinor: null,
+      brokenLinks: null, seoIssues: null, launchIssues: null, perfIssues: null,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(schema.qaRoundPages.id, roundPageId))
+    return
+  }
+  const urls = scannedLinkUrls(scans)
   const linkRows: (typeof schema.qaLinkResults.$inferSelect)[] = []
   for (let i = 0; i < urls.length; i += LINK_QUERY_CHUNK) {
     const chunk = urls.slice(i, i + LINK_QUERY_CHUNK)
@@ -79,7 +117,7 @@ export async function recomputeCounts(database: D1, roundPageId: string, preload
   const linkMap = new Map(linkRows.map(r => [r.url, rowToLinkResult(r)]))
   const origin = targetOrigin(site, round.target as QaTarget) ?? ''
   const host = origin ? new URL(origin).hostname : ''
-  const c = countIssues(pageIssues(scans, round.target as QaTarget, host, linkMap))
+  const c = countIssues(browserPageIssues(scans, round.target as QaTarget, host, linkMap))
   await database.update(schema.qaRoundPages).set({
     a11yCritical: c.a11yCritical, a11ySerious: c.a11ySerious, a11yModerate: c.a11yModerate, a11yMinor: c.a11yMinor,
     brokenLinks: c.brokenLinks, seoIssues: c.seoIssues, launchIssues: c.launchIssues, perfIssues: c.perfIssues,

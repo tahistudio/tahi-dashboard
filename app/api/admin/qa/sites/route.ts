@@ -6,6 +6,8 @@ import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { isRecord, loadOrgNames, parseSiteFieldPatch } from '@/lib/qa/server'
+import { parseRoundBrowsers } from '@/lib/qa/browsers'
+import { QA_VIEWPORT_KEYS } from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -80,10 +82,26 @@ export async function GET(req: NextRequest) {
   }
   const statsByRound = new Map(statRows.map(r => [r.roundId, r]))
 
+  // Ticked Firefox and WebKit ticks per open round: one grouped query per chunk of rounds.
+  const browserTickCounts = new Map<string, number>()
+  for (const ids of chunk([...newestOpen.values()].map(r => r.id), ID_CHUNK)) {
+    const grouped = await database
+      .select({ roundId: schema.qaRoundPages.roundId, browser: schema.qaBrowserTicks.browser, n: sql<number>`count(*)` })
+      .from(schema.qaBrowserTicks)
+      .innerJoin(schema.qaRoundPages, eq(schema.qaBrowserTicks.roundPageId, schema.qaRoundPages.id))
+      .where(and(inArray(schema.qaRoundPages.roundId, ids), eq(schema.qaBrowserTicks.ticked, 1)))
+      .groupBy(schema.qaRoundPages.roundId, schema.qaBrowserTicks.browser)
+    for (const g of grouped) browserTickCounts.set(`${g.roundId}|${g.browser}`, Number(g.n))
+  }
+
   const names = await loadOrgNames(database, sites.map(s => s.orgId))
   const items = sites.map(site => {
     const round = newestOpen.get(site.id)
     const stats = round ? statsByRound.get(round.id) : undefined
+    const browsers = round ? parseRoundBrowsers(round.browsers) : []
+    // Ticks across the round's browsers: Chromium from the vp_* columns, the rest from qa_browser_ticks.
+    let ticksDone = browsers.includes('chromium') ? Number(stats?.ticksDone ?? 0) : 0
+    if (round) for (const b of browsers) if (b !== 'chromium') ticksDone += browserTickCounts.get(`${round.id}|${b}`) ?? 0
     return {
       ...site,
       orgName: names.get(site.orgId) ?? null,
@@ -91,8 +109,9 @@ export async function GET(req: NextRequest) {
         id: round.id,
         name: round.name,
         target: round.target,
-        ticksDone: Number(stats?.ticksDone ?? 0),
-        ticksTotal: Number(stats?.pageCount ?? 0) * 5,
+        browsers,
+        ticksDone,
+        ticksTotal: Number(stats?.pageCount ?? 0) * QA_VIEWPORT_KEYS.length * browsers.length,
         failing: Number(stats?.failing ?? 0),
         issues: Number(stats?.issues ?? 0),
       } : null,

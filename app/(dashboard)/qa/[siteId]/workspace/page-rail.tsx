@@ -5,8 +5,8 @@ import { Check, ChevronLeft, ChevronRight, Circle, Plus, X } from 'lucide-react'
 import { ProgressBar } from '@/components/tahi/progress-bar'
 import { Badge } from '@/components/tahi/badge'
 import { SlideOver } from '@/components/tahi/slide-over'
-import { QA_VIEWPORTS, type QaPageStatus } from '@/lib/qa/types'
-import { issueTotal, ticksFor, tickCount, type QaGroupSummary, type QaRoundPageRow } from './qa-types'
+import { QA_VIEWPORTS, type QaBrowserKey, type QaPageStatus } from '@/lib/qa/types'
+import { browserBreakdown, issueTotal, pageRowTitle, ticksFor, tickCount, type QaGroupSummary, type QaRoundPageRow } from './qa-types'
 
 export type QaRailFilter = 'all' | 'untested' | 'failing' | 'issues'
 
@@ -53,6 +53,10 @@ function groupHeading(groupKey: string): string {
 
 export interface PageRailProps {
   pages: QaRoundPageRow[]
+  /** The browsers the round covers. Progress counts ticks across all of them. */
+  browsers: QaBrowserKey[]
+  /** The browser whose five viewport dots each row shows. */
+  dotBrowser: QaBrowserKey
   groups: QaGroupSummary[]
   selectedId: string | null
   onSelect: (id: string) => void
@@ -72,8 +76,8 @@ export interface PageRailProps {
 export function PageRail(props: PageRailProps) {
   const isMobile = props.singleFrame
   const listRef = useRef<HTMLDivElement | null>(null)
-  const done = props.pages.reduce((n, p) => n + tickCount(p), 0)
-  const total = props.pages.length * QA_VIEWPORTS.length
+  const done = props.pages.reduce((n, p) => n + tickCount(p, props.browsers), 0)
+  const total = props.pages.length * QA_VIEWPORTS.length * props.browsers.length
 
   if (isMobile) {
     return (
@@ -122,6 +126,8 @@ interface RailBodyProps extends PageRailProps {
 
 function RailBody({
   pages,
+  browsers,
+  dotBrowser,
   groups,
   selectedId,
   onSelect,
@@ -156,8 +162,10 @@ function RailBody({
   function renderRow(p: QaRoundPageRow) {
     const selected = p.id === selectedId
     const status = STATUS_DOT[p.status]
-    const ticks = ticksFor(p)
+    const ticks = ticksFor(p, dotBrowser)
     const issues = issueTotal(p)
+    const rowDone = tickCount(p, browsers)
+    const rowTotal = QA_VIEWPORTS.length * browsers.length
     return (
       <button
         key={p.id}
@@ -165,7 +173,7 @@ function RailBody({
         data-page-id={p.id}
         onClick={() => onSelect(p.id)}
         aria-current={selected ? 'true' : undefined}
-        title={p.path}
+        title={pageRowTitle(p, browsers)}
         className={[
           'flex w-full min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] px-2 text-left transition-colors',
           'hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-brand)]',
@@ -202,6 +210,12 @@ function RailBody({
             )
           })}
         </span>
+        {browsers.length > 1 ? (
+          <span className="shrink-0 text-[var(--color-text-muted)]" style={{ fontSize: '0.6875rem', fontVariantNumeric: 'tabular-nums' }}>
+            <span aria-hidden="true">{rowDone}/{rowTotal}</span>
+            <span className="sr-only">{browserBreakdown(p, browsers).map(b => `${b.label} ${b.done} of ${b.total}`).join(', ')}</span>
+          </span>
+        ) : null}
         {issues > 0 ? (
           <Badge tone="danger" variant="count" size="sm">
             {issues}
@@ -244,7 +258,7 @@ function RailBody({
                 fontWeight: 600,
                 borderColor: on ? 'var(--color-brand)' : 'var(--color-border)',
                 background: on ? 'var(--color-brand-50)' : 'var(--color-bg)',
-                color: on ? 'var(--color-brand-dark)' : 'var(--color-text-muted)',
+                color: on ? 'var(--color-brand-on-tint)' : 'var(--color-text-muted)',
               }}
             >
               {f.label}
