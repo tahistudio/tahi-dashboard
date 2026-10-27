@@ -1430,6 +1430,17 @@ scheduled; each needs a scope before building.
   monitor plus 375px and dark. Follow-ups noted by review, not done: pins
   skip elements hidden when pins arrive (tabs, accordions); the feedback ball
   covers comment actions at 375px (pre-existing).
+- [ ] SQA.4 - [BE/FE] Site QA browsers per round (Liam, 2026-10-27: "make it
+  work with the 3 big browsers? chrome, firefox, safari?"). Shipped at
+  1f2773a1, migration 0118 applied on production 2026-10-27 (statement by
+  statement; the `--file` import hit an auth error). Sonnet built, Opus review
+  failed then passed with notes. Open before [x]: live smoke in real Firefox
+  and Safari plus 375px and dark. Review notes not done: carry the axe rule id
+  on a11y issues so the dedupe key does not rely on helpUrl; per-viewport
+  pending tick tracking in use-round.ts (a stale pending browserTicks can mask
+  ticks made elsewhere until the next tick); comments from a removed browser
+  still list under All browsers and the report. Next: SQA.5 local Firefox and
+  WebKit engine helper with an Engine switch (plan in progress).
 - [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
   build Next 15 since its support window ended (21 Oct 2026); the first
   dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build
