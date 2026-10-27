@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm'
 import { requireMigrationAccess } from '@/lib/require-migration-access'
 import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
 import { RECORDER_DEVICES_MIGRATION } from '@/lib/recorder-devices-migration'
-import { QA_COMMENTS_MIGRATION, SITE_QA_MIGRATION } from '@/lib/qa-migration'
+import { QA_COMMENT_CONTEXT_MIGRATION, QA_COMMENTS_MIGRATION, SITE_QA_MIGRATION } from '@/lib/qa-migration'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -2486,6 +2486,11 @@ const MIGRATIONS: Migration[] = [
     name: '0116',
     description: 'Site QA comments (SQA.2): qa_comments. Additive, IF NOT EXISTS.',
     statements: [...QA_COMMENTS_MIGRATION],
+  },
+  {
+    name: '0117',
+    description: 'Site QA element context: qa_comments.element_context (ALTER ADD COLUMN; the runner treats "duplicate column name" as already applied). Apply BEFORE deploying: db/schema.ts names the column.',
+    statements: [...QA_COMMENT_CONTEXT_MIGRATION],
   },
 ]
 

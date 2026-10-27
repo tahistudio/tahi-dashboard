@@ -1,4 +1,5 @@
-import type { QaCommentModeChangedMessage, QaEscapeMessage, QaPickMessage, QaPin, QaPinClickMessage } from '../../../../lib/qa/types'
+import type { QaCommentModeChangedMessage, QaElementContext, QaEscapeMessage, QaPickMessage, QaPin, QaPinClickMessage } from '../../../../lib/qa/types'
+import { buildElementContext } from './context'
 import { uniqueSelector } from './selector'
 
 export interface CommentLayerOptions {
@@ -98,6 +99,8 @@ export function createCommentLayer(opts: CommentLayerOptions): CommentLayer {
     if (!hovered) return
     hovered.style.outline = hoverPrev.outline
     hovered.style.outlineOffset = hoverPrev.outlineOffset
+    // Leave no empty style attribute behind when the element had no inline style of its own.
+    if (hovered.getAttribute('style') === '') hovered.removeAttribute('style')
     hovered = null
   }
 
@@ -129,7 +132,16 @@ export function createCommentLayer(opts: CommentLayerOptions): CommentLayer {
     e.stopImmediatePropagation()
     const el = asElement(e.target)
     if (!el) return
+    // Drop our own hover outline first so it never lands in the selector or the html snippet.
+    clearHover()
     const rect = el.getBoundingClientRect()
+    let context: QaElementContext | undefined
+    try {
+      context = buildElementContext(el, win, doc)
+    } catch {
+      // Context is a bonus. The pick itself must never be lost.
+      context = undefined
+    }
     const msg: QaPickMessage = {
       type: 'qa:pick',
       version: 1,
@@ -140,6 +152,7 @@ export function createCommentLayer(opts: CommentLayerOptions): CommentLayer {
       tag: el.tagName.toLowerCase(),
       text: (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
     }
+    if (context) msg.context = context
     post(msg)
   }
 

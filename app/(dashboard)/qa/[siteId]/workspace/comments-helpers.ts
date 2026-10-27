@@ -3,12 +3,14 @@ import {
   type QaComment,
   type QaCommentModeChangedMessage,
   type QaCommentStatus,
+  type QaElementContext,
   type QaEscapeMessage,
   type QaPickMessage,
   type QaPin,
   type QaPinClickMessage,
   type QaViewportKey,
 } from '@/lib/qa/types'
+import { parseElementContext } from '@/lib/qa/comments'
 
 /** A comment with its 1-based pin number on the round page. */
 export type NumberedComment = QaComment & { n: number }
@@ -136,7 +138,20 @@ export function parsePickMessage(data: unknown): QaPickMessage | null {
   if (!isFraction(ox) || !isFraction(oy)) return null
   if (typeof tag !== 'string' || tag.length === 0 || tag.length > TAG_MAX) return null
   if (typeof text !== 'string') return null
-  return { type: 'qa:pick', version: 1, url, selector, ox, oy, tag: tag.toLowerCase(), text: oneLine(text).slice(0, TEXT_MAX) }
+  const pick: QaPickMessage = { type: 'qa:pick', version: 1, url, selector, ox, oy, tag: tag.toLowerCase(), text: oneLine(text).slice(0, TEXT_MAX) }
+  const context = parsePickContext(data.context)
+  if (context) pick.context = context
+  return pick
+}
+
+/**
+ * The optional element context of a pick. A context that is not an object with a
+ * class list and a box is dropped, and the rest is clamped by the same parser the
+ * API uses. A bad context never rejects the pick.
+ */
+function parsePickContext(raw: unknown): QaElementContext | undefined {
+  if (!isRecord(raw) || !Array.isArray(raw.classes) || !isRecord(raw.box)) return undefined
+  return parseElementContext(raw) ?? undefined
 }
 
 /** Validates a qa:pin-click message. */

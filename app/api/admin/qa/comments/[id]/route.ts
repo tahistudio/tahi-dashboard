@@ -1,14 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
-import { loadRoundPage } from '@/lib/qa/server'
-import { commentUpdateFields, parseCommentPatch, rowToComment } from '@/lib/qa/comments'
+import { loadRoundPage, targetOrigin } from '@/lib/qa/server'
+import { commentUpdateFields, numberComments, parseCommentPatch, rowToComment, toCommentDetail } from '@/lib/qa/comments'
+import type { QaTarget } from '@/lib/qa/types'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
+
+/** One comment with its pin number, page URL, viewport guidance and element context. */
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { orgId, userId } = await getRequestAuth(req)
+  if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const featureDenied = await requireFeature({ userId, orgId }, 'qa_tester')
+  if (featureDenied) return featureDenied
+  const adminDenied = await requireAdmin({ userId, orgId })
+  if (adminDenied) return adminDenied
+
+  const { id } = await params
+  const database = await db() as Drizzle
+  const [existing] = await database.select().from(schema.qaComments).where(eq(schema.qaComments.id, id)).limit(1)
+  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const loaded = await loadRoundPage(database, existing.roundPageId)
+  if (!loaded) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // The pin number counts every comment on the page, so read the page's comments.
+  const siblings = await database
+    .select()
+    .from(schema.qaComments)
+    .where(eq(schema.qaComments.roundPageId, existing.roundPageId))
+    .orderBy(asc(schema.qaComments.createdAt), asc(schema.qaComments.id))
+  const numbers = numberComments(siblings)
+  const target: QaTarget = loaded.round.target === 'live' ? 'live' : 'staging'
+  const comment = toCommentDetail(existing, numbers.get(existing.id) ?? 0, loaded.roundPage.path, {
+    roundId: loaded.round.id,
+    roundName: loaded.round.name,
+    siteName: loaded.site.name,
+    target,
+    siteUrl: targetOrigin(loaded.site, target),
+  })
+  return NextResponse.json({ comment })
+}
 
 /** Edits a comment: body, status (resolve or reopen) or the request it created. */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -4446,4 +4446,6 @@ export const qaComments = sqliteTable('qa_comments', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   resolvedAt: text('resolved_at'),
+  // JSON text of a QaElementContext captured at pick time (migration 0117)
+  elementContext: text('element_context'),
 }, (table) => [index('idx_qa_comments_round_page').on(table.roundPageId)])
