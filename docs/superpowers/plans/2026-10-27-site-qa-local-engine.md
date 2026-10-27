@@ -1019,7 +1019,283 @@ Opus spike, contracts, migration, reviews and integration.
 
 ## Appendix: phase 0 measurements
 
-To be filled by the spike.
+Engine half only, 2026-10-27, Opus; checked by a fresh opus-reviewer (first
+pass failed on traceability and two over-read verdicts, fixed below with extra
+runs). The Chrome Local Network Access half (prompt, permission names, HKCU
+policy, zoom versus DPR heuristic) is run separately with Liam and is not
+covered here. Throwaway scripts and raw outputs live in
+%TEMP%/qa-engine-spike (results/*.json, matrix.log, matrix2.log,
+guard-*.json, micro-*.json); nothing in the repo besides this appendix changed.
+
+### Setup
+
+- Liam's PC: Windows 11, 16 logical cores, Node 26.4.0.
+- Real viewer: workers/qa-view under `wrangler dev` on 127.0.0.1:8811 with a
+  random local QA_VIEW_SECRET (no production secret), tokens minted in the
+  lib/qa/token.ts format with `p` set to the viewer origin, so the scanner's
+  postMessage to `window.parent` (itself, at top level) is delivered and an
+  init script relays it into an exposeBinding. That stands in for phase 2's
+  host.ts. The worker injected the scanner exactly as in production.
+- Page: https://webflow.com home through the viewer (about 7,630 px tall,
+  constant animations), the heaviest public Webflow page that loads cleanly
+  through the viewer.
+- Five contexts in one browser, viewports from QA_VIEWPORTS (1920x1080,
+  1440x900, 768x1024, 425x860, 375x812), focused frame Desktop 1440. All engine
+  traffic went through a Node refusing proxy (design (a)) with the viewer
+  carve out.
+- Focused page: `page.mouse.wheel(0, 120)` (sign flips every 4 s) every 50 ms
+  for 30 s. The focused page's scanner qa:scroll reports were relayed to the
+  other four as qa:scroll-to (coalesced, 100 ms), which also put them in a
+  burst, as the plan's scheduler would.
+- Capture A (the plan's design): `page.screenshot` jpeg q70, scale 'css', one
+  frame in flight per page until the dashboard ack, burst every 100 ms until
+  700 ms after the last input, idle 2 s, global cap 30 fps, focused first. The
+  spike measured the 100 ms from capture end unless marked start to start.
+  The spike's degrade path (focused bursts, others on a fixed idle timer)
+  leaves out "once after each relayed scroll settles", so it is slightly
+  lighter than the plan's.
+- Capture B (found during the spike, see Surprises): Playwright's internal
+  screencast, JPEG q70 at the viewport size. "Unconstrained" forwards every
+  frame as the engine sends it (no dashboard gate, no global cap). "Flow"
+  holds each page's engine ack until the dashboard acked that page's previous
+  frame, with the 30 fps global cap and focused first, which is the
+  recommended default below.
+- Dashboard: a headless Playwright Chromium page (a stand-in, not Liam's headed
+  web app) received every frame over a local WebSocket, ran createImageBitmap
+  plus drawImage onto a viewport sized canvas, then acked. "Main thread" is the
+  synchronous part (Blob, createImageBitmap call, drawImage, close).
+- Input to visible: an init script paints a 12 bit marker (wheel events
+  received) at the top left in the scroll handler; latency = wheel sent in Node
+  to the first frame drawn in the dashboard whose decoded marker includes it.
+  Every wheel was matched in every saved run.
+- Engine CPU cores: CPU seconds per wall second during the scroll window from
+  Get-Process by name (firefox.exe; or Playwright.exe plus WebKitWebProcess,
+  WebKitGPUProcess and WebKitNetworkProcess), approximate (nothing else of those
+  names was running).
+- WebKit: Playwright 1.58.2 requires webkit-2248, not the installed 2227 (see
+  Surprises). All WebKit numbers were taken with playwright-core 1.57.0
+  (installed in the scratch dir only) driving webkit-2227 (WebKit 26.0).
+  Firefox numbers are Playwright 1.58.2 with firefox-1509 (Firefox 146.0.1).
+
+### Numbers (30 s wheel scroll, five live pages, dsf 1 unless noted)
+
+"Run 1" rows were printed to the console only (their result files were
+overwritten by the later run of the same name); every other row is in
+results/*.json and matrix.log or matrix2.log.
+
+| Run | Focused fps | Others fps | Aggregate fps | Input to visible p50 / p90 / max ms | Shot p50 / p90 ms (focused) | Dashboard main thread p90 ms | Engine CPU cores |
+|---|---|---|---|---|---|---|---|
+| Firefox A, run 1 (console only) | 6.06 | 4.23 to 4.36 | 23.3 | 141 / 234 / 642 | 41 / 84 | 0.8 | n.a. |
+| Firefox A, run 2 | 5.63 | 4.06 to 4.23 | 22.3 | 154 / 365 / 882 | 43 / 122 | 0.8 | 3.4 |
+| Firefox A, run 3 | 6.56 | 4.36 to 4.40 | 24.0 | 127 / 204 / 423 | 38 / 54 | 0.7 | 3.4 |
+| Firefox A, dsf 1.5 | 6.09 | 4.36 to 4.43 | 23.6 | 145 / 257 / 679 | 44 / 89 | 0.8 | 3.2 |
+| Firefox A, burst start to start | 8.46 | 3.93 | 24.2 | 114 / 168 / 378 | 38 / 64 | 0.7 | 3.4 |
+| Firefox A, degrade (others 1 fps) | 7.06 | 1.0 | 11.1 | 126 / 194 / 558 | 36 / 53 | 0.7 | 3.1 |
+| Firefox B unconstrained, run 1 (console only) | 19.45 | 19.5 to 19.8 | 98.0 | 61 / 114 / 388 | n.a. | 0.6 | n.a. |
+| Firefox B unconstrained, run 2 | 17.78 | 17.9 to 20.3 | 92.1 | 57 / 100 / 261 | n.a. | 0.6 | 2.8 |
+| Firefox B unconstrained, dsf 1.5 | 18.61 | 18.9 to 19.3 | 94.8 | 73 / 130 / 373 | n.a. | 0.6 | 2.7 |
+| Firefox B flow (gated ack, 30 fps cap) | 18.87 | 1.50 to 1.53 | 25.0 | 53 / 97 / 366 | n.a. | 0.7 | 2.7 |
+| WebKit A jpeg, run 1 (console only) | 2.52 | 1.89 to 2.82 | 12.6 | 462 / 738 / 1138 | 263 / 401 | 0.8 | n.a. |
+| WebKit A jpeg, run 2 | 2.56 | 2.03 to 2.79 | 12.7 | 471 / 723 / 1176 | 256 / 351 | 0.8 | 3.1 |
+| WebKit A png | 3.59 | 2.46 to 3.62 | 16.7 | 303 / 532 / 1156 | 157 / 264 | 0.9 | n.a. |
+| WebKit A png, dsf 1.5 | 3.70 | 2.76 to 4.13 | 18.4 | 368 / 587 / 838 | 149 / 269 | 0.9 | 4.3 |
+| WebKit A degrade jpeg, others 1 fps | 3.29 | 0.96 to 1.0 | 7.2 | 349 / 558 / 862 | 192 / 262 | 0.8 | n.a. |
+| WebKit A degrade png, others 0.5 fps | 4.33 | 0.5 | 6.3 | 247 / 388 / 658 | 125 / 163 | 0.8 | 2.9 |
+| WebKit A png, focused only (others never captured, older script version) | 3.04 | 0 | 3.0 | 345 / 801 / 1341 | 152 / 428 | 1.0 | n.a. |
+| WebKit B unconstrained, run 1 (console only) | 12.36 | 7.29 to 7.99 | 42.9 | 126 / 208 / 624 | n.a. | 0.8 | n.a. |
+| WebKit B unconstrained, run 2 | 13.13 | 8.76 to 9.36 | 49.3 | 126 / 176 / 371 | n.a. | 0.7 | 2.7 |
+| WebKit B unconstrained, dsf 1.5 | 7.64 | 6.18 to 6.41 | 33.0 | 243 / 321 / 683 | n.a. | 0.8 | 3.0 |
+| WebKit B flow (gated ack, 30 fps cap), run 1 | 14.80 | 2.67 to 2.70 | 25.6 | 112 / 152 / 399 | n.a. | 0.8 | 2.7 |
+| WebKit B flow (gated ack, 30 fps cap), run 2 | 14.64 | 2.66 to 2.70 | 25.4 | 117 / 153 / 392 | n.a. | 0.7 | 2.8 |
+
+The helper's own Node process used 0.1 to 0.3 cores, except 0.78 in the
+WebKit jpeg run (the transcode, Surprises item 4). The dashboard's synchronous
+createImageBitmap plus draw was at most 1.0 ms per frame at p90 in every run,
+with no long tasks and a rAF gap p99 of 16.8 ms, so the 8 ms budget holds with
+a wide margin, even unconstrained at 98 frames per second. Frame sizes (jpeg
+q70, scale 'css'): focused 1440x900 about 90 KB Firefox and 105 to 120 KB
+WebKit; 1920x1080 about 125 to 175 KB.
+
+Single page, no scrolling, 1440x900, 12 sequential shots (micro-*.json):
+
+| Engine | Static page jpeg / png p50 | webflow.com jpeg / png p50 | mouse.wheel call p50 |
+|---|---|---|---|
+| Firefox | 9 / 11 ms | 44 / 62 ms | 2 to 6 ms |
+| WebKit | 70 / 26 ms | 175 / 116 ms | 17 to 43 ms |
+
+### Go or no-go (focused >= 5 fps, input to visible p90 <= 300 ms, others >= 1 fps, dashboard < 8 ms per frame)
+
+- Firefox, screenshots (the plan's design): GO with one change. As specified
+  (100 ms measured from capture end) the p90 passed in three runs (204 ms run 3, 234
+  ms run 1 console only, 257 ms at dsf 1.5) and missed in one (365 ms), with focused 5.6 to 6.6 fps. Measuring
+  the burst interval start to start gave 8.5 fps and p90 168 ms (one run),
+  and the degrade path passes (7.1 fps, p90 194 ms, one run; others exactly
+  1.0 fps, on the threshold with no margin). Adopt start
+  to start.
+- Firefox, screencast: GO with a wide margin, both unconstrained and with flow
+  control plus the 30 fps cap (focused 18.9 fps, p90 97 ms, others 1.5 fps).
+- WebKit, screenshots: NO-GO, and the degrade path also misses. Focused 2.5 to
+  4.3 fps and p90 388 to 801 ms across jpeg, png, both degrade variants and
+  focused only. WebKit's Page.snapshotRect costs about 115 ms on this page even
+  idle, and the page renders at only 11 to 51 rAF per second under capture.
+  Per the plan's rule, the WebKit engine as designed stops here.
+- WebKit, screencast at dsf 1: passes every threshold, unconstrained (focused
+  12.4 to 13.1 fps, p90 176 to 208 ms) and with flow control plus the cap
+  (focused 14.6 to 14.8 fps, p90 152 to 153 ms, others 2.7 fps), measured on
+  webkit-2227 under Playwright 1.57.0, not yet on 2248. At dsf 1.5 the
+  unconstrained run misses p90 (321 ms) because WebKit's screencast ignores the
+  requested size and sends device pixel frames (2160x1350 for Desktop).
+- Overall: Firefox engine go. WebKit engine go only by switching capture to the
+  screencast path, which is an internal Playwright API (Surprises item 1). That
+  is a design change for Liam and the next review to accept; nothing was built.
+
+### Other checks
+
+- mouse.wheel: real, trusted wheel events (isTrusted on every wheel event in
+  every run, for example 553 of 553 Firefox run 3 and 528 of 528 WebKit flow
+  run 1) and real scroll events. The injected scanner counted them as user
+  input and posted qa:scroll about once per focused scroll event (Firefox 413
+  to 436 in 30 s; WebKit 165 to 434 depending on load), and the relay's
+  qa:scroll-to scrolled the followers (93 to 206 scroll events each).
+- exposeBinding: works on a qa-view page in both engines; the scanner's qa:scan
+  and qa:scroll arrived through it. A same origin child iframe (srcdoc) CAN call
+  the binding in both engines; `source.frame === page.mainFrame()` tells them
+  apart (main true, child false, all six guard runs). The main frame check in
+  section 1.5 is required, not optional.
+- Background throttling (headless, one page per context, five contexts): none
+  seen. Firefox: rAF 155 to 215 per second on every page (no vsync cap), a
+  100 ms setInterval at 9.0 to 9.5 per second. WebKit: rAF about 45 to 64 per
+  second on lightly loaded pages and 11 to 51 under capture load (CPU bound,
+  every page alike, not a background penalty); timers 6.0 to 9.5 per second,
+  lowest on the busiest pages. No no-throttle prefs or bringToFront rotation
+  needed.
+- Guard design (a), probes from http://example.com and https://example.com
+  loaded through the proxy, with a stand-in helper on 127.0.0.1 counting hits
+  (guard-*.json):
+  - Firefox 146, per-launch credentials and the prefs: http, https and wss all
+    go through the proxy with credentials. fetch to 127.0.0.1, localhost,
+    [::1], localtest.me (resolves to ::1 and 127.0.0.1), 192.168.1.1 and
+    169.254.169.254, an img and an iframe at loopback, ws:// to 127.0.0.1 and to
+    localtest.me: all reached the proxy and were refused; the helper got zero
+    hits. Control run without the proxy: 12 helper hits including both
+    WebSockets, so the probes are real. Wrong password:
+    NS_ERROR_PROXY_CONNECTION_REFUSED, nothing loads. RTCPeerConnection is
+    undefined with media.peerconnection.enabled false. With
+    network.proxy.allow_hijacking_localhost omitted, Playwright 1.58.2 still
+    sent loopback through the proxy (it appears to set it already); keep the
+    pref explicit anyway.
+  - WebKit 26.0 on Windows: the proxy option is honoured for http, https
+    (CONNECT) and wss, but proxy credentials are never sent on CONNECT. With
+    credentials set, https and wss loop on 407 without ever authenticating
+    (54,527 CONNECTs in one run; 64,157 plain requests with a bad password);
+    credentials embedded in the proxy URL are ignored too
+    (wk-https-urlcreds.json). Plain http does authenticate after a 407. With an
+    unauthenticated proxy everything works and every refusal case above holds
+    (zero helper hits; control without the proxy: 8 hits). Plain ws:// with the
+    proxy set fails closed in WebKit (it never reaches the proxy or the target).
+    The RTCPeerConnection init script works (undefined in the page).
+  - framenavigated bounce back: works in both engines. Site script setting
+    location.href to https://example.org/ and an injected meta refresh to
+    https://example.net/ each produced one main frame framenavigated off the
+    allowlist, and `page.goto(lastAllowedUrl)` put the viewer page back both
+    times.
+  - Not proven here: the classifier's NAT64 range and decimal, octal and hex
+    literal normalising (the spike proxy had neither); phase 3b's unit tests
+    cover them.
+- Text sharpness (1440x900, jpeg q70): scale 'css' gives the same image size and
+  bytes at dsf 1 and 1.5 (Firefox 99 and 100 KB, WebKit 114 and 113 KB); dsf 1.5
+  with scale 'css' is supersampled and slightly smoother, not sharper. A 1.5x
+  canvas upscale (a simulation of Actual size on a 1.5 DPR screen, not viewed
+  on Liam's monitor) shows small text readable but visibly soft with JPEG
+  ringing. scale 'device' at dsf 1.5 is clearly crisp at 1.8 to 1.9 times the
+  bytes (Firefox 183 KB, WebKit 216 KB). Comparison image:
+  %TEMP%/qa-engine-spike/shots/sharp-firefox-compare.png.
+
+### Guard decision
+
+Design (a), amended. The refusing proxy works in both engines and every
+integration case in section 3 point 8 that was run was refused without reaching
+the helper, so fallback (b) is not needed. Amendments:
+1. Firefox: per-launch Basic credentials as planned, prefs
+   network.proxy.allow_hijacking_localhost true, media.peerconnection.enabled
+   false, and also network.http.http2.websockets false. Without that last pref
+   the first wss through any HTTP proxy fails in Firefox 146 (reproduced with a
+   plain pass-through tunnel, ff-wss-debug.out, and fixed by the pref,
+   ff-wss-debug2.out; no proxy at all also works, ff-wss-noproxy.out), so it
+   is not the guard.
+2. WebKit: proxy credentials cannot work (CONNECT is never authenticated). This
+   drops the section 3 point 7 credential property for WebKit. Proposal: give
+   WebKit its own proxy listener without credentials on a random ephemeral
+   127.0.0.1 port chosen per launch, and never answer 407 to it. Reasoning: the
+   proxy only ever connects to public addresses, so a local process that finds
+   the port gains nothing it does not already have, and web pages cannot speak
+   the proxy protocol (the proxy must reject origin form requests, which is
+   all a fetch from a page can send). security-reviewer to confirm before 3b.
+3. The proxy needs a per-connection rate limit on 407 and refusals regardless,
+   because WebKit retries rejected requests in a tight loop.
+4. Pause the client socket while resolving in the CONNECT handler, so no tunnel
+   bytes arrive before the pipe is in place.
+
+### Recommended capture defaults
+
+If Liam accepts the screencast path (recommended; it is the only way WebKit
+passes):
+- Both engines: one screencast per page, JPEG q70, size = viewport; the helper
+  holds each page's engine ack until the dashboard acked that page's previous
+  frame (this replaces "one frame in flight"), a 30 fps global cap with the
+  focused or hovered page first, plus the `visible` and tab-hidden pauses.
+  Measured: focused 14.6 to 18.9 fps, p90 97 to 153 ms, others 1.5 to 2.7 fps.
+  If the others should refresh faster, give the focused page a per-page cap
+  (for example 12 fps) rather than raising the global cap.
+- WebKit: deviceScaleFactor 1 (dsf 1.5 sends device pixel frames and misses
+  latency). Firefox: deviceScaleFactor may follow the screen DPR (frames come
+  back at CSS size either way).
+- page.screenshot stays for one-off stills, for example a crisp scale 'device'
+  capture of the focused frame at Actual size and larger, and as the fallback
+  when the screencast adapter's version check fails.
+
+If screencast is rejected:
+- Firefox: screenshots jpeg q70 scale 'css', burst interval measured start to
+  start at 100 ms, others idle 2 s, global cap 30 fps, degrade path as
+  designed. Expect about 8 fps focused, 4 fps others, p90 about 170 ms
+  (one run each for start to start and degrade; as specified, 1 of 4 runs
+  missed p90).
+- WebKit engine: do not ship it in v1.
+
+### Surprises that change the plan
+
+1. Firefox and WebKit screencasts exist inside Playwright, just not publicly.
+   Playwright's server side (used by recordVideo and tracing) has
+   Page.startScreencast (Juggler) and Screencast.startScreencast (WebKit) with
+   JPEG frames and an ack. The spike reached it through
+   `page._connection.toImpl(page)` (in process only) and the server page's
+   screencast object, overriding its frame ack throttle for flow control. It is
+   unsupported and already differs between 1.57 (`delegate.setScreencastOptions`,
+   `throttleScreencastFrameAck`) and 1.58 (`screencast._startScreencast`,
+   `screencast.throttleFrameAck`). It needs a thin adapter with a version check
+   that fails closed to the screenshot path, and a test that runs on every
+   Playwright bump. Section 1.6 and risk 2 should be rewritten around it if
+   accepted. This is Liam's call (a dependency on internals), and Opus
+   recommends yes.
+2. Playwright 1.58.2 needs webkit-2248, not webkit-2227. The plan says the
+   installed 2227 is shared; it is not, and 1.58.2 cannot drive 2227 (protocol
+   assertion on launch). `npx playwright install webkit` is required in the 1.1
+   install step (it is already listed), and the 2227 statement in 1.1 should
+   go. All WebKit numbers above are from 2227 under Playwright 1.57.0; re-run
+   the screencast check on 2248 once it is installed.
+3. On this PC `npx playwright install firefox` (Node 26.4.0) downloaded the
+   archive and then hung during extraction (an earlier attempt on 2026-10-17
+   left the same orphaned archive in %TEMP%). The spike extracted the downloaded
+   archive with Windows tar into firefox-1509 (no INSTALLATION_COMPLETE marker
+   written, so a later install will try again). The README install step needs
+   a note, or the helper should pin a Node LTS.
+4. WebKit's jpeg screenshot is a png snapshot transcoded to jpeg in pure
+   JavaScript inside the helper's Node process (pngjs plus jpeg-js), about 60
+   ms per 1440x900 frame on the helper's event loop (175 versus 116 ms in
+   micro-webkit.json). Irrelevant with screencast; with screenshots WebKit
+   should request png.
+5. exposeBinding is reachable from child frames (Other checks), so the main
+   frame check is load bearing.
 
 ## Changelog
 
@@ -1096,3 +1372,58 @@ Revision 4, 2026-10-27, after the third fresh Opus review:
   fake helper move to 6c; via guard order and `item` plus `ticks`; the proxy is
   its own phase 3b; package-lock.json committed in 3a; engine options Windows
   only; the AGENTS.md bullet defines 'native' and the MCP default.
+
+## Appendix: phase 0 decisions (2026-10-27, Opus)
+
+- Firefox engine: GO. WebKit engine: GO only on screencast capture.
+- Capture: use Playwright's internal screencast for both engines behind one
+  adapter (`capture/screencast.ts`) that checks the Playwright version it was
+  written against (1.58.2, pinned exactly in package.json) and feature-detects
+  the server page's screencast object at launch. If either check fails, the
+  adapter falls back to page.screenshot (Firefox: start-to-start burst timing;
+  WebKit: png) and the engine status reports `capture: 'screenshot'` so the
+  dashboard can label the slower mode. Defaults: JPEG q70 at viewport size,
+  per-page ack held until the dashboard acks that page's last frame, 30 fps
+  global cap, focused page first, WebKit at deviceScaleFactor 1.
+  page.screenshot stays for crisp 'device' stills. Section 1.6 and risk 2 are
+  read in this light; upgrading Playwright means re-running the phase 0 matrix.
+- Browser binaries: Playwright 1.58.2 needs webkit-2248 (installed by
+  `npx playwright install webkit`) and firefox-1509. The README notes that the
+  Firefox installer hung under Node 26.4 and documents the manual extract; the
+  helper's engines field pins a Node LTS.
+- Firefox prefs add `network.http.http2.websockets: false` (fidelity
+  difference from stock Firefox, recorded in the README).
+- Guard (security-reviewer verdict: ACCEPT WITH CONDITIONS). Phase 3b
+  requirements:
+  1. Two listeners. Firefox keeps per-launch credentials. WebKit gets its own
+     unauthenticated listener per launch, port 0, bound to 127.0.0.1 only,
+     closed with all sockets destroyed when that browser closes or crashes.
+  2. Non-CONNECT requests must be absolute-form http://; any other form gets
+     400, socket destroyed, no keep-alive. The target comes from the
+     request-target only, never Host. Unit test: `GET /` with
+     `Host: example.com` returns 400 with zero upstream connections.
+  3. One shared refusal function: refuse every helper port before resolving;
+     refuse if any resolved address is bad and connect to the exact checked
+     IP; classifier adds 2002::/16 and 2001::/32 (embedded IPv4 checked),
+     192.0.0.0/24, 198.18.0.0/15 and 255.255.255.255.
+  4. Refuse single-label names and .local, .lan, .home.arpa, .internal before
+     DNS. Every refusal is the same 403 with no body.
+  5. Caps on concurrent tunnels and pending resolves per listener, 5 s DNS
+     timeout, idle tunnel timeout. Token bucket per listener plus backoff per
+     target; at the limit refuse and report the page `blocked`, never relax.
+     Repeated log lines are collapsed.
+  6. Logs carry host:port only, never a path (no `/v/<token>`).
+  7. Socket `error` and `close` handlers attach before the DNS await; the
+     client socket is paused while resolving; the lookup aborts on close; 200
+     is written only after the upstream connect; `head` is forwarded.
+  8. Integration test re-runs every phase 0 WebKit case against the
+     unauthenticated listener, plus a Chrome-style fetch to it that returns
+     400 with zero upstream hits, and keeps asserting WebKit ws:// to loopback
+     fails closed.
+- Accepted residuals (Low): engine traffic leaves via node.exe past per-app
+  Windows Firewall rules; the proxy answers whether a name resolves privately
+  using the local resolver; a PID check on the WebKit listener is optional
+  later hardening.
+- Still open before phase 1: the Chrome Local Network Access test from
+  portal.tahi.studio (Liam), and re-running the WebKit screencast case on
+  webkit-2248 with Playwright 1.58.2.
