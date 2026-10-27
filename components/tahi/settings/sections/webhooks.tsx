@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom'
 import { Webhook, Plus, Copy, Check } from 'lucide-react'
 import { apiPath } from '@/lib/api'
 import { useResource } from '@/lib/use-resource'
+import { normaliseEvents } from '@/lib/webhook-events'
 import {
   SectionShell,
   EditDialog,
@@ -32,6 +33,7 @@ interface WebhookEndpoint {
   id: string
   url: string
   events: string[]
+  includeInternal?: boolean
   active: boolean
   createdAt: string
 }
@@ -40,17 +42,11 @@ interface EndpointsResponse {
   endpoints: WebhookEndpoint[]
 }
 
-// Split a free-text events field ("a.b, c.d") into a clean, de-duped list.
+const INTERNAL_HELP = 'Internal requests are team-only work, such as QA findings. Leave this off for anything that can reach clients.'
+
+// Split a free-text events field ("request_created, invoice_paid") into the emitted names, de-duped.
 function parseEvents(raw: string): string[] {
-  const seen = new Set<string>()
-  return raw
-    .split(/[,\n]/)
-    .map(e => e.trim())
-    .filter(e => {
-      if (!e || seen.has(e)) return false
-      seen.add(e)
-      return true
-    })
+  return normaliseEvents(raw.split(/[,\n]/))
 }
 
 function newSecret(): string {
@@ -79,7 +75,8 @@ function AddEndpointDialog({
 }) {
   const [mounted, setMounted] = useState(false)
   const [url, setUrl] = useState('https://')
-  const [events, setEvents] = useState('request.created')
+  const [events, setEvents] = useState('request_created')
+  const [includeInternal, setIncludeInternal] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -157,7 +154,7 @@ function AddEndpointDialog({
               </div>
             </>
           ) : (
-            <form onSubmit={event => { event.preventDefault(); void onSave({ url, ev: events }) }} aria-busy={busy}>
+            <form onSubmit={event => { event.preventDefault(); void onSave({ url, ev: events, internal: includeInternal ? 'true' : 'false' }) }} aria-busy={busy}>
               <div className="set-field">
                 <label htmlFor="webhook-endpoint-url">Endpoint URL</label>
                 <input id="webhook-endpoint-url" type="url" required className="set-input" value={url} onChange={event => setUrl(event.target.value)} disabled={busy} style={{ minHeight: '2.75rem' }} />
@@ -165,6 +162,13 @@ function AddEndpointDialog({
               <div className="set-field" style={{ marginTop: '0.75rem' }}>
                 <label htmlFor="webhook-endpoint-events">Events</label>
                 <input id="webhook-endpoint-events" required className="set-input" value={events} onChange={event => setEvents(event.target.value)} disabled={busy} style={{ minHeight: '2.75rem' }} />
+              </div>
+              <div className="set-field" style={{ marginTop: '0.75rem' }}>
+                <label htmlFor="webhook-include-internal" style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', minHeight: '2.75rem', cursor: 'pointer' }}>
+                  <input id="webhook-include-internal" type="checkbox" checked={includeInternal} onChange={event => setIncludeInternal(event.target.checked)} disabled={busy} aria-describedby="webhook-include-internal-help" style={{ width: '1.125rem', height: '1.125rem', accentColor: 'var(--brand)' }} />
+                  <span>Include internal requests</span>
+                </label>
+                <small id="webhook-include-internal-help" style={{ display: 'block', color: 'var(--text-faint)' }}>{INTERNAL_HELP}</small>
               </div>
               {error && <p className="dlg-warn" role="alert">{error}</p>}
               <div className="dlg-foot">
@@ -298,7 +302,7 @@ export function WebhooksSection(_props: { isAdmin?: boolean } = {}) {
       const res = await fetch(apiPath('/api/admin/webhooks'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, secret, events }),
+        body: JSON.stringify({ url, secret, events, includeInternal: values.internal === 'true' }),
       })
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: string } | null
@@ -335,7 +339,7 @@ export function WebhooksSection(_props: { isAdmin?: boolean } = {}) {
       await fetch(apiPath('/api/admin/webhooks'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, url, events }),
+        body: JSON.stringify({ id, url, events, includeInternal: values.internal === 'true' }),
       })
     } finally {
       setEditId(null)
@@ -412,6 +416,7 @@ export function WebhooksSection(_props: { isAdmin?: boolean } = {}) {
                 <small>{r.events.join(', ')}</small>
               </div>
               <div className="lrow-r">
+                {r.includeInternal === true ? <span className="chip outline">Internal</span> : null}
                 <span className={'chip ' + (r.active ? 'brand' : 'outline')}>
                   {r.active ? 'Active' : 'Paused'}
                 </span>
@@ -440,10 +445,11 @@ export function WebhooksSection(_props: { isAdmin?: boolean } = {}) {
       {editId && editing && (
         <EditDialog
           heading="Edit endpoint"
-          row={{ url: editing.url, ev: editing.events.join(', ') }}
+          row={{ url: editing.url, ev: editing.events.join(', '), internal: editing.includeInternal === true ? 'true' : 'false' }}
           fields={[
             { key: 'url', label: 'Endpoint URL' },
             { key: 'ev', label: 'Events' },
+            { key: 'internal', label: 'Include internal requests', type: 'checkbox', help: INTERNAL_HELP },
           ]}
           onSave={v => void saveEndpoint(editId, v)}
           onClose={() => setEditId(null)}

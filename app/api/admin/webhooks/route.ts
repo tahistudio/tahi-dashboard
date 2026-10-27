@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { eq, like } from 'drizzle-orm'
+import { normaliseEvents } from '@/lib/webhook-events'
 
 const WEBHOOK_KEY_PREFIX = 'webhook_endpoint_'
 
@@ -12,6 +13,8 @@ interface WebhookEndpoint {
   url: string
   secret: string
   events: string[]
+  /** Opt in to events about internal (team-only) requests. Absent means false. */
+  includeInternal?: boolean
   /** Paused endpoints keep their record + secret but should not receive deliveries. */
   active: boolean
   createdAt: string
@@ -51,6 +54,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ endpoints: endpoints.map(endpoint => ({
     id: endpoint.id, url: endpoint.url, events: endpoint.events,
+    includeInternal: endpoint.includeInternal === true,
     active: endpoint.active, createdAt: endpoint.createdAt,
   })) })
 }
@@ -71,10 +75,15 @@ export async function POST(req: NextRequest) {
     url?: string
     secret?: string
     events?: string[]
+    includeInternal?: boolean
   }
 
-  const { url, secret, events } = body
+  const { url, secret } = body
+  const events = Array.isArray(body.events) ? normaliseEvents(body.events) : undefined
 
+  if (body.includeInternal !== undefined && typeof body.includeInternal !== 'boolean') {
+    return NextResponse.json({ error: 'includeInternal must be true or false' }, { status: 400 })
+  }
   if (!url || !secret || !events || events.length === 0) {
     return NextResponse.json(
       { error: 'url, secret, and events are required' },
@@ -98,7 +107,11 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
 
-  const endpoint: WebhookEndpoint = { id, url, secret, events, active: true, createdAt: now }
+  const endpoint: WebhookEndpoint = {
+    id, url, secret, events,
+    includeInternal: body.includeInternal === true,
+    active: true, createdAt: now,
+  }
 
   await drizzle
     .insert(schema.settings)
@@ -128,6 +141,7 @@ export async function PATCH(req: NextRequest) {
     id?: string
     url?: string
     events?: string[]
+    includeInternal?: boolean
     active?: boolean
   }
 
@@ -141,8 +155,11 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'url must be a valid URL' }, { status: 400 })
     }
   }
-  if (body.events !== undefined && (!Array.isArray(body.events) || body.events.length === 0)) {
+  if (body.events !== undefined && (!Array.isArray(body.events) || normaliseEvents(body.events).length === 0)) {
     return NextResponse.json({ error: 'events must be a non-empty array' }, { status: 400 })
+  }
+  if (body.includeInternal !== undefined && typeof body.includeInternal !== 'boolean') {
+    return NextResponse.json({ error: 'includeInternal must be true or false' }, { status: 400 })
   }
 
   const database = await db()
@@ -169,7 +186,8 @@ export async function PATCH(req: NextRequest) {
   const endpoint: WebhookEndpoint = {
     ...existing,
     url: body.url ?? existing.url,
-    events: body.events ?? existing.events,
+    events: body.events ? normaliseEvents(body.events) : existing.events,
+    includeInternal: body.includeInternal ?? existing.includeInternal === true,
     active: body.active ?? existing.active !== false,
   }
 
@@ -180,6 +198,7 @@ export async function PATCH(req: NextRequest) {
 
   return NextResponse.json({ success: true, endpoint: {
     id: endpoint.id, url: endpoint.url, events: endpoint.events,
+    includeInternal: endpoint.includeInternal === true,
     active: endpoint.active, createdAt: endpoint.createdAt,
   } })
 }

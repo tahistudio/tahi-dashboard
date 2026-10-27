@@ -81,6 +81,7 @@
 - Commit straight to main after the gate (no pull requests). Subject in plain language, body says why (Ship Studio reads the body as the team feed). Add the trailer your tool's own guidance asks for (Made-With or Co-Authored-By).
 - Update TASKS.md and the run log in the same push as the code; a task flips to `[x]` only with a commit id and a live observation.
 - New or changed emails: run the preview sender (POST /api/admin/emails/preview as Liam) so he sees the design.
+- Outgoing webhooks skip events about internal requests (`requests.is_internal = 1`, e.g. Site QA findings) unless the endpoint has `includeInternal: true` (settings > Webhooks "Include internal requests", default off); request_* payloads carry `isInternal`, and a failed lookup fails closed (not sent). Logic lives in `lib/webhooks.ts`.
 
 ---
 

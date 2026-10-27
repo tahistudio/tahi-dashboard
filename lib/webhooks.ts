@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
-import { like } from 'drizzle-orm'
+import { eq, like } from 'drizzle-orm'
+import { normaliseEvents } from '@/lib/webhook-events'
 
 type Database = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -11,7 +12,37 @@ interface WebhookEndpoint {
   url: string
   secret: string
   events: string[]
+  /** Opt in to events about internal (team-only) requests. Absent means false. */
+  includeInternal?: boolean
+  /** Paused endpoints get no deliveries. Records saved before the flag existed are active. */
+  active?: boolean
   createdAt: string
+}
+
+/**
+ * Decide whether a request event concerns an internal request. A payload that
+ * already says internal is trusted; anything else is checked against the row,
+ * so a stale "not internal" from a caller can never leak. Fails closed: a
+ * missing id, missing row or query error counts as internal.
+ */
+async function resolveRequestIsInternal(
+  database: Database,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  if (payload.isInternal === true || payload.isInternal === 1) return true
+  const entityId = payload.entityId
+  if (typeof entityId !== 'string' || entityId.length === 0) return true
+  try {
+    const [row] = await database
+      .select({ isInternal: schema.requests.isInternal })
+      .from(schema.requests)
+      .where(eq(schema.requests.id, entityId))
+      .limit(1)
+    if (!row) return true
+    return row.isInternal === true
+  } catch {
+    return true
+  }
 }
 
 /**
@@ -100,7 +131,12 @@ export async function fireWebhook(
         }
       })
       .filter((e): e is WebhookEndpoint => e !== null)
-      .filter(e => e.events.includes(event) || e.events.includes('*'))
+      .filter(e => e.active !== false)
+      // Records saved before names were normalised may say request.created.
+      .filter(e => {
+        const subscribed = normaliseEvents(Array.isArray(e.events) ? e.events : [])
+        return subscribed.includes(event) || subscribed.includes('*')
+      })
   } catch {
     console.error('Failed to load webhook endpoints')
     return
@@ -108,10 +144,23 @@ export async function fireWebhook(
 
   if (endpoints.length === 0) return
 
+  // Request events: internal requests only reach endpoints that opted in, and
+  // every request payload carries isInternal. The lookup runs only here, after
+  // at least one endpoint matched, and fails closed.
+  let data = payload
+  if (event.startsWith('request_')) {
+    const isInternal = await resolveRequestIsInternal(drizzle, payload)
+    if (isInternal) {
+      endpoints = endpoints.filter(e => e.includeInternal === true)
+      if (endpoints.length === 0) return
+    }
+    data = { ...payload, isInternal }
+  }
+
   const body = JSON.stringify({
     event,
     timestamp: new Date().toISOString(),
-    data: payload,
+    data,
   })
 
   const deliveries = endpoints.map(async (endpoint) => {

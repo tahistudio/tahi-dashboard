@@ -197,7 +197,8 @@ describe('webhook signing secret creation', () => {
     expect(captured.submit).toBeNull()
     const request = JSON.parse(fetch.mock.calls[0][1].body) as { secret: string; events: string[] }
     expect(request.secret).toMatch(/^whsec_[a-f0-9]{32}$/)
-    expect(request.events).toEqual(['request.created', 'invoice.paid'])
+    // Typed with dots, saved as the emitted underscore names (lib/webhook-events.ts).
+    expect(request.events).toEqual(['request_created', 'invoice_paid'])
     captured.buttons.get('Copy secret')?.()
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('whsec_saved_secret'))
     expect(render()).toContain('Copied')

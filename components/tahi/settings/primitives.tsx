@@ -226,7 +226,7 @@ export function Chip({ tone, children }: ChipProps) {
 }
 
 /* ---------- EditDialog ---------- */
-export type FieldType = 'text' | 'textarea' | 'select' | 'color' | 'number'
+export type FieldType = 'text' | 'textarea' | 'select' | 'color' | 'number' | 'checkbox'
 
 export interface Field {
   key: string
@@ -281,8 +281,22 @@ export function EditDialog({ heading, fields, row, onSave, onClose }: EditDialog
           <h3>{heading}</h3>
           {fields.map((f, i) => (
             <div key={f.key} className="set-field" style={{ marginTop: i ? 12 : 0 }}>
-              <label>{f.label}</label>
-              {f.type === 'color' ? (
+              {f.type === 'checkbox' ? null : <label htmlFor={`edit-field-${f.key}`}>{f.label}</label>}
+              {f.type === 'checkbox' ? (
+                <label
+                  htmlFor={`edit-field-${f.key}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', minHeight: '2.75rem', cursor: 'pointer' }}
+                >
+                  <input
+                    id={`edit-field-${f.key}`}
+                    type="checkbox"
+                    checked={v[f.key] === 'true'}
+                    onChange={(e) => set(f.key, e.target.checked ? 'true' : 'false')}
+                    style={{ width: '1.125rem', height: '1.125rem', accentColor: 'var(--brand)' }}
+                  />
+                  <span>{f.label}</span>
+                </label>
+              ) : f.type === 'color' ? (
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <input
                     type="color"
