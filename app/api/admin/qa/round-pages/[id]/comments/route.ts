@@ -13,7 +13,7 @@ import type { QaTarget } from '@/lib/qa/types'
 /** A comment body is at most 4000 characters and its context 8 KB, so 64 KB is generous. */
 const COMMENT_REQUEST_MAX_BYTES = 64 * 1024
 
-type Drizzle =ReturnType<typeof import('drizzle-orm/d1').drizzle>
+type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /** Element comments on one round page, oldest first, each with its pin number, page URL and viewport guidance. */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
