@@ -19,6 +19,9 @@ import {
   APPROVAL_ATTEMPT_WINDOW_MS,
   failedApprovalCount,
   isAllowedRedirectUri,
+  readBodyCapped,
+  recordCapped,
+  throttleKey,
   isMintedBeforeEpoch,
   parseAllowedRedirectHosts,
   parseTokenEpoch,
@@ -4374,6 +4377,8 @@ async function handleAuthorizeCallback(request: Request, env: Env): Promise<Resp
   return redirectResponse(callback.toString(), { 'Set-Cookie': CLEAR_CONSENT_COOKIE })
 }
 
+const TOKEN_MAX_BODY_BYTES = 8 * 1024
+
 /** POST /oauth/token - Token exchange endpoint */
 async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
   const contentType = request.headers.get('Content-Type') ?? ''
@@ -4381,9 +4386,18 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
   let params: URLSearchParams
 
   if (contentType.includes('application/x-www-form-urlencoded')) {
-    params = new URLSearchParams(await request.text())
+    const text = await readBodyCapped(request, TOKEN_MAX_BODY_BYTES)
+    if (text === null) return corsResponse({ error: 'invalid_request', error_description: 'Request body is too large' }, 400)
+    params = new URLSearchParams(text)
   } else if (contentType.includes('application/json')) {
-    const body = await request.json() as Record<string, string>
+    const text = await readBodyCapped(request, TOKEN_MAX_BODY_BYTES)
+    if (text === null) return corsResponse({ error: 'invalid_request', error_description: 'Request body is too large' }, 400)
+    let body: Record<string, string>
+    try {
+      body = JSON.parse(text) as Record<string, string>
+    } catch {
+      return corsResponse({ error: 'invalid_request', error_description: 'Body must be valid JSON' }, 400)
+    }
     params = new URLSearchParams(body)
   } else {
     console.warn(`[oauth/token] unsupported content type: ${contentType || 'none'}`)
@@ -4499,6 +4513,82 @@ async function handleOAuthToken(request: Request, env: Env): Promise<Response> {
   return corsResponse({ error: 'unsupported_grant_type' }, 400)
 }
 
+// Dynamic client registration (RFC 7591), stateless on purpose (Decision #075).
+// Every registration answers with the one static client id, so nothing is
+// stored, no secret exists, and the real gate stays the Clerk consent plus the
+// redirect_uri allowlist. Counted per source address in an isolate local map,
+// a speed bump like the consent throttle.
+const REGISTER_MAX_BODY_BYTES = 8 * 1024
+const REGISTER_MAX_REDIRECT_URIS = 10
+const REGISTER_MAX_NAME_LENGTH = 100
+// Looser than the consent throttle: nothing secret is handed out, and
+// Anthropic's outbound range is shared by many people.
+const REGISTER_ATTEMPT_LIMIT = 120
+const registerAttempts: ApprovalAttempts = new Map()
+
+function registrationError(error: string, description: string, status = 400): Response {
+  return corsResponse({ error, error_description: description }, status)
+}
+
+/** POST /register - RFC 7591 dynamic client registration, no storage. */
+async function handleRegister(request: Request, env: Env): Promise<Response> {
+  if (!env.OAUTH_CLIENT_ID) {
+    return registrationError('server_error', 'Client registration is not configured.', 503)
+  }
+
+  const now = Date.now()
+  const source = throttleKey(attemptKey(request))
+  pruneApprovalAttempts(registerAttempts, now)
+  if (failedApprovalCount(registerAttempts, source, now) >= REGISTER_ATTEMPT_LIMIT) {
+    const response = registrationError('temporarily_unavailable', 'Too many registrations from this address. Try again later.', 429)
+    response.headers.set('Retry-After', String(Math.ceil(APPROVAL_ATTEMPT_WINDOW_MS / 1000)))
+    return response
+  }
+  recordCapped(registerAttempts, source, now)
+
+  const raw = await readBodyCapped(request, REGISTER_MAX_BODY_BYTES)
+  if (raw === null) {
+    return registrationError('invalid_client_metadata', 'Registration body is too large.')
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return registrationError('invalid_client_metadata', 'Body must be a JSON object.')
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return registrationError('invalid_client_metadata', 'Body must be a JSON object.')
+  }
+  const metadata = parsed as Record<string, unknown>
+
+  const uris = metadata.redirect_uris
+  const allowedHosts = parseAllowedRedirectHosts(env.OAUTH_REDIRECT_HOSTS)
+  if (
+    !Array.isArray(uris) ||
+    uris.length === 0 ||
+    uris.length > REGISTER_MAX_REDIRECT_URIS ||
+    !uris.every((u): u is string => typeof u === 'string' && isAllowedRedirectUri(u, allowedHosts))
+  ) {
+    return registrationError('invalid_redirect_uri', 'redirect_uris must be a non-empty list of approved callbacks.')
+  }
+
+  const result: Record<string, unknown> = {
+    client_id: env.OAUTH_CLIENT_ID,
+    token_endpoint_auth_method: 'none',
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    redirect_uris: uris,
+  }
+  if (typeof metadata.client_name === 'string') {
+    const name = metadata.client_name.replace(/[\u0000-\u001f\u007f<>"'`]/g, '').trim().slice(0, REGISTER_MAX_NAME_LENGTH)
+    if (name) result.client_name = name
+  }
+  const created = corsResponse(result, 201)
+  created.headers.set('X-Content-Type-Options', 'nosniff')
+  return created
+}
+
 /** Extract and validate the bearer token; the session it grants, or a 401. */
 async function authenticateRequest(request: Request, env: Env): Promise<McpSession | Response> {
   const origin = new URL(request.url).origin
@@ -4550,6 +4640,7 @@ function handleAuthServerMetadata(origin: string): Response {
     issuer: origin,
     authorization_endpoint: `${origin}/authorize`,
     token_endpoint: `${origin}/oauth/token`,
+    registration_endpoint: `${origin}/register`,
     // Decision #049: advertise refresh_token so Claude knows it can silently
     // mint a new access token instead of forcing reauth every hour.
     grant_types_supported: ['authorization_code', 'refresh_token'],
@@ -4634,6 +4725,11 @@ export default {
           { error: 'invalid_request', error_description: 'The approval key flow was retired. Start connecting again from Claude and sign in with your Tahi account.' },
           410,
         )
+      }
+
+      // Dynamic client registration (RFC 7591), public and stateless
+      if (url.pathname === '/register') {
+        return handleRegister(request, env)
       }
 
       // OAuth token endpoint (no bearer auth required, uses client credentials)

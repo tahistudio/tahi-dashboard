@@ -14,16 +14,24 @@
  * spec lives in app/api/__tests__/mcp-oauth-approval.test.ts).
  */
 
-/** Hosts allowed as OAuth callback targets without any extra config. */
-export const DEFAULT_REDIRECT_HOSTS = ['claude.ai', 'claude.com', 'localhost', '127.0.0.1']
+/**
+ * Callbacks allowed without any extra config. Exact URLs: no subdomains, no
+ * other paths, no port, no query. Loopback is handled separately in
+ * isAllowedRedirectUri (RFC 8252 section 7.3: any port, any path).
+ */
+export const DEFAULT_REDIRECT_URIS = [
+  'https://claude.ai/api/mcp/auth_callback',
+  'https://claude.com/api/mcp/auth_callback',
+]
 
-/** Hosts that may use http instead of https (local MCP inspector work). */
+/** Hosts that may use http instead of https (RFC 8252 loopback redirect). */
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1']
 
 /**
- * Parse the OAUTH_REDIRECT_HOSTS secret (comma or space separated) and
- * merge it with the defaults. Entries may be bare hosts ('claude.ai') or
- * full origins ('https://claude.ai'); both reduce to a hostname.
+ * Parse the OAUTH_REDIRECT_HOSTS secret (comma or space separated) and merge
+ * it with the defaults. Entries are EXACT callback URLs. Deprecated: a bare
+ * host with no scheme ('mcp.example.org') still works for that entry only, as
+ * the old https host-or-subdomain match. Junk entries are dropped.
  */
 export function parseAllowedRedirectHosts(raw: string | undefined | null): string[] {
   const extra = (raw ?? '')
@@ -33,31 +41,37 @@ export function parseAllowedRedirectHosts(raw: string | undefined | null): strin
     .map((entry) => {
       if (!entry.includes('://')) return entry.replace(/\/.*$/, '')
       try {
-        return new URL(entry).hostname
+        const url = new URL(entry)
+        if (url.username || url.password || url.hash) return ''
+        return url.href
       } catch {
         return ''
       }
     })
     .filter(Boolean)
-  return Array.from(new Set([...DEFAULT_REDIRECT_HOSTS, ...extra]))
+  return Array.from(new Set([...DEFAULT_REDIRECT_URIS, ...extra]))
 }
 
 /**
  * Is this redirect_uri one we are willing to hand an authorization code to?
- * Exact host match or a subdomain of an allowed host. https only, except on
- * loopback where the OAuth spec allows http.
+ * Exact URL match against the allowlist, or an http loopback URL on any port
+ * and path. Userinfo and fragments are never allowed. Allowlist entries
+ * without a scheme are the deprecated host-or-subdomain form (https only).
  */
-export function isAllowedRedirectUri(redirectUri: string, allowedHosts: string[]): boolean {
+export function isAllowedRedirectUri(redirectUri: string, allowed: string[]): boolean {
   let url: URL
   try {
     url = new URL(redirectUri)
   } catch {
     return false
   }
+  if (url.username || url.password || url.hash) return false
   const host = url.hostname.toLowerCase()
-  const isLoopback = LOOPBACK_HOSTS.includes(host)
-  if (url.protocol !== 'https:' && !(isLoopback && url.protocol === 'http:')) return false
-  return allowedHosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`))
+  if (url.protocol === 'http:' && LOOPBACK_HOSTS.includes(host)) return true
+  if (url.protocol !== 'https:') return false
+  return allowed.some((entry) =>
+    entry.includes('://') ? url.href === entry : host === entry || host.endsWith(`.${entry}`),
+  )
 }
 
 /**
@@ -223,4 +237,72 @@ export function renderConsentErrorPage(message: string): string {
   </main>
 </body>
 </html>`
+}
+
+// ---------------------------------------------------------------------------
+// Registration throttling and bounded body reads
+// ---------------------------------------------------------------------------
+
+/** Most distinct source keys the registration throttle will remember. */
+export const REGISTER_MAX_TRACKED_KEYS = 5000
+
+/**
+ * Throttle key for a source address. IPv6 collapses to its /64 prefix (one
+ * subscriber owns a whole /64), IPv4 and anything else is used as is.
+ */
+export function throttleKey(ip: string): string {
+  if (!ip.includes(':')) return ip
+  const [head, tail = ''] = ip.toLowerCase().split('::')
+  const headParts = head ? head.split(':') : []
+  const tailParts = tail ? tail.split(':') : []
+  const missing = Math.max(0, 8 - headParts.length - tailParts.length)
+  const full = ip.includes('::') ? [...headParts, ...Array(missing).fill('0'), ...tailParts] : headParts
+  if (full.length < 4) return ip
+  return `${full.slice(0, 4).map((part) => part.replace(/^0+(?=.)/, '')).join(':')}::/64`
+}
+
+/**
+ * Like recordFailedApproval, but the map never grows past maxKeys: once full
+ * (after pruning lapsed windows) a new key is simply not recorded.
+ */
+export function recordCapped(
+  buckets: ApprovalAttempts,
+  key: string,
+  now: number,
+  maxKeys: number = REGISTER_MAX_TRACKED_KEYS,
+): void {
+  if (!buckets.has(key) && buckets.size >= maxKeys) {
+    pruneApprovalAttempts(buckets, now)
+    if (buckets.size >= maxKeys) return
+  }
+  recordFailedApproval(buckets, key, now)
+}
+
+/**
+ * Read a request body as text, counting bytes as they stream so a client
+ * cannot dodge the cap by omitting Content-Length. Returns null when the body
+ * exceeds maxBytes (the stream is cancelled).
+ */
+export async function readBodyCapped(request: Request, maxBytes: number): Promise<string | null> {
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    merged.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(merged)
 }

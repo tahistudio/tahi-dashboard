@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest'
 import {
   APPROVAL_ATTEMPT_LIMIT,
   APPROVAL_ATTEMPT_WINDOW_MS,
-  DEFAULT_REDIRECT_HOSTS,
+  DEFAULT_REDIRECT_URIS,
   escapeHtml,
   failedApprovalCount,
   isAllowedRedirectUri,
@@ -28,23 +28,26 @@ import {
   renderConsentErrorPage,
   timingSafeEquals,
   type ApprovalAttempts,
+  readBodyCapped,
+  recordCapped,
+  throttleKey,
 } from '../../../workers/mcp-server/src/oauth-approval'
 
 describe('parseAllowedRedirectHosts', () => {
   it('always includes the built-in hosts', () => {
-    expect(parseAllowedRedirectHosts(undefined)).toEqual(DEFAULT_REDIRECT_HOSTS)
-    expect(parseAllowedRedirectHosts('')).toEqual(DEFAULT_REDIRECT_HOSTS)
+    expect(parseAllowedRedirectHosts(undefined)).toEqual(DEFAULT_REDIRECT_URIS)
+    expect(parseAllowedRedirectHosts('')).toEqual(DEFAULT_REDIRECT_URIS)
   })
 
   it('accepts bare hosts and full origins, comma or space separated', () => {
     const hosts = parseAllowedRedirectHosts('example.test, https://mcp.example.org/callback')
     expect(hosts).toContain('example.test')
-    expect(hosts).toContain('mcp.example.org')
+    expect(hosts).toContain('https://mcp.example.org/callback')
   })
 
   it('drops junk entries instead of allowing them', () => {
     const hosts = parseAllowedRedirectHosts('https://,  , ://nope')
-    expect(hosts).toEqual(DEFAULT_REDIRECT_HOSTS)
+    expect(hosts).toEqual(DEFAULT_REDIRECT_URIS)
   })
 })
 
@@ -54,7 +57,22 @@ describe('isAllowedRedirectUri', () => {
   it('allows the Claude callbacks the connector uses', () => {
     expect(isAllowedRedirectUri('https://claude.ai/api/mcp/auth_callback', hosts)).toBe(true)
     expect(isAllowedRedirectUri('https://claude.com/api/mcp/auth_callback', hosts)).toBe(true)
-    expect(isAllowedRedirectUri('https://api.claude.ai/callback', hosts)).toBe(true)
+    for (const bad of [
+      'https://x.claude.ai/cb',
+      'https://claude.ai/other',
+      'https://claude.ai:444/api/mcp/auth_callback',
+      'https://evil.com@claude.ai/api/mcp/auth_callback',
+      'https://claude.com/anything',
+      'http://claude.ai/api/mcp/auth_callback',
+      'https://claude.ai/api/mcp/auth_callback?x=1',
+      'https://claude.ai/api/mcp/auth_callback#f',
+      'http://localhost:3118/cb#f',
+      'http://user@localhost:3118/cb',
+    ]) {
+      expect(isAllowedRedirectUri(bad, hosts)).toBe(false)
+    }
+    expect(isAllowedRedirectUri('http://localhost:3118/callback', hosts)).toBe(true)
+    expect(isAllowedRedirectUri('http://127.0.0.1:5000/callback', hosts)).toBe(true)
   })
 
   it('allows http only on loopback', () => {
@@ -72,6 +90,9 @@ describe('isAllowedRedirectUri', () => {
   })
 
   it('honours an extra host from the secret', () => {
+    const exact = parseAllowedRedirectHosts('https://mcp.example.org/callback')
+    expect(isAllowedRedirectUri('https://mcp.example.org/callback', exact)).toBe(true)
+    expect(isAllowedRedirectUri('https://mcp.example.org/other', exact)).toBe(false)
     const extended = parseAllowedRedirectHosts('mcp.example.org')
     expect(isAllowedRedirectUri('https://mcp.example.org/cb', extended)).toBe(true)
     expect(isAllowedRedirectUri('https://mcp.example.org/cb', hosts)).toBe(false)
@@ -196,5 +217,34 @@ describe('renderConsentErrorPage', () => {
     const html = renderConsentErrorPage('<script>alert(1)</script>')
     expect(html).not.toContain('<script>alert(1)</script>')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  })
+})
+
+describe('registration throttle and body helpers', () => {
+  it('never tracks more than the cap under many distinct keys', () => {
+    const map: ApprovalAttempts = new Map()
+    for (let i = 0; i < 10000; i++) recordCapped(map, `k${i}`, 1000, 5000)
+    expect(map.size).toBeLessThanOrEqual(5000)
+  })
+
+  it('keys IPv6 by /64 and leaves IPv4 alone', () => {
+    expect(throttleKey('203.0.113.9')).toBe('203.0.113.9')
+    expect(throttleKey('2001:db8:1:2:aaaa:bbbb:cccc:dddd')).toBe(throttleKey('2001:db8:1:2::1'))
+    expect(throttleKey('2001:db8:1:2::1')).not.toBe(throttleKey('2001:db8:1:3::1'))
+  })
+
+  it('stops reading a streamed body past the cap with no Content-Length', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(4500))
+        controller.enqueue(new Uint8Array(4500))
+        controller.close()
+      },
+    })
+    const req = new Request('https://mcp.example/register', { method: 'POST', body: stream, duplex: 'half' } as RequestInit)
+    expect(req.headers.get('Content-Length')).toBeNull()
+    expect(await readBodyCapped(req, 8192)).toBeNull()
+    const ok = new Request('https://mcp.example/register', { method: 'POST', body: 'hello' })
+    expect(await readBodyCapped(ok, 8192)).toBe('hello')
   })
 })

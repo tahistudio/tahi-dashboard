@@ -56,8 +56,13 @@ every session. The `client_credentials` grant is gone.
 
 Optional, only if you need them:
 
-- `OAUTH_REDIRECT_HOSTS`: extra callback hosts, comma separated. `claude.ai`,
-  `claude.com`, their subdomains, and loopback are always allowed.
+- `OAUTH_REDIRECT_HOSTS`: extra callback URLs, comma separated, each an EXACT
+  URL (scheme, host, port, path). Always allowed with no config: exactly
+  `https://claude.ai/api/mcp/auth_callback`,
+  `https://claude.com/api/mcp/auth_callback`, and `http://localhost` or
+  `http://127.0.0.1` on any port and path (RFC 8252). No subdomains, userinfo,
+  fragments or other paths. Deprecated: a bare host with no scheme still
+  matches that host and its subdomains over https, for that entry only.
 - `MANYREQUESTS_BASE_URL`: overrides the default ManyRequests API base URL.
 
 `wrangler secret list` shows what is set. Values are write only after that.
@@ -125,6 +130,17 @@ The callback also requires the `__Host-tahi_mcp_consent` cookie set at
 the flow. Codes live two minutes. Failed callbacks are throttled per source
 address (eight in ten minutes) and logged. `POST /authorize` (the old key
 form) answers 410.
+
+Claude's "Register automatically (DCR, RFC 7591)" option works too:
+`POST /register` is stateless, takes JSON (8 KB cap) with `redirect_uris`
+(1 to 10, each an exact URL on the same allowlist as `/authorize`, else 400
+`invalid_redirect_uri`), and answers 201 with the one static `client_id`,
+`token_endpoint_auth_method: none` and the redirect URIs echoed. Nothing is
+stored and no secret is issued, so all Claude clients share one client id;
+revoke a person by clearing `team_members.mcp_profile`. It answers 503 if
+`OAUTH_CLIENT_ID` is unset, and is throttled per source address (IPv6 by /64;
+120 in ten minutes, at most 5000 addresses tracked). Request bodies on
+`/register` and `/oauth/token` are capped at 8 KB while streaming. Metadata advertises it as `registration_endpoint`. Decision #075.
 
 Every id-named tool argument must match `^[A-Za-z0-9_-]{1,128}$` and every
 dashboard path must normalise to itself (`src/path-safety.ts`), so an
