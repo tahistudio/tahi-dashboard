@@ -126,6 +126,8 @@ export interface ViewportStripProps {
   onCommentToggle: (viewport: QaViewportKey) => void
   /** The expanded frame changed (a frame expanded, collapsed or switched). */
   onExpandedChange?: (viewport: QaViewportKey | null) => void
+  /** Bumped to reload every frame; each bump adds a cache-busting query the viewer forwards. 0 is the plain URL. */
+  reloadKey?: number
 }
 
 function isScanMessage(data: unknown): data is { type: 'qa:scan'; version: 1; url: string; viewportWidth: number; result: QaScanResult } {
@@ -158,6 +160,7 @@ export function ViewportStrip({
   commentViewport,
   onCommentToggle,
   onExpandedChange,
+  reloadKey = 0,
 }: ViewportStripProps) {
   const viewOrigin = useMemo(() => {
     try {
@@ -186,6 +189,10 @@ export function ViewportStrip({
   syncActiveRef.current = syncIsActive
   // Frames that have loaded their page. Before that a frame is the dashboard's own blank document.
   const loadedFrames = useRef(new WeakSet<HTMLIFrameElement>())
+  // A reload navigates every frame, so none counts as loaded until it reports in again.
+  useEffect(() => {
+    loadedFrames.current = new WeakSet<HTMLIFrameElement>()
+  }, [reloadKey])
   // One resend timer per viewport, so a frame that reloads often never piles timers up.
   const syncTimers = useRef<Partial<Record<QaViewportKey, number>>>({})
 
@@ -360,7 +367,10 @@ export function ViewportStrip({
     setExpandedKey(null)
   }, [path, isMobile])
 
-  const src = `${baseUrl}${path}`
+  // The query is dropped when paths are compared (comparablePath), so a reload key never breaks matching.
+  const src = reloadKey > 0
+    ? `${baseUrl}${path}${path.includes('?') ? '&' : '?'}_qa_reload=${reloadKey}`
+    : `${baseUrl}${path}`
 
   function frameProps(v: QaViewportDef, rowHeightRem: number, expanded: boolean) {
     return {

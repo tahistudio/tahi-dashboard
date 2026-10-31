@@ -9,6 +9,7 @@ import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { RelativeTime } from '@/components/tahi/relative-time'
 import { TahiButton } from '@/components/tahi/tahi-button'
 import { Textarea } from '@/components/tahi/input'
+import { NoteThread } from './note-thread'
 import { QA_COMMENT_BODY_MAX, browserLabel, type QaBrowserKey, type QaComment } from '@/lib/qa/types'
 import {
   commentsForBrowser,
@@ -61,6 +62,8 @@ export interface CommentsTabProps {
   onResolve: (id: string, resolved: boolean) => void | Promise<void>
   onEdit: (id: string, body: string) => void | Promise<void>
   onDelete: (id: string) => void | Promise<void>
+  onAddNote: (id: string, body: string, resolve: boolean) => void | Promise<void>
+  onDeleteNote: (id: string, noteId: string) => void | Promise<void>
   onCreateRequest: (comment: NumberedComment) => void | Promise<void>
 }
 
@@ -78,6 +81,8 @@ export function CommentsTab({
   onResolve,
   onEdit,
   onDelete,
+  onAddNote,
+  onDeleteNote,
   onCreateRequest,
 }: CommentsTabProps) {
   const [filter, setFilter] = useState<CommentFilter>('open')
@@ -397,6 +402,15 @@ export function CommentsTab({
                         )}
                       </div>
                     )}
+
+                    <NoteThread
+                      commentId={comment.id}
+                      notes={comment.notes}
+                      resolved={resolved}
+                      readOnly={readOnly}
+                      onAdd={onAddNote}
+                      onDelete={onDeleteNote}
+                    />
                   </li>
                 )
               })}

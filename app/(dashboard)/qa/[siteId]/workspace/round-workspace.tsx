@@ -39,16 +39,24 @@ import { CommentComposer } from './comment-composer'
 import { useComments } from './use-comments'
 import { comparablePath } from './comparable-path'
 import {
+  COMMENT_VIEW_STORAGE_KEY,
+  DEFAULT_COMMENT_VIEW,
+  commentViewCount,
   composerHasDraft,
   composerPlacement,
+  parseCommentView,
   pickAction,
+  pinsForView,
   parseEscapeMessage,
   parseModeChangedMessage,
   parsePickMessage,
   parsePinClickMessage,
   viewportForSource,
+  type CommentView,
   type NumberedComment,
 } from './comments-helpers'
+import { RefreshButton, ReloadFramesButton } from './refresh-button'
+import { CommentViewControl } from './comment-view-control'
 import { RoundActions } from './round-actions'
 import type { CreateRequestInput } from './create-request-dialog'
 import type { QaIssuePanelDetail, QaRoundPageDetail, QaRoundPageRow, QaRoundRow, QaScanState, QaSiteRow } from './qa-types'
@@ -185,7 +193,7 @@ interface RoundWorkspaceBodyProps {
   pages: QaRoundPageRow[]
   groups: { groupKey: string; totalPages: number; sampled: number }[]
   readOnly: boolean
-  refresh: () => Promise<void>
+  refresh: () => Promise<boolean>
   patchPage: (pageId: string, patch: QaPagePatch) => Promise<void>
   fetchDetail: (pageId: string) => Promise<QaRoundPageDetail>
   submitScan: (roundPageId: string, viewport: QaViewportKey, result: QaScanResult, browser: QaBrowserKey) => Promise<void>
@@ -265,16 +273,18 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }, [pathname, round.id, router, searchParams])
 
   // Load the issues for the selected page.
-  const loadDetail = useCallback(async (pageId: string) => {
+  const loadDetail = useCallback(async (pageId: string): Promise<boolean> => {
     setDetailLoading(true)
     try {
       const next = await fetchDetail(pageId)
       // The user may have moved to another page while this loaded.
-      if (selectedIdRef.current !== pageId) return
+      if (selectedIdRef.current !== pageId) return true
       setDetail(next)
       setDetailError(null)
+      return true
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : 'Could not load the issues.')
+      return false
     } finally {
       setDetailLoading(false)
     }
@@ -314,8 +324,9 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     return () => clearTimeout(timer)
   }, [detail, readOnly, activeBrowser, browserInRound])
 
-  const reloadDetail = useCallback(async () => {
-    if (selectedId) await loadDetail(selectedId)
+  const reloadDetail = useCallback(async (): Promise<boolean> => {
+    if (!selectedId) return true
+    return loadDetail(selectedId)
   }, [loadDetail, selectedId])
 
   /** One issues reload shortly after the last scan of a burst. */
@@ -337,8 +348,60 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }, [viewOrigin])
 
   const comments = useComments(selectedId, readOnly, activeBrowser)
-  const pinsForRef = useRef(comments.pinsFor)
-  pinsForRef.current = comments.pinsFor
+
+  // Which pins the frames draw. View state only: it never touches a comment, and pins keep the
+  // server's pin number. The saved choice is restored after mount so server and client markup match.
+  const [commentView, setCommentView] = useState<CommentView>(DEFAULT_COMMENT_VIEW)
+  useEffect(() => {
+    try {
+      setCommentView(parseCommentView(window.localStorage.getItem(COMMENT_VIEW_STORAGE_KEY)))
+    } catch {
+      // Storage can be blocked; the default view applies.
+    }
+  }, [])
+  const changeCommentView = useCallback((next: CommentView) => {
+    setCommentView(next)
+    try {
+      window.localStorage.setItem(COMMENT_VIEW_STORAGE_KEY, JSON.stringify(next))
+    } catch {
+      // Not persisted; the choice still applies for this visit.
+    }
+  }, [])
+  const viewPins = useCallback(
+    (viewport: QaViewportKey) => pinsForView(comments.comments, viewport, commentView, activeBrowser, selectedCommentId),
+    [comments.comments, commentView, activeBrowser, selectedCommentId],
+  )
+  const viewCount = commentViewCount(comments.comments, commentView, activeBrowser, selectedCommentId)
+  const pinsForRef = useRef(viewPins)
+  pinsForRef.current = viewPins
+
+  // Refresh: refetch the round and the open page's comments on demand. The selected page, viewport,
+  // browser, comment view and an open composer are state of this component, so none of them reset.
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null)
+  const refreshInFlight = useRef(false)
+  const refreshComments = comments.refresh
+  const refreshAll = useCallback(async () => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
+    setRefreshing(true)
+    try {
+      const [roundOk, commentsOk, detailOk] = await Promise.all([refresh(), refreshComments(), reloadDetail()])
+      if (roundOk && commentsOk && detailOk) setRefreshedAt(Date.now())
+      else showToast('Could not refresh everything. Try again.', 'error')
+    } finally {
+      refreshInFlight.current = false
+      setRefreshing(false)
+    }
+  }, [refresh, refreshComments, reloadDetail, showToast])
+
+  // Reload the site frames themselves (a new cache-busting key). View state is untouched; each frame
+  // reports its load again, which resends the pins and comment mode.
+  const [frameReload, setFrameReload] = useState(0)
+  const reloadFrames = useCallback(() => {
+    loadedFrames.current = new WeakSet<HTMLIFrameElement>()
+    setFrameReload(n => n + 1)
+  }, [])
   // Latest values for the message listener, so it subscribes once.
   const latest = useRef({ path: selectedRow?.path ?? '', readOnly, wideActive: false, comments: comments.comments })
   latest.current = { path: selectedRow?.path ?? '', readOnly, wideActive, comments: comments.comments }
@@ -358,7 +421,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   // Whenever the comments change, redraw the pins in every visible frame.
   useEffect(() => {
     sendPins()
-  }, [comments.pinsFor, sendPins])
+  }, [viewPins, sendPins])
 
   /** One frame at a time is in comment mode; null turns it off everywhere. Closes the composer. */
   const applyCommentViewport = useCallback((next: QaViewportKey | null, keepComposer = false) => {
@@ -835,6 +898,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
         onResolve: resolveComment,
         onEdit: (id, body) => comments.update(id, { body }),
         onDelete: deleteComment,
+        onAddNote: (id, body, resolve) => comments.addNote(id, body, resolve),
+        onDeleteNote: (id, noteId) => comments.removeNote(id, noteId),
         onCreateRequest: createRequestFromComment,
       }}
     />
@@ -937,10 +1002,12 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
             scanRunning={scanAll.running}
             scanAllDisabled={!browserInRound}
             onScanAll={scanAll.start}
-            onRoundChanged={refresh}
+            onRoundChanged={async () => { await refresh() }}
             onCloseRound={() => void setRoundStatus('closed')}
             onReopenRound={() => void setRoundStatus('open')}
           />
+          <RefreshButton onRefresh={refreshAll} refreshing={refreshing} refreshedAt={refreshedAt} />
+          <ReloadFramesButton onReload={reloadFrames} disabled={!selectedRow} />
         </div>
       </div>
 
@@ -999,6 +1066,17 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               <span style={{ fontWeight: 600 }}>{doneTicks} / {totalTicks}</span>
             </div>
             {selectedRow ? (
+              <CommentViewControl
+                view={commentView}
+                onChange={changeCommentView}
+                roundBrowsers={roundBrowsers}
+                activeBrowser={activeBrowser}
+                viewports={isMobile ? [mobileViewport] : QA_VIEWPORTS.map(v => v.key)}
+                shown={viewCount.shown}
+                total={viewCount.total}
+              />
+            ) : null}
+            {selectedRow ? (
               <div className="flex min-w-0 flex-wrap items-center" style={{ gap: '0 0.75rem' }} role="group" aria-label="Viewport ticks">
                 {QA_VIEWPORTS.map(v => (
                   <label key={v.key} className="flex min-h-[2.75rem] items-center whitespace-nowrap text-[var(--color-text)]" style={{ gap: '0.25rem', fontSize: '0.75rem' }}>
@@ -1035,6 +1113,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               commentViewport={commentViewport}
               onCommentToggle={toggleCommentViewport}
               onExpandedChange={handleExpandedChange}
+              reloadKey={frameReload}
             />
           ) : (
             <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.875rem' }}>No pages in this round yet.</p>

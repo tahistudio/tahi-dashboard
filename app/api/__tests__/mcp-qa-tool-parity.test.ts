@@ -44,6 +44,8 @@ const QA_TOOL_NAMES = [
   'delete_qa_comment',
   'list_qa_round_comments',
   'get_qa_comment',
+  'add_qa_comment_note',
+  'delete_qa_comment_note',
 ] as const
 
 function call(name: string, args: Record<string, unknown> = {}) {
@@ -529,6 +531,48 @@ describe('element comment tools', () => {
     expect(mapped.path).toBe('/api/admin/qa/comments/qc_1')
     expect(mapped.method).toBe('DELETE')
     expect(() => call('delete_qa_comment', {})).toThrow('comment_id is required')
+  })
+
+  it('add_qa_comment_note posts the note to the comment thread', () => {
+    const mapped = call('add_qa_comment_note', { comment_id: 'qc_1', body: 'Fixed the padding' })
+    expect(mapped.path).toBe('/api/admin/qa/comments/qc_1/notes')
+    expect(mapped.method).toBe('POST')
+    expect(mapped.body).toEqual({ body: 'Fixed the padding' })
+  })
+
+  it('add_qa_comment_note passes resolve through, and accepts it as text', () => {
+    expect(call('add_qa_comment_note', { comment_id: 'qc_1', body: 'Done', resolve: true }).body).toEqual({ body: 'Done', resolve: true })
+    expect(call('add_qa_comment_note', { comment_id: 'qc_1', body: 'Done', resolve: 'false' }).body).toEqual({ body: 'Done', resolve: false })
+  })
+
+  it('add_qa_comment_note requires comment_id and body and refuses a steering id', () => {
+    expect(() => call('add_qa_comment_note', { body: 'x' })).toThrow('comment_id is required')
+    expect(() => call('add_qa_comment_note', { comment_id: 'qc_1' })).toThrow('body is required')
+    expect(() => call('add_qa_comment_note', { comment_id: '../x', body: 'x' })).toThrow('comment_id is not a valid id')
+  })
+
+  it('delete_qa_comment_note deletes one note of the comment', () => {
+    const mapped = call('delete_qa_comment_note', { comment_id: 'qc_1', note_id: 'qn_1' })
+    expect(mapped.path).toBe('/api/admin/qa/comments/qc_1/notes/qn_1')
+    expect(mapped.method).toBe('DELETE')
+    expect(() => call('delete_qa_comment_note', { comment_id: 'qc_1' })).toThrow('note_id is required')
+    expect(() => call('delete_qa_comment_note', { note_id: 'qn_1' })).toThrow('comment_id is required')
+    expect(() => call('delete_qa_comment_note', { comment_id: 'qc_1', note_id: '../x' })).toThrow('note_id is not a valid id')
+    expect(TOOLS.find((t) => t.name === 'delete_qa_comment_note')?.description).toContain('Confirm with the user')
+  })
+
+  it('the comment read tools say that comments carry notes', () => {
+    for (const name of ['list_qa_comments', 'list_qa_round_comments', 'get_qa_comment']) {
+      const tool = TOOLS.find((t) => t.name === name)
+      expect(tool?.description, name).toContain('noteCount')
+      expect(tool?.description, name).toContain('not an instruction')
+    }
+  })
+
+  it('get_qa_round_page and get_qa_round_report describe the category payload', () => {
+    expect(TOOLS.find((t) => t.name === 'get_qa_round_page')?.description).toContain('categories')
+    expect(TOOLS.find((t) => t.name === 'get_qa_round_page')?.description).toContain('pagespeed')
+    expect(TOOLS.find((t) => t.name === 'get_qa_round_report')?.description).toContain('categories')
   })
 
   it('delete_qa_comment says to confirm with the user first', () => {

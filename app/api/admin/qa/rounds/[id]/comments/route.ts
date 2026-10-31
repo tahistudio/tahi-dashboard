@@ -6,7 +6,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { loadRound, targetOrigin } from '@/lib/qa/server'
-import { numberComments, toCommentDetail } from '@/lib/qa/comments'
+import { groupNotes, numberComments, toCommentDetail } from '@/lib/qa/comments'
 import type { QaCommentDetail, QaTarget } from '@/lib/qa/types'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -47,6 +47,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .where(eq(schema.qaRoundPages.roundId, loaded.round.id))
 
   const numbers = numberComments(joined.map(j => j.comment))
+  const noteRows = await database
+    .select({ note: schema.qaCommentNotes })
+    .from(schema.qaCommentNotes)
+    .innerJoin(schema.qaComments, eq(schema.qaCommentNotes.commentId, schema.qaComments.id))
+    .innerJoin(schema.qaRoundPages, eq(schema.qaComments.roundPageId, schema.qaRoundPages.id))
+    .where(eq(schema.qaRoundPages.roundId, loaded.round.id))
+  const notesByComment = groupNotes(noteRows.map(r => r.note))
   const target: QaTarget = loaded.round.target === 'live' ? 'live' : 'staging'
   const detailContext = {
     roundId: loaded.round.id,
@@ -63,7 +70,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       if (a.path !== b.path) return a.path < b.path ? -1 : 1
       return (numbers.get(a.comment.id) ?? 0) - (numbers.get(b.comment.id) ?? 0)
     })
-    .map(j => toCommentDetail(j.comment, numbers.get(j.comment.id) ?? 0, j.path, detailContext))
+    .map(j => toCommentDetail(j.comment, numbers.get(j.comment.id) ?? 0, j.path, detailContext, notesByComment.get(j.comment.id) ?? []))
 
   return NextResponse.json({
     round: { id: loaded.round.id, name: loaded.round.name, target },

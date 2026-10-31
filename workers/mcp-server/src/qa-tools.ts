@@ -332,6 +332,20 @@ export function qaToolCall(
       if (Object.keys(body).length === 0) throw new Error('body, status or request_id is required')
       return { path: `/api/admin/qa/comments/${commentId}`, method: 'PATCH', body }
     }
+    case 'add_qa_comment_note': {
+      const commentId = required(args, 'comment_id')
+      assertSafeIdArgs({ comment_id: commentId })
+      const body: Record<string, unknown> = { body: required(args, 'body') }
+      const resolve = coerceBoolean(args.resolve)
+      if (resolve !== undefined) body.resolve = resolve
+      return { path: `/api/admin/qa/comments/${commentId}/notes`, method: 'POST', body }
+    }
+    case 'delete_qa_comment_note': {
+      const commentId = required(args, 'comment_id')
+      const noteId = required(args, 'note_id')
+      assertSafeIdArgs({ comment_id: commentId, note_id: noteId })
+      return { path: `/api/admin/qa/comments/${commentId}/notes/${noteId}`, method: 'DELETE', body: {} }
+    }
     case 'delete_qa_comment': {
       const commentId = required(args, 'comment_id')
       assertSafeIdArgs({ comment_id: commentId })

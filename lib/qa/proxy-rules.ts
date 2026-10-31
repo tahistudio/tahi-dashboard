@@ -48,9 +48,19 @@ export function fromProxyUrl(href: string, proxyBase: string, upstreamOrigin: st
   return `${upstreamOrigin}${rest}`
 }
 
+/** Query parameter the dashboard adds to reload a frame past caches. It never reaches the client site. */
+export const QA_RELOAD_PARAM = '_qa_reload'
+
+/** The query string without the reload parameter (and without a bare leading "?" when nothing is left). */
+export function stripReloadParam(search: string): string {
+  if (!search || search === '?') return ''
+  const kept = search.replace(/^[?]/, '').split('&').filter(part => part !== '' && part.split('=')[0] !== QA_RELOAD_PARAM)
+  return kept.length > 0 ? `?${kept.join('&')}` : ''
+}
+
 export function upstreamUrlFor(upstreamOrigin: string, path: string, search: string): string {
   const p = path.startsWith('/') ? path : `/${path}`
-  return `${upstreamOrigin}${p}${search}`
+  return `${upstreamOrigin}${p}${stripReloadParam(search)}`
 }
 
 const DROP = [

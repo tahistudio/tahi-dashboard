@@ -1,5 +1,6 @@
 import {
   QA_VIEWPORTS,
+  isQaBrowserKey,
   type QaBrowserKey,
   type QaComment,
   type QaCommentModeChangedMessage,
@@ -273,4 +274,132 @@ export function composerHasDraft(text: string | null | undefined): boolean {
 export function pickAction(composerOpen: boolean, draft: string | null | undefined): 'open' | 'replace' | 'ignore' {
   if (!composerOpen) return 'open'
   return composerHasDraft(draft) ? 'ignore' : 'replace'
+}
+
+// Comment view (which pins to draw). View state only: nothing here
+// touches a comment, and pin numbers stay the server n.
+
+export const COMMENT_VIEW_STORAGE_KEY = 'tahi-qa-comment-view'
+
+export interface CommentView {
+  /** Master switch: false hides every pin. */
+  show: boolean
+  /** Which statuses get a pin. The default draws both, as before. */
+  status: CommentFilter
+  /** Browsers whose comments get a pin. null is the browser being tested, as before. */
+  browsers: QaBrowserKey[] | null
+  /** Viewports whose frames get no pins. Empty draws pins in every frame. */
+  hiddenViewports: QaViewportKey[]
+}
+
+export const DEFAULT_COMMENT_VIEW: CommentView = { show: true, status: 'all', browsers: null, hiddenViewports: [] }
+
+const VIEWPORT_KEYS: readonly string[] = QA_VIEWPORTS.map(v => v.key)
+
+/** Reads a stored view. Anything missing or unreadable falls back to the default for that field. */
+export function parseCommentView(raw: string | null | undefined): CommentView {
+  if (!raw) return DEFAULT_COMMENT_VIEW
+  let data: unknown
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    return DEFAULT_COMMENT_VIEW
+  }
+  if (!isRecord(data)) return DEFAULT_COMMENT_VIEW
+  const status: CommentFilter = data.status === 'open' || data.status === 'resolved' || data.status === 'all'
+    ? data.status
+    : DEFAULT_COMMENT_VIEW.status
+  const browsers = Array.isArray(data.browsers)
+    ? data.browsers.filter((b): b is QaBrowserKey => isQaBrowserKey(b))
+    : null
+  const hiddenViewports = Array.isArray(data.hiddenViewports)
+    ? data.hiddenViewports.filter((v): v is QaViewportKey => typeof v === 'string' && VIEWPORT_KEYS.includes(v))
+    : []
+  return {
+    show: data.show !== false,
+    status,
+    browsers: browsers && browsers.length > 0 ? browsers : null,
+    hiddenViewports,
+  }
+}
+
+export function isDefaultCommentView(view: CommentView): boolean {
+  return view.show && view.status === 'all' && view.browsers === null && view.hiddenViewports.length === 0
+}
+
+/** The browsers a view draws pins for: its own list, else the browser being tested. */
+export function viewBrowsers(view: CommentView, activeBrowser: QaBrowserKey): QaBrowserKey[] {
+  return view.browsers ?? [activeBrowser]
+}
+
+/**
+ * Whether a comment gets a pin. A comment the user has selected stays visible whatever the
+ * filters say, so picking or focusing one never makes it vanish. Only the master switch hides it.
+ */
+export function commentVisible(
+  comment: Pick<QaComment, 'id' | 'status' | 'browser' | 'viewport'>,
+  view: CommentView,
+  activeBrowser: QaBrowserKey,
+  keepId: string | null,
+): boolean {
+  if (!view.show) return false
+  if (keepId !== null && comment.id === keepId) return true
+  if (!matchesFilter(comment.status, view.status)) return false
+  if (!viewBrowsers(view, activeBrowser).includes(comment.browser)) return false
+  return !view.hiddenViewports.includes(comment.viewport)
+}
+
+/** Pins for one frame, from comments that already carry their server pin number. */
+export function pinsForView(
+  comments: NumberedComment[],
+  viewport: QaViewportKey,
+  view: CommentView,
+  activeBrowser: QaBrowserKey,
+  keepId: string | null,
+): QaPin[] {
+  return pinsFor(
+    comments.filter(c => commentVisible(c, view, activeBrowser, keepId)),
+    viewport,
+  )
+}
+
+/** "Showing X of Y": comments that get a pin out of every comment on the page. */
+export function commentViewCount(
+  comments: readonly Pick<QaComment, 'id' | 'status' | 'browser' | 'viewport'>[],
+  view: CommentView,
+  activeBrowser: QaBrowserKey,
+  keepId: string | null,
+): { shown: number; total: number } {
+  let shown = 0
+  for (const c of comments) if (commentVisible(c, view, activeBrowser, keepId)) shown += 1
+  return { shown, total: comments.length }
+}
+
+/** Adds or removes one browser from the view. Emptying the list goes back to the browser being tested. */
+export function toggleViewBrowser(view: CommentView, browser: QaBrowserKey, activeBrowser: QaBrowserKey): CommentView {
+  const current = viewBrowsers(view, activeBrowser)
+  const next = current.includes(browser) ? current.filter(b => b !== browser) : [...current, browser]
+  return { ...view, browsers: next.length > 0 ? next : null }
+}
+
+/** Shows or hides the pins of one viewport. */
+export function toggleViewViewport(view: CommentView, viewport: QaViewportKey): CommentView {
+  const hidden = view.hiddenViewports.includes(viewport)
+    ? view.hiddenViewports.filter(v => v !== viewport)
+    : [...view.hiddenViewports, viewport]
+  return { ...view, hiddenViewports: hidden }
+}
+
+// Refresh versus local writes. Every local write (an edit, an added or removed note, a new comment)
+// bumps a sequence number; a load remembers the number it started at and is dropped if it moved,
+// so a slow response can never overwrite a newer local change.
+
+/** True when a local write happened after the load started, so its response is out of date. */
+export function isStaleLoad(startedAtSeq: number, currentSeq: number): boolean {
+  return startedAtSeq !== currentSeq
+}
+
+/** A loaded list with the optimistic version of every comment whose write is still in flight. */
+export function mergeLoadedComments(loaded: readonly QaComment[], inFlight: ReadonlyMap<string, QaComment>): QaComment[] {
+  return loaded.map(c => inFlight.get(c.id) ?? c)
 }

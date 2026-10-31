@@ -80,7 +80,7 @@ Risks, highest first:
    several iframe-typed helpers. Phase 5 replaces them with a frame handle and
    one bus without changing behaviour, before engine mode is added.
 
-Irreversible: only the additive migration 0119 (phase 7a). It ships before any
+Irreversible: only the additive migration 0120 (phase 7a). It ships before any
 engine write can reach production (phase 6c depends on 7a), so no engine-era
 row is ever stamped 'native' by the column default, and the unconditional scan
 upsert (app/api/admin/qa/round-pages/[id]/scan/route.ts, the
@@ -713,8 +713,8 @@ the WebKit engine may scan and comment but never tick Safari, and (C) no
 provenance at all. Option A:
 
 Every tick, scan and comment records `via` ('native' or 'engine'), additive
-migration 0119 on qa_browser_ticks, qa_scan_results and qa_comments, default
-'native'. 0119 ships (phase 7a) before any engine write exists (phase 6d), so
+migration 0120 on qa_browser_ticks, qa_scan_results and qa_comments, default
+'native'. 0120 ships (phase 7a) before any engine write exists (phase 6d), so
 the default only ever stamps rows that really were native. Chromium ticks stay
 in the qa_round_pages.vp_* columns and are always native, since there is no
 Chromium engine; a write with browser chromium and via 'engine' is a 400.
@@ -776,7 +776,7 @@ Rules:
   is the branded not-found page with 404; a 500, a Cloudflare error page or a
   plain-text 404 is the alarm. Then one signed-in page, then the /qa workspace.
   Roll back by reverting and pushing.
-- Migration 0119 (phase 7a): Opus applies it on production before the push,
+- Migration 0120 (phase 7a): Opus applies it on production before the push,
   with wrangler d1 execute against tahi-db using the remote flag and the file
   flag; if the file import fails on auth, each statement is run separately
   with the command flag. Verify with `PRAGMA table_info(qa_browser_ticks)`,
@@ -961,10 +961,10 @@ write sends via 'engine'.
 Phase 7a. Provenance server (sonnet-worker; Opus writes and reviews the
 migration and applies it on production per 7.2 before this phase is pushed).
 Pushed before 6c. Files:
-- drizzle/migrations/0119_qa_via.sql: ALTER TABLE qa_browser_ticks,
+- drizzle/migrations/0120_qa_via.sql: ALTER TABLE qa_browser_ticks,
   qa_scan_results and qa_comments ADD COLUMN via text NOT NULL DEFAULT 'native'.
 - lib/qa-migration.ts: QA_VIA_MIGRATION with the same three statements.
-- app/api/admin/db/migrate/route.ts: runner entry name '0119', description
+- app/api/admin/db/migrate/route.ts: runner entry name '0120', description
   "Site QA engine provenance: qa_browser_ticks.via, qa_scan_results.via,
   qa_comments.via (ALTER ADD COLUMN; the runner treats "duplicate column name"
   as already applied). Apply BEFORE deploying: db/schema.ts names the
@@ -1304,7 +1304,7 @@ Revision 2, 2026-10-27, after the fresh Opus review:
   per message, the composer captures it at pick, Scan all captures it at start,
   disconnect keeps the draft under the captured engine; new e2e cases (P1-1).
 - The Liam deploy decision is replaced by the standing push procedure, health
-  probe on portal.tahi.studio, and Opus applying 0119 on production with PRAGMA
+  probe on portal.tahi.studio, and Opus applying 0120 on production with PRAGMA
   checks (P1-2). dashboard.tahi.studio removed as an allowed origin.
 - Network guard is a resolve-then-connect refusing proxy with Firefox prefs and
   WebRTC off, route plus routeWebSocket as fallback, no weaker downgrade, new
@@ -1329,8 +1329,8 @@ Revision 2, 2026-10-27, after the fresh Opus review:
   sentence fixed (P3-7). Scanner trust wording corrected.
 
 Revision 3, 2026-10-27, after the second fresh Opus review:
-- Phase 7 split: 7a provenance server (0119 applied by Opus, db/schema.ts via
-  columns, lib/qa-migration.ts QA_VIA_MIGRATION, migrate runner entry '0119'
+- Phase 7 split: 7a provenance server (0120 applied by Opus, db/schema.ts via
+  columns, lib/qa-migration.ts QA_VIA_MIGRATION, migrate runner entry '0120'
   with "Apply BEFORE deploying", routes validate via, conditional upserts,
   readers and MCP return via, route tests) ships before 6c; 7b provenance UI
   after 6d. New ordering paragraph. 6d Done: every engine write sends via

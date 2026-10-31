@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiPath } from '@/lib/api'
 import { useToast } from '@/components/tahi/toast'
 import type { QaBrowserKey, QaComment, QaElementContext, QaPin, QaViewportKey } from '@/lib/qa/types'
-import { numberComments, pinsFor, type NumberedComment } from './comments-helpers'
+import { isStaleLoad, mergeLoadedComments, numberComments, pinsFor, type NumberedComment } from './comments-helpers'
 
 export interface AddCommentInput {
   viewport: QaViewportKey
@@ -29,13 +29,20 @@ export interface UseCommentsResult {
   comments: NumberedComment[]
   loading: boolean
   error: string | null
-  refresh: () => Promise<void>
+  /** Refetches this page's comments. Resolves true when they loaded. Optimistic edits still in flight are kept. */
+  refresh: () => Promise<boolean>
   /** Creates a comment. Rejects with a readable message on failure so the composer can stay open. */
   add: (input: AddCommentInput) => Promise<QaComment>
   /** Applies a patch optimistically. On failure it rolls back, toasts once and rejects so a caller can keep its form open. */
   update: (id: string, patch: UpdateCommentPatch) => Promise<void>
   /** Deletes a comment. Rejects with a readable message on failure after toasting. */
   remove: (id: string) => Promise<void>
+  /** Adds a note to a comment thread; resolve also resolves the comment. Rejects with a readable message after toasting. */
+  addNote: (commentId: string, body: string, resolve?: boolean) => Promise<void>
+  /** Deletes one note from a thread. Rejects with a readable message after toasting. */
+  removeNote: (commentId: string, noteId: string) => Promise<void>
+  /** When the comments were last loaded from the server, or null before the first load. */
+  loadedAt: number | null
   pinsFor: (viewport: QaViewportKey) => QaPin[]
 }
 
@@ -59,6 +66,11 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
   const [comments, setComments] = useState<QaComment[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loadedAt, setLoadedAt] = useState<number | null>(null)
+  // Comments with a PATCH still in flight, keyed by id. A refresh keeps their optimistic value.
+  const inFlightRef = useRef<Map<string, QaComment>>(new Map())
+  // Bumped by every local write; a load that started before the latest bump is stale.
+  const writeSeqRef = useRef(0)
   // The round page the hook is showing now. Responses for any other id are stale.
   const latestIdRef = useRef<string | null>(roundPageId)
   latestIdRef.current = roundPageId
@@ -70,18 +82,29 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
   const browserRef = useRef(browser)
   browserRef.current = browser
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, retries = 1): Promise<boolean> => {
     setLoading(true)
+    const startedAtSeq = writeSeqRef.current
     try {
       const res = await fetch(apiPath(`/api/admin/qa/round-pages/${encodeURIComponent(id)}/comments`))
       if (!res.ok) throw new Error(await readError(res))
       const json = (await res.json()) as { comments?: QaComment[] }
-      if (latestIdRef.current !== id) return
-      setComments(json.comments ?? [])
+      if (latestIdRef.current !== id) return false
+      // A local write landed while this was loading: its response is older than what is on screen. Try once more.
+      if (isStaleLoad(startedAtSeq, writeSeqRef.current)) {
+        if (retries > 0) return await load(id, retries - 1)
+        // Still behind a newer local write: nothing was pulled in, so do not report a refresh.
+        return false
+      }
+      setComments(mergeLoadedComments(json.comments ?? [], inFlightRef.current))
       setError(null)
+      setLoadedAt(Date.now())
+      return true
     } catch (err) {
-      if (latestIdRef.current !== id) return
-      setError(err instanceof Error ? err.message : 'Could not load comments.')
+      if (latestIdRef.current !== id) return false
+      // A failed refresh keeps the list on screen; the caller reports it.
+      if (commentsRef.current.length === 0) setError(err instanceof Error ? err.message : 'Could not load comments.')
+      return false
     } finally {
       if (latestIdRef.current === id) setLoading(false)
     }
@@ -90,6 +113,8 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
   useEffect(() => {
     setComments([])
     setError(null)
+    setLoadedAt(null)
+    inFlightRef.current.clear()
     if (!roundPageId) {
       setLoading(false)
       return
@@ -97,10 +122,10 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
     void load(roundPageId)
   }, [roundPageId, load])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<boolean> => {
     const id = latestIdRef.current
-    if (!id) return
-    await load(id)
+    if (!id) return false
+    return load(id)
   }, [load])
 
   const add = useCallback(async (input: AddCommentInput): Promise<QaComment> => {
@@ -115,6 +140,7 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
     if (!res.ok) throw new Error(await readError(res))
     const json = (await res.json()) as { comment: QaComment }
     if (latestIdRef.current === id) {
+      writeSeqRef.current += 1
       setComments(prev => [...prev.filter(c => !sameIdentity(c, json.comment)), json.comment])
     }
     return json.comment
@@ -127,6 +153,9 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
     }
     const previous = commentsRef.current.find(c => c.id === commentId)
     if (!previous) return
+    const optimistic = applyOptimistic(previous, patch)
+    inFlightRef.current.set(commentId, optimistic)
+    writeSeqRef.current += 1
     setComments(prev => prev.map(c => (c.id === commentId ? applyOptimistic(c, patch) : c)))
     try {
       const res = await fetch(apiPath(`/api/admin/qa/comments/${encodeURIComponent(commentId)}`), {
@@ -136,12 +165,16 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
       })
       if (!res.ok) throw new Error(await readError(res))
       const json = (await res.json()) as { comment: QaComment }
+      writeSeqRef.current += 1
       setComments(prev => prev.map(c => (c.id === commentId ? json.comment : c)))
     } catch (err) {
+      writeSeqRef.current += 1
       setComments(prev => prev.map(c => (c.id === commentId ? previous : c)))
       const message = err instanceof Error ? err.message : 'Could not save that change.'
       showToast(message, 'error')
       throw new Error(message)
+    } finally {
+      inFlightRef.current.delete(commentId)
     }
   }, [showToast])
 
@@ -153,9 +186,53 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
     try {
       const res = await fetch(apiPath(`/api/admin/qa/comments/${encodeURIComponent(commentId)}`), { method: 'DELETE' })
       if (!res.ok) throw new Error(await readError(res))
+      writeSeqRef.current += 1
       setComments(prev => prev.filter(c => c.id !== commentId))
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not delete the comment.'
+      showToast(message, 'error')
+      throw new Error(message)
+    }
+  }, [showToast])
+
+  const addNote = useCallback(async (commentId: string, body: string, resolve = false) => {
+    if (readOnlyRef.current) {
+      showToast('This round is closed.', 'error')
+      throw new Error('This round is closed.')
+    }
+    try {
+      const res = await fetch(apiPath(`/api/admin/qa/comments/${encodeURIComponent(commentId)}/notes`), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(resolve ? { body, resolve: true } : { body }),
+      })
+      if (!res.ok) throw new Error(await readError(res))
+      const json = (await res.json()) as { comment: QaComment }
+      writeSeqRef.current += 1
+      setComments(prev => prev.map(c => (c.id === commentId ? json.comment : c)))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not add the note.'
+      showToast(message, 'error')
+      throw new Error(message)
+    }
+  }, [showToast])
+
+  const removeNote = useCallback(async (commentId: string, noteId: string) => {
+    if (readOnlyRef.current) {
+      showToast('This round is closed.', 'error')
+      throw new Error('This round is closed.')
+    }
+    try {
+      const res = await fetch(apiPath(`/api/admin/qa/comments/${encodeURIComponent(commentId)}/notes/${encodeURIComponent(noteId)}`), { method: 'DELETE' })
+      if (!res.ok) throw new Error(await readError(res))
+      writeSeqRef.current += 1
+      setComments(prev => prev.map(c => {
+        if (c.id !== commentId) return c
+        const notes = c.notes.filter(n => n.id !== noteId)
+        return { ...c, notes, noteCount: notes.length }
+      }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not delete the note.'
       showToast(message, 'error')
       throw new Error(message)
     }
@@ -176,6 +253,9 @@ export function useComments(roundPageId: string | null, readOnly: boolean, brows
     add,
     update,
     remove,
+    addNote,
+    removeNote,
+    loadedAt,
     pinsFor: pinsForViewport,
   }
 }

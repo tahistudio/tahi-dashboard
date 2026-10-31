@@ -1441,6 +1441,17 @@ scheduled; each needs a scope before building.
   ticks made elsewhere until the next tick); comments from a removed browser
   still list under All browsers and the report. Next: SQA.5 local Firefox and
   WebKit engine helper with an Engine switch (plan in progress).
+- [ ] SQA.6 - [BE/FE] Site QA workspace refresh, comment notes thread and
+  category payloads (Liam, 2026-10-31). Built, uncommitted until reviewed:
+  data refresh button (round, comments, issue panel) plus a separate Reload
+  page frames button; notes thread under each comment (qa_comment_notes,
+  migration 0119, max 100 notes per comment, add_qa_comment_note with optional
+  resolve and delete_qa_comment_note MCP tools); pin filter control (show or
+  hide, status, browser, viewport; saved in localStorage); get_qa_round_page
+  returns status, note, categories counts and pagespeed; get_qa_round_report
+  returns per-category totals. Open before [x]: apply 0119 on production
+  BEFORE the push, live smoke, 375px, dark mode. The SQA.5 plan now reserves
+  0120 for its qa_via migration.
 - [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
   build Next 15 since its support window ended (21 Oct 2026); the first
   dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build

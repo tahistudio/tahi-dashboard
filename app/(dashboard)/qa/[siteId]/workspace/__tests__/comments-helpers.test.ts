@@ -32,6 +32,8 @@ function comment(over: Partial<QaComment> & { id: string; viewport: QaViewportKe
     updatedAt: '2026-10-27T10:00:00.000Z',
     resolvedAt: null,
     elementContext: null,
+    notes: [],
+    noteCount: 0,
     ...over,
   }
 }

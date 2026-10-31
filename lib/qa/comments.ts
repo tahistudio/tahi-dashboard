@@ -4,6 +4,7 @@
  */
 import {
   QA_COMMENT_BODY_MAX,
+  QA_NOTE_BODY_MAX,
   QA_DEFAULT_BROWSER,
   QA_CONTEXT_CLASS_MAX,
   QA_CONTEXT_HTML_MAX,
@@ -17,6 +18,8 @@ import {
   type QaBrowserKey,
   type QaComment,
   type QaCommentDetail,
+  type QaCommentNote,
+  type QaNoteSource,
   type QaCommentStatus,
   type QaContextAncestor,
   type QaElementContext,
@@ -96,7 +99,67 @@ function optionalText(v: unknown, max: number): { ok: true; value: string | null
   return { ok: true, value: trimmed || null }
 }
 
-export function rowToComment(row: CommentRow): QaComment {
+/** One qa_comment_notes row as Drizzle returns it. */
+export interface NoteRow {
+  id: string
+  commentId: string
+  body: string
+  authorId: string | null
+  authorName: string | null
+  source: string
+  createdAt: string
+}
+
+export function rowToNote(row: NoteRow): QaCommentNote {
+  const source: QaNoteSource = row.source === 'mcp' || row.source === 'service' ? row.source : 'dashboard'
+  return {
+    id: row.id,
+    commentId: row.commentId,
+    body: row.body,
+    authorId: row.authorId,
+    authorName: row.authorName,
+    source,
+    createdAt: row.createdAt,
+  }
+}
+
+/** Notes grouped by comment id, each list oldest first (created_at, ties by id). */
+export function groupNotes(rows: readonly NoteRow[]): Map<string, QaCommentNote[]> {
+  const sorted = [...rows].sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1
+    if (a.id !== b.id) return a.id < b.id ? -1 : 1
+    return 0
+  })
+  const out = new Map<string, QaCommentNote[]>()
+  for (const row of sorted) {
+    const list = out.get(row.commentId)
+    if (list) list.push(rowToNote(row))
+    else out.set(row.commentId, [rowToNote(row)])
+  }
+  return out
+}
+
+export interface NoteInput {
+  body: string
+  /** also resolve the comment in the same call */
+  resolve: boolean
+}
+
+/** Validates the body of a notes POST: text trimmed to 1..4000 characters, optional resolve flag. */
+export function parseNoteInput(body: unknown): ParseResult<NoteInput> {
+  if (!isRecord(body)) return { ok: false, error: 'Request body must be a JSON object' }
+  if (typeof body.body !== 'string') return { ok: false, error: 'body must be text' }
+  const text = body.body.trim()
+  if (text.length < 1 || text.length > QA_NOTE_BODY_MAX) {
+    return { ok: false, error: `body must be 1 to ${QA_NOTE_BODY_MAX} characters` }
+  }
+  if (body.resolve !== undefined && typeof body.resolve !== 'boolean') {
+    return { ok: false, error: 'resolve must be true or false' }
+  }
+  return { ok: true, value: { body: text, resolve: body.resolve === true } }
+}
+
+export function rowToComment(row: CommentRow, notes: readonly QaCommentNote[] = []): QaComment {
   const browser: QaBrowserKey = isQaBrowserKey(row.browser) ? row.browser : QA_DEFAULT_BROWSER
   return {
     id: row.id,
@@ -118,6 +181,8 @@ export function rowToComment(row: CommentRow): QaComment {
     updatedAt: row.updatedAt,
     resolvedAt: row.resolvedAt,
     elementContext: parseStoredContext(row.elementContext),
+    notes: [...notes],
+    noteCount: notes.length,
   }
 }
 
@@ -239,8 +304,14 @@ export interface CommentDetailContext {
   siteUrl: string | null
 }
 
-export function toCommentDetail(row: CommentRow, n: number, path: string, ctx: CommentDetailContext): QaCommentDetail {
-  const comment = rowToComment(row)
+export function toCommentDetail(
+  row: CommentRow,
+  n: number,
+  path: string,
+  ctx: CommentDetailContext,
+  notes: readonly QaCommentNote[] = [],
+): QaCommentDetail {
+  const comment = rowToComment(row, notes)
   return {
     ...comment,
     n,

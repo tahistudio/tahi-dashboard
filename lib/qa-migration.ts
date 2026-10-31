@@ -25,6 +25,12 @@ export const QA_COMMENT_CONTEXT_MIGRATION = [
   `ALTER TABLE qa_comments ADD COLUMN element_context text`,
 ] as const
 
+/** Comment notes thread, mirrored in drizzle/migrations/0119_qa_comment_notes.sql. Additive and re-run safe. */
+export const QA_COMMENT_NOTES_MIGRATION = [
+  `CREATE TABLE IF NOT EXISTS qa_comment_notes (id text PRIMARY KEY NOT NULL, comment_id text NOT NULL, body text NOT NULL, author_id text, author_name text, source text NOT NULL DEFAULT 'dashboard', created_at text NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_qa_comment_notes_comment ON qa_comment_notes(comment_id)`,
+] as const
+
 /**
  * Browsers per round (SQA.4), mirrored in drizzle/migrations/0118_qa_browsers.sql. The ALTERs rely on the
  * migrate runner tolerating "duplicate column name", so a rerun is safe. Order matters: the new scan

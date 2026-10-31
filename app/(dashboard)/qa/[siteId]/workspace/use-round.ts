@@ -96,8 +96,9 @@ export function useRound(roundId: string | null) {
   const pendingRef = useRef<Map<string, PendingFields>>(new Map())
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const refresh = useCallback(async () => {
-    if (!roundId) return
+  /** Refetches the round. Resolves true when it loaded, false when it failed (the error is kept in state). */
+  const refresh = useCallback(async (): Promise<boolean> => {
+    if (!roundId) return false
     setLoading(true)
     try {
       const res = await fetch(apiPath(`/api/admin/qa/rounds/${roundId}`))
@@ -112,8 +113,10 @@ export function useRound(roundId: string | null) {
       }
       setData(merged)
       setError(null)
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the round.')
+      return false
     } finally {
       setLoading(false)
     }

@@ -199,6 +199,20 @@ export interface QaPinClickMessage { type: 'qa:pin-click'; version: 1; id: strin
 
 export type QaCommentStatus = 'open' | 'resolved'
 
+/** Where a note was written: the dashboard, a person's assistant through MCP, or the shared service token with no person. */
+export type QaNoteSource = 'dashboard' | 'mcp' | 'service'
+
+/** One note in the thread under a comment. */
+export interface QaCommentNote {
+  id: string
+  commentId: string
+  body: string
+  authorId: string | null
+  authorName: string | null
+  source: QaNoteSource
+  createdAt: string
+}
+
 /** One row of qa_comments as the API returns it. */
 export interface QaComment {
   id: string
@@ -223,6 +237,9 @@ export interface QaComment {
   resolvedAt: string | null
   /** absent for comments made before element context existed */
   elementContext: QaElementContext | null
+  /** the note thread, oldest first */
+  notes: QaCommentNote[]
+  noteCount: number
 }
 
 /** Webflow breakpoint guidance for a viewport, so an editor knows which breakpoint to open. */
@@ -249,6 +266,9 @@ export type QaCommentDetail = QaComment & {
 }
 
 export const QA_COMMENT_BODY_MAX = 4000
+export const QA_NOTE_BODY_MAX = 4000
+/** Most notes one comment thread holds. */
+export const QA_NOTES_PER_COMMENT_MAX = 100
 
 export type QaIssueCategory = 'a11y' | 'links' | 'seo' | 'launch' | 'perf'
 export type QaIssueSeverity = 'fail' | 'warn' | 'info'

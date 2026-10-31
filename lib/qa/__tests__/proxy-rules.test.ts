@@ -61,6 +61,12 @@ describe('upstreamUrlFor', () => {
     expect(upstreamUrlFor(UP, '/a/b', '?q=1')).toBe('https://acme.webflow.io/a/b?q=1')
     expect(upstreamUrlFor(UP, '', '')).toBe('https://acme.webflow.io/')
   })
+  it('strips the dashboard reload parameter so the client site never sees it', () => {
+    expect(upstreamUrlFor(UP, '/a', '?_qa_reload=3')).toBe('https://acme.webflow.io/a')
+    expect(upstreamUrlFor(UP, '/a', '?q=1&_qa_reload=3')).toBe('https://acme.webflow.io/a?q=1')
+    expect(upstreamUrlFor(UP, '/a', '?_qa_reload=3&q=1&r=2')).toBe('https://acme.webflow.io/a?q=1&r=2')
+    expect(upstreamUrlFor(UP, '/a', '?_qa_reloaded=1')).toBe('https://acme.webflow.io/a?_qa_reloaded=1')
+  })
 })
 
 describe('scrubResponseHeaders', () => {

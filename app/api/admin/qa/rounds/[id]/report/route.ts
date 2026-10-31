@@ -7,6 +7,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { loadRound } from '@/lib/qa/server'
 import { numberComments, rowToComment } from '@/lib/qa/comments'
+import { reportCategoryTotals } from '@/lib/qa/category-summary'
 import { countTicks, mergeBrowserTicks, parseRoundBrowsers } from '@/lib/qa/browsers'
 import { QA_VIEWPORT_KEYS, type QaPageCounts, type QaPageStatus, type QaViewportKey } from '@/lib/qa/types'
 
@@ -124,6 +125,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     launchIssues: sumCounts(c => c.launchIssues),
     perfIssues: sumCounts(c => c.perfIssues),
   }
+  // The same totals grouped by category, as the report page presents them.
+  const categories = reportCategoryTotals(pages.map(p => p.counts))
 
   // One join for the whole round, so the query stays within the D1 bound-parameter cap however many pages it has.
   const commentRows = await database
@@ -189,6 +192,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     },
     orgName: org?.name ?? null,
     totals,
+    categories,
     pages,
     siteChecks: parseJson<unknown[]>(round.siteChecks),
     redirectMap: parseJson<unknown[]>(round.redirectMap),

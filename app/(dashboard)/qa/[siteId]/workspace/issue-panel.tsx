@@ -69,6 +69,8 @@ export interface IssuePanelComments {
   onResolve: (id: string, resolved: boolean) => void | Promise<void>
   onEdit: (id: string, body: string) => void | Promise<void>
   onDelete: (id: string) => void | Promise<void>
+  onAddNote: (id: string, body: string, resolve: boolean) => void | Promise<void>
+  onDeleteNote: (id: string, noteId: string) => void | Promise<void>
   /** Creates the request and links it to the comment. Resolves with the request id. */
   onCreateRequest: (comment: NumberedComment, input: CreateRequestInput) => Promise<string>
 }
@@ -168,6 +170,8 @@ export function IssuePanel(props: IssuePanelProps) {
             onResolve={comments.onResolve}
             onEdit={comments.onEdit}
             onDelete={comments.onDelete}
+            onAddNote={comments.onAddNote}
+            onDeleteNote={comments.onDeleteNote}
             onCreateRequest={setRequestForComment}
           />
         ) : null}

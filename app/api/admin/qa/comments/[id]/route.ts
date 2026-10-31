@@ -6,7 +6,7 @@ import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { loadRoundPage, targetOrigin } from '@/lib/qa/server'
-import { commentUpdateFields, numberComments, parseCommentPatch, rowToComment, toCommentDetail } from '@/lib/qa/comments'
+import { commentUpdateFields, groupNotes, numberComments, parseCommentPatch, rowToComment, toCommentDetail } from '@/lib/qa/comments'
 import type { QaTarget } from '@/lib/qa/types'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
@@ -34,6 +34,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .where(eq(schema.qaComments.roundPageId, existing.roundPageId))
     .orderBy(asc(schema.qaComments.createdAt), asc(schema.qaComments.id))
   const numbers = numberComments(siblings)
+  const noteRows = await database.select().from(schema.qaCommentNotes).where(eq(schema.qaCommentNotes.commentId, id))
+  const notes = groupNotes(noteRows).get(id) ?? []
   const target: QaTarget = loaded.round.target === 'live' ? 'live' : 'staging'
   const comment = toCommentDetail(existing, numbers.get(existing.id) ?? 0, loaded.roundPage.path, {
     roundId: loaded.round.id,
@@ -41,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     siteName: loaded.site.name,
     target,
     siteUrl: targetOrigin(loaded.site, target),
-  })
+  }, notes)
   return NextResponse.json({ comment })
 }
 
@@ -76,7 +78,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .returning()
   if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  return NextResponse.json({ comment: rowToComment(updated) })
+  const noteRows = await database.select().from(schema.qaCommentNotes).where(eq(schema.qaCommentNotes.commentId, id))
+  return NextResponse.json({ comment: rowToComment(updated, groupNotes(noteRows).get(id) ?? []) })
 }
 
 /** Deletes a comment from an open round. */
@@ -96,6 +99,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!loaded) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (loaded.round.status === 'closed') return NextResponse.json({ error: 'This round is closed' }, { status: 409 })
 
-  await database.delete(schema.qaComments).where(eq(schema.qaComments.id, id))
+  // The notes go with the comment, in one batch so neither is left behind.
+  await database.batch([
+    database.delete(schema.qaCommentNotes).where(eq(schema.qaCommentNotes.commentId, id)),
+    database.delete(schema.qaComments).where(eq(schema.qaComments.id, id)),
+  ])
   return NextResponse.json({ ok: true })
 }

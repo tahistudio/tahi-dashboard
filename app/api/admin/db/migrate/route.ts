@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm'
 import { requireMigrationAccess } from '@/lib/require-migration-access'
 import { MEETING_RECORDING_MIGRATION } from '@/lib/meeting-recordings-migration'
 import { RECORDER_DEVICES_MIGRATION } from '@/lib/recorder-devices-migration'
-import { QA_BROWSERS_MIGRATION, QA_COMMENT_CONTEXT_MIGRATION, QA_COMMENTS_MIGRATION, SITE_QA_MIGRATION } from '@/lib/qa-migration'
+import { QA_BROWSERS_MIGRATION, QA_COMMENT_NOTES_MIGRATION, QA_COMMENT_CONTEXT_MIGRATION, QA_COMMENTS_MIGRATION, SITE_QA_MIGRATION } from '@/lib/qa-migration'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -2496,6 +2496,11 @@ const MIGRATIONS: Migration[] = [
     name: '0118',
     description: 'Site QA browsers per round: qa_rounds.browsers, qa_browser_ticks, qa_scan_results.browser (new unique index created before the old one is dropped), qa_comments.browser (ALTER ADD COLUMN; the runner treats "duplicate column name" as already applied). Apply BEFORE deploying: db/schema.ts names the columns.',
     statements: [...QA_BROWSERS_MIGRATION],
+  },
+  {
+    name: '0119',
+    description: 'Site QA comment notes: qa_comment_notes thread table and its comment index (CREATE IF NOT EXISTS, additive). Apply BEFORE deploying: db/schema.ts names the table and the comment routes read it.',
+    statements: [...QA_COMMENT_NOTES_MIGRATION],
   },
 ]
 

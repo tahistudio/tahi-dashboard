@@ -5,8 +5,9 @@ import { schema } from '@/db/d1'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
+import { attributedUserId } from '@/lib/mcp-actor'
 import { loadRoundPage } from '@/lib/qa/server'
-import { numberComments, parseCommentInput, rowToComment, toCommentDetail } from '@/lib/qa/comments'
+import { groupNotes, numberComments, parseCommentInput, rowToComment, toCommentDetail } from '@/lib/qa/comments'
 import { targetOrigin } from '@/lib/qa/server'
 import { parseRoundBrowsers } from '@/lib/qa/browsers'
 import type { QaTarget } from '@/lib/qa/types'
@@ -37,6 +38,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .orderBy(asc(schema.qaComments.createdAt), asc(schema.qaComments.id))
 
   const numbers = numberComments(rows)
+  // One join for the page's notes, so the number of comments never reaches a bound-parameter limit.
+  const noteRows = await database
+    .select({ note: schema.qaCommentNotes })
+    .from(schema.qaCommentNotes)
+    .innerJoin(schema.qaComments, eq(schema.qaCommentNotes.commentId, schema.qaComments.id))
+    .where(eq(schema.qaComments.roundPageId, loaded.roundPage.id))
+  const notesByComment = groupNotes(noteRows.map(r => r.note))
   const target: QaTarget = loaded.round.target === 'live' ? 'live' : 'staging'
   const detailContext = {
     roundId: loaded.round.id,
@@ -45,13 +53,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     target,
     siteUrl: targetOrigin(loaded.site, target),
   }
-  const comments = rows.map(row => toCommentDetail(row, numbers.get(row.id) ?? 0, loaded.roundPage.path, detailContext))
+  const comments = rows.map(row => toCommentDetail(row, numbers.get(row.id) ?? 0, loaded.roundPage.path, detailContext, notesByComment.get(row.id) ?? []))
   return NextResponse.json({ comments })
 }
 
 /** Adds an element comment to a round page. The author is the signed-in team member. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { orgId, userId } = await getRequestAuth(req)
+  const auth = await getRequestAuth(req)
+  const { orgId, userId } = auth
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const featureDenied = await requireFeature({ userId, orgId }, 'qa_tester')
   if (featureDenied) return featureDenied
@@ -91,12 +100,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'That browser is not part of this round' }, { status: 400 })
   }
 
+  // The recorded author is the MCP person when one is verified, otherwise the signed-in member.
+  const authorId = attributedUserId(auth)
   let authorName: string | null = null
-  if (userId) {
+  if (authorId) {
     const [member] = await database
       .select({ name: schema.teamMembers.name })
       .from(schema.teamMembers)
-      .where(eq(schema.teamMembers.clerkUserId, userId))
+      .where(eq(schema.teamMembers.clerkUserId, authorId))
       .limit(1)
     authorName = member?.name ?? null
   }
@@ -115,7 +126,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     body: parsed.value.body,
     status: 'open',
     requestId: null,
-    authorId: userId ?? null,
+    authorId,
     authorName,
     createdAt: now,
     updatedAt: now,

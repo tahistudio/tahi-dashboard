@@ -1,6 +1,8 @@
 /**
  * GET   /api/admin/qa/round-pages/[id]
- *       { roundPage, browsers, ticks, scans, links, issues }. Scans keyed by browser, then
+ *       { roundPage, status, note, categories, pagespeed, browsers, ticks, scans, links, issues }.
+ *       categories has { total, fail, warn, info } for a11y, links, seo, launch and perf (total is the
+ *       count on the issue panel tab); pagespeed is { mobile?, desktop? } scores or null. Scans keyed by browser, then
  *       viewport; the round's browsers and this page's ticks per browser; the link results
  *       for this page's URLs; and every issue for the page: the page-level rules per browser,
  *       merged so an identical issue seen in several browsers appears once (with its
@@ -26,6 +28,7 @@ import { loadRoundPage, rowToLinkResult, scannedLinkUrls, scansByBrowser, target
 import { parseStoredScan } from '@/lib/qa/normalise-scan'
 import { browserPageIssues, duplicateMetaIssues } from '@/lib/qa/issue-rules'
 import { mergeBrowserTicks, parseRoundBrowsers } from '@/lib/qa/browsers'
+import { categorySummaries, parseStoredPageSpeed } from '@/lib/qa/category-summary'
 import {
   QA_BROWSER_KEYS,
   QA_PRIMARY_VIEWPORT,
@@ -132,7 +135,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return hit ? [hit] : []
   })
 
-  return NextResponse.json({ roundPage, browsers, ticks, scans, links, issues })
+  // Everything the issue panel shows, so a caller that cannot see the screen has the same picture:
+  // status and note, the five category counts, and the PageSpeed scores per strategy.
+  return NextResponse.json({
+    roundPage,
+    status: roundPage.status,
+    note: roundPage.note,
+    categories: categorySummaries(issues),
+    pagespeed: parseStoredPageSpeed(roundPage.pagespeed),
+    browsers,
+    ticks,
+    scans,
+    links,
+    issues,
+  })
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

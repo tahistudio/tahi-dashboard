@@ -4469,3 +4469,17 @@ export const qaComments = sqliteTable('qa_comments', {
   // JSON text of a QaElementContext captured at pick time (migration 0117)
   elementContext: text('element_context'),
 }, (table) => [index('idx_qa_comments_round_page').on(table.roundPageId)])
+
+// A thread of notes under one QA comment (migration 0119). Deleted with the comment.
+export const qaCommentNotes = sqliteTable('qa_comment_notes', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  commentId: text('comment_id').notNull(),
+  body: text('body').notNull(),
+  // Clerk user id of the person (the MCP actor when written through MCP)
+  authorId: text('author_id'),
+  // team_members.name at write time
+  authorName: text('author_name'),
+  // 'dashboard' | 'mcp' (verified person) | 'service' (shared token, no person)
+  source: text('source').notNull().default('dashboard'),
+  createdAt: text('created_at').notNull(),
+}, (table) => [index('idx_qa_comment_notes_comment').on(table.commentId)])
