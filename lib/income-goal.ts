@@ -16,7 +16,7 @@
  *
  * Segments (the plain-words definitions live in INCOME_GOAL_SEGMENTS so the
  * card and the tests read the same text):
- *   paid      invoices marked paid in Xero or Stripe this month (not bank cash)
+ *   paid      invoices marked paid in Xero or Stripe this month
  *   invoiced  unpaid invoices issued this month
  *   unbilled  logged billable hours not yet on an invoice
  *   pipeline  open deals expected to close this month or overdue, weighted
@@ -43,7 +43,7 @@ export type IncomeGoalSegmentKey = 'paid' | 'invoiced' | 'unbilled' | 'pipeline'
 /** One native-currency amount, as it sits in the database. */
 export interface MoneyItem {
   amount: number | null | undefined
-  /** ISO code. Blank or missing is read as NZD, the base currency. */
+  /** ISO code. Blank or missing is read as USD, the invoices.currency column default. */
   currency: string | null | undefined
 }
 
@@ -187,7 +187,7 @@ export function sumItemsNzd(
       continue
     }
     const raw = typeof item.currency === 'string' ? item.currency.trim().toUpperCase() : ''
-    const currency = raw === '' ? 'NZD' : raw
+    const currency = raw === '' ? 'USD' : raw
     if (currency !== 'NZD') {
       const rate = rateMap[currency]
       if (!rate || !Number.isFinite(rate) || rate <= 0) {

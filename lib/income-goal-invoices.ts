@@ -47,13 +47,16 @@ export interface GoalInvoiceRow extends InvoiceRowLike {
   amountUsd: number
   discountAmountUsd: number | null
   sentAt: string | null
+  /** organisations.stripe_customer_id of the row's organisation, when it has one. */
+  stripeCustomerId?: string | null
 }
 
 /** The amount a row contributes: ex-GST for NZD, the total otherwise; never negative. */
 export function goalAmount(
   row: Pick<GoalInvoiceRow, 'currency' | 'amountUsd' | 'discountAmountUsd' | 'totalUsd'> & { source?: string | null },
 ): MoneyItem {
-  const currency = (row.currency ?? '').trim().toUpperCase() || 'NZD'
+  // Blank means USD, the invoices.currency column default.
+  const currency = (row.currency ?? '').trim().toUpperCase() || 'USD'
   if (currency === 'NZD') {
     let net = (row.amountUsd ?? 0) - (row.discountAmountUsd ?? 0)
     if (row.source === 'stripe') net = Math.min(net, row.totalUsd ?? net)
@@ -75,11 +78,32 @@ export function issuedAt(row: Pick<GoalInvoiceRow, 'sentAt' | 'createdAt'>): str
   return row.sentAt || row.createdAt || null
 }
 
+/** A paid row with no readable paid date is flagged only if created this recently. */
+const RECENT_UNKNOWN_DAYS = 90
+
 export interface TwinResolution {
   /** ch_/py_ rows that duplicate an in_ row which itself records the payment. Leave out of Paid. */
   dropCharges: Set<string>
-  /** Owed in_ rows whose money already arrived as a paid ch_ row. Leave out of Invoiced and older outstanding. */
-  claimedInvoices: Set<string>
+  /**
+   * Owed in_ rows whose money already arrived as a paid ch_ row, mapped to that
+   * charge's id. Leave out of Invoiced and older outstanding.
+   */
+  claimedInvoices: Map<string, string>
+}
+
+/**
+ * Are these two Stripe rows the same paying party? When both rows belong to an
+ * organisation that carries a Stripe customer id, the customer decides (one
+ * Stripe customer can sit under several duplicate organisation records, so a
+ * charge and its invoice can disagree on org_id). Otherwise fall back to the
+ * organisation id.
+ */
+export function sameStripeParty(
+  a: Pick<GoalInvoiceRow, 'orgId' | 'stripeCustomerId'>,
+  b: Pick<GoalInvoiceRow, 'orgId' | 'stripeCustomerId'>,
+): boolean {
+  if (a.stripeCustomerId && b.stripeCustomerId) return a.stripeCustomerId === b.stripeCustomerId
+  return a.orgId === b.orgId
 }
 
 /**
@@ -96,7 +120,7 @@ export interface TwinResolution {
  * Nothing is deleted or changed; the caller just leaves rows out.
  */
 export function resolveChargeTwins(stripeRows: readonly GoalInvoiceRow[]): TwinResolution {
-  const out: TwinResolution = { dropCharges: new Set(), claimedInvoices: new Set() }
+  const out: TwinResolution = { dropCharges: new Set(), claimedInvoices: new Map() }
   const chargeRows = stripeRows.filter(isChargeRow)
   const invoiceRows = stripeRows.filter(r =>
     isInvoiceRow(r)
@@ -110,11 +134,23 @@ export function resolveChargeTwins(stripeRows: readonly GoalInvoiceRow[]): TwinR
     (a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id),
   )
   for (const charge of ordered) {
-    const twin = findInvoiceTwin(charge, invoiceRows, claimed)
+    // The shared matcher compares org ids and measures its window from
+    // createdAt, so hand it copies: orgId set to the charge's own id when the
+    // paying party matches (customer first, org as fallback), and for a PAID
+    // invoice createdAt replaced by when it was paid, because a charge settles
+    // a paid invoice on the day it was paid, not the day it was sent.
+    const candidates = invoiceRows
+      .filter(inv => sameStripeParty(charge, inv))
+      .map(inv => ({
+        ...inv,
+        orgId: charge.orgId,
+        createdAt: isPaidInvoice(inv.status) ? (normaliseXeroDate(inv.paidAt) ?? inv.createdAt) : inv.createdAt,
+      }))
+    const twin = findInvoiceTwin(charge, candidates, claimed)
     if (!twin) continue
     claimed.add(twin.id)
     if (isPaidInvoice(statusById.get(twin.id))) out.dropCharges.add(charge.id)
-    else out.claimedInvoices.add(twin.id)
+    else out.claimedInvoices.set(twin.id, charge.id)
   }
   return out
 }
@@ -141,15 +177,20 @@ export function bucketInvoices(
   twins: TwinResolution,
   monthStartIso: string,
   monthEndIso: string,
+  nowMs: number = Date.now(),
 ): GoalInvoiceBuckets {
   const start = Date.parse(monthStartIso)
   const end = Date.parse(monthEndIso)
+  const byId = new Map(rows.map(r => [r.id, r]))
+  const inMonth = (ms: number | null) => ms !== null && ms >= start && ms < end
   const out: GoalInvoiceBuckets = { paid: [], invoiced: [], olderOutstanding: [], twinsExcluded: 0, unknownDate: 0 }
   for (const row of rows) {
     if (isPaidInvoice(row.status)) {
       const paid = toInstantMs(row.paidAt)
       if (paid === null) {
-        out.unknownDate++
+        // Only recent rows are worth flagging; old history would repeat forever.
+        const created = toInstantMs(row.createdAt)
+        if (created !== null && nowMs - created <= RECENT_UNKNOWN_DAYS * 86_400_000) out.unknownDate++
         continue
       }
       if (paid < start || paid >= end) continue
@@ -158,8 +199,14 @@ export function bucketInvoices(
       continue
     }
     if (!isOwedInvoice(row.status) || row.paidAt) continue
-    if (twins.claimedInvoices.has(row.id)) {
-      out.twinsExcluded++
+    const chargeId = twins.claimedInvoices.get(row.id)
+    if (chargeId !== undefined) {
+      // Counted in the footnote only when it touches this month: the invoice
+      // was issued in it, or its settling charge was paid in it.
+      const charge = byId.get(chargeId)
+      if (inMonth(toInstantMs(issuedAt(row))) || (charge && (inMonth(toInstantMs(charge.paidAt)) || inMonth(toInstantMs(charge.createdAt))))) {
+        out.twinsExcluded++
+      }
       continue
     }
     const issued = toInstantMs(issuedAt(row))

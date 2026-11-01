@@ -10,7 +10,7 @@ import { computeIncomeGoal, INCOME_GOAL_SEGMENTS, pipelineDealPlacement } from '
 
 const START = '2026-11-01T00:00:00.000Z'
 const END = '2026-12-01T00:00:00.000Z'
-const NO_TWINS = { dropCharges: new Set<string>(), claimedInvoices: new Set<string>() }
+const NO_TWINS = { dropCharges: new Set<string>(), claimedInvoices: new Map<string, string>() }
 
 function row(over: Partial<GoalInvoiceRow> & { id: string }): GoalInvoiceRow {
   return {
@@ -61,8 +61,9 @@ describe('goalAmount (GST and credits)', () => {
     expect(goalAmount(row({ id: 's', source: 'stripe', amountUsd: 1000, totalUsd: 800 })).amount).toBe(800)
     expect(goalAmount(row({ id: 't', source: 'stripe', amountUsd: 1000, totalUsd: 1150 })).amount).toBe(1000)
   })
-  it('blank currency is NZD; negatives floor at 0 for NZD and non-NZD alike', () => {
-    expect(goalAmount(row({ id: 'c', currency: null, amountUsd: 100, discountAmountUsd: 300 })).amount).toBe(0)
+  it('blank currency is USD (column default); negatives floor at 0 for NZD and non-NZD alike', () => {
+    expect(goalAmount(row({ id: 'c', currency: null, totalUsd: 1150 }))).toEqual({ amount: 1150, currency: 'USD' })
+    expect(goalAmount(row({ id: 'c2', currency: 'NZD', amountUsd: 100, discountAmountUsd: 300 })).amount).toBe(0)
     expect(goalAmount(row({ id: 'e', currency: 'USD', totalUsd: -50 })).amount).toBe(0)
   })
   it('non-NZD stays on total', () => {
@@ -105,9 +106,13 @@ describe('toInstantMs and month boundaries', () => {
       row({ id: '1', status: 'paid', paidAt: 'garbage' }),
       row({ id: '2', status: 'paid', paidAt: null }),
       row({ id: '3', status: 'sent', sentAt: 'garbage', createdAt: 'also garbage' }),
-    ], NO_TWINS, START, END)
+    ], NO_TWINS, START, END, Date.parse('2026-11-20T00:00:00Z'))
     expect(b.unknownDate).toBe(3)
     expect(b.paid).toHaveLength(0)
+  })
+  it('an old paid row with no paid date is not flagged forever', () => {
+    const old = row({ id: '1', status: 'paid', paidAt: null, createdAt: '2025-01-01T00:00:00.000Z' })
+    expect(bucketInvoices([old], NO_TWINS, START, END, Date.parse('2026-11-20T00:00:00Z')).unknownDate).toBe(0)
   })
 })
 
@@ -171,7 +176,7 @@ describe('resolveChargeTwins', () => {
     const rows = [inv({ status, paidAt: null, sentAt: '2026-11-02T00:00:00.000Z' }), ch('c1')]
     const t = resolveChargeTwins(rows)
     expect(t.dropCharges.size).toBe(0)
-    expect([...t.claimedInvoices]).toEqual(['in1'])
+    expect([...t.claimedInvoices.keys()]).toEqual(['in1'])
     const b = bucketInvoices(rows, t, START, END)
     expect(b.paid).toHaveLength(1)
     expect(b.invoiced).toHaveLength(0)
@@ -208,6 +213,75 @@ describe('resolveChargeTwins', () => {
     const t = resolveChargeTwins(rows)
     expect([...t.dropCharges]).toEqual(['near'])
     expect(bucketInvoices(rows, t, START, END).paid).toHaveLength(2)
+  })
+
+  it('a late-paid in_ matches its charge: the window runs from paid_at, not created_at', () => {
+    // Real local shape: invoice created 15 April, paid 18 April 14:23:28; charge 14:23:27 on the 18th.
+    const aprStart = '2026-04-01T00:00:00.000Z'
+    const aprEnd = '2026-05-01T00:00:00.000Z'
+    const rows = [
+      inv({ createdAt: '2026-04-15T09:00:00.000Z', paidAt: '2026-04-18T14:23:28.000Z' }),
+      ch('py1', '2026-04-18T14:23:27.000Z'),
+    ]
+    const t = resolveChargeTwins(rows)
+    expect([...t.dropCharges]).toEqual(['py1'])
+    expect(bucketInvoices(rows, t, aprStart, aprEnd).paid).toHaveLength(1)
+  })
+
+  it('an owed in_ keeps createdAt for the window (a charge 10 days later does not match)', () => {
+    const rows = [inv({ status: 'sent', paidAt: null, createdAt: '2026-11-02T00:00:00.000Z' }), ch('c1', '2026-11-12T00:00:00.000Z')]
+    expect(resolveChargeTwins(rows).claimedInvoices.size).toBe(0)
+  })
+
+  describe('split organisation records for one Stripe customer', () => {
+    it('matches on the customer id and counts the pair once', () => {
+      const rows = [
+        inv({ orgId: 'orgA', stripeCustomerId: 'cus_1' }),
+        { ...ch('c1'), orgId: 'orgB', stripeCustomerId: 'cus_1' },
+      ]
+      const t = resolveChargeTwins(rows)
+      expect([...t.dropCharges]).toEqual(['c1'])
+      expect(bucketInvoices(rows, t, START, END).paid).toHaveLength(1)
+    })
+    it('does not match different customers with identical amounts, even in the same org', () => {
+      const rows = [
+        inv({ orgId: 'orgA', stripeCustomerId: 'cus_1' }),
+        { ...ch('c1'), orgId: 'orgA', stripeCustomerId: 'cus_2' },
+      ]
+      const t = resolveChargeTwins(rows)
+      expect(t.dropCharges.size).toBe(0)
+      expect(bucketInvoices(rows, t, START, END).paid).toHaveLength(2)
+    })
+    it('falls back to the org id when either row has no customer id', () => {
+      expect(resolveChargeTwins([inv({ orgId: 'orgA' }), { ...ch('c1'), orgId: 'orgA' }]).dropCharges.size).toBe(1)
+      expect(resolveChargeTwins([inv({ orgId: 'orgA', stripeCustomerId: 'cus_1' }), { ...ch('c1'), orgId: 'orgA' }]).dropCharges.size).toBe(1)
+      expect(resolveChargeTwins([inv({ orgId: 'orgA' }), { ...ch('c1'), orgId: 'orgB' }]).dropCharges.size).toBe(0)
+    })
+    it('the earlier written_off in_ stays unmatched, the paid in_ pairs with the charge', () => {
+      const rows = [
+        inv({ id: 'in0', stripeInvoiceId: 'in_0', status: 'written_off', paidAt: null, orgId: 'orgA', stripeCustomerId: 'cus_1' }),
+        inv({ id: 'in1', orgId: 'orgA', stripeCustomerId: 'cus_1' }),
+        { ...ch('c1'), orgId: 'orgB', stripeCustomerId: 'cus_1' },
+      ]
+      expect([...resolveChargeTwins(rows).dropCharges]).toEqual(['c1'])
+    })
+  })
+
+  it('claimed in_ footnote counts only when it touches the month', () => {
+    const claimedOld = {
+      dropCharges: new Set<string>(),
+      claimedInvoices: new Map([['in1', 'c1']]),
+    }
+    const rows = [
+      inv({ id: 'in1', status: 'sent', paidAt: null, createdAt: '2026-06-01T00:00:00.000Z' }),
+      ch('c1', '2026-06-02T00:00:00.000Z'),
+    ]
+    expect(bucketInvoices(rows, claimedOld, START, END).twinsExcluded).toBe(0)
+    const rowsNov = [
+      inv({ id: 'in1', status: 'sent', paidAt: null, createdAt: '2026-06-01T00:00:00.000Z' }),
+      ch('c1', '2026-11-02T00:00:00.000Z'),
+    ]
+    expect(bucketInvoices(rowsNov, claimedOld, START, END).twinsExcluded).toBe(1)
   })
 
   it('does not match a different amount, org or a late date', () => {

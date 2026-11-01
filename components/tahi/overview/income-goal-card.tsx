@@ -102,7 +102,7 @@ export function IncomeGoalCard({
     : data.projectedMeetsTarget
       ? `Target covered if everything is paid, ${money(data.overByNzd)} over.`
       : data.hasTarget
-        ? `${money(data.gapNzd)} short even if everything is paid.`
+        ? `${money(data.gapNzd)} short even if everything on this bar is paid.`
         : 'No target set.'
 
   // The target marker sits where the target falls on the bar. The bar is as

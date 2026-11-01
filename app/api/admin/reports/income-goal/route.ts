@@ -8,7 +8,7 @@
  *
  * Sources (each reuses an existing definition):
  *  - paid      invoices with a paid status and paid_at inside the month. This is
- *              what Xero or Stripe marked paid, not bank cash. NZD rows count
+ *              what Xero or Stripe marked paid. NZD rows count
  *              ex-GST (amount minus discount); other currencies use total.
  *              Rules in lib/income-goal-invoices.ts.
  *  - invoiced  owed, unpaid invoices ISSUED this month (sent_at, else
@@ -125,8 +125,12 @@ export async function GET(req: NextRequest) {
         paidAt: schema.invoices.paidAt,
         manyrequestsId: schema.invoices.manyrequestsId,
         xeroInvoiceId: schema.invoices.xeroInvoiceId,
+        // One Stripe customer can sit under several duplicate organisation
+        // records, so twin matching prefers the customer id over the org id.
+        stripeCustomerId: schema.organisations.stripeCustomerId,
       })
       .from(schema.invoices)
+      .leftJoin(schema.organisations, eq(schema.invoices.orgId, schema.organisations.id))
       // Wide on purpose: paid_at comes in several string shapes (including
       // '/Date(ms)/'), so a SQL range would lose rows. Dates are compared in
       // JS after normalising (lib/income-goal-invoices.ts).

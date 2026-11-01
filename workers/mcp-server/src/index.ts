@@ -336,7 +336,7 @@ export const TOOLS: ToolDef[] = [
   }),
   tool('get_reports', 'Get aggregate reports: total clients, requests, billable hours, trends'),
   tool('get_billing_summary', 'Per-client billable and total hours for a month, with an indicative amount at the studio hourly rate. Reads time_entries only, never the invoices table, so no invoice status (draft included) can reach this figure.'),
-  tool('get_income_goal', 'Monthly income goal in NZD, invoices without GST: marked paid in Xero or Stripe (not bank cash), invoiced (issued this month, unpaid; older unpaid reported separately), unbilled (billable hourly time not on an invoice), weighted pipeline (open deals expected to close this month, or overdue by up to 90 days) and the gap to the combined take-home target (before costs and tax). Current UTC month only; takes no arguments. Full profile only.'),
+  tool('get_income_goal', 'Monthly income goal in NZD, invoices without GST: marked paid in Xero or Stripe, invoiced (issued this month, unpaid; older unpaid reported separately), unbilled (billable hourly time not on an invoice), weighted pipeline (open deals expected to close this month, or overdue by up to 90 days) and the gap to the combined take-home target (before costs and tax). Current UTC month only; takes no arguments. Full profile only.'),
   tool('get_response_time', 'Get response time report with averages and breakdowns'),
   tool('get_exchange_rates', 'Get cached exchange rates'),
   tool('refresh_exchange_rates', 'Refresh exchange rates from external provider'),

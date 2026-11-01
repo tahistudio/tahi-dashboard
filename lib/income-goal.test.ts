@@ -48,9 +48,10 @@ describe('roundCents', () => {
 
 describe('sumItemsNzd', () => {
   const rateMap = buildRateMap(RATES)
-  it('passes NZD through and treats blank currency as NZD', () => {
+  it('passes NZD through and treats blank currency as USD (the column default)', () => {
+    // 50 USD = 80 NZD, 25 USD = 40 NZD
     expect(sumItemsNzd([{ amount: 100, currency: 'NZD' }, { amount: 50, currency: '' }, { amount: 25, currency: null }], rateMap))
-      .toEqual({ nzd: 175, skipped: 0 })
+      .toEqual({ nzd: 220, skipped: 0 })
   })
   it('converts through the existing FX helpers', () => {
     // 100 USD = 160 NZD; 80 EUR = 100 USD = 160 NZD
