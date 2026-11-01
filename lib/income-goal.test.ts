@@ -177,7 +177,7 @@ describe('INCOME_GOAL_SEGMENTS', () => {
   it('defines every segment in words without dashes', () => {
     for (const seg of Object.values(INCOME_GOAL_SEGMENTS)) {
       expect(seg.label.length).toBeGreaterThan(0)
-      expect(seg.definition).not.toMatch(/[–—]|--/)
+      expect(seg.definition).not.toMatch(/[\u2013\u2014]|--/)
     }
   })
 })
