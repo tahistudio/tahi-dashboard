@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/tahi/empty-state'
 import { FilterBar, type FilterDef, type ActiveFilter } from '@/components/tahi/filter-bar'
 import { SlideOver } from '@/components/tahi/slide-over'
 import { LinkedToPanel } from '@/components/tahi/linked-to-panel'
+import { ClientCallBriefPanel } from '@/components/tahi/client-call-brief'
 import { useToast } from '@/components/tahi/toast'
 import { apiPath } from '@/lib/api'
 import { MEETING_TYPES, MEETING_TYPE_META, type MeetingType } from '@/lib/calls'
@@ -840,6 +841,8 @@ function CallDetailSlideOver({
               </span>
             </div>
           </label>
+
+          {call && (call.orgId || call.dealId || call.requestId) && <ClientCallBriefPanel callId={call.id} />}
 
           {/* Only rendered while a call is actually loaded: LinkedToPanel
               needs a real resourceId, and this keeps the panel's own fields

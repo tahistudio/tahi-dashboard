@@ -123,6 +123,8 @@ export const CONDITIONAL_CONFIRM_TOOLS: ReadonlySet<string> = new Set(['update_r
 export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
   // Finance sync writes stay with the full profile.
   'sync_airwallex',
+  // Finance block (the brief includes invoices over MCP); revisit when the designer-finance policy is decided.
+  'get_client_call_brief',
   // Shared brief cache regeneration stays with the full profile.
   'refresh_daily_brief',
   'link_stripe_customer', 'confirm_xero_contact',
