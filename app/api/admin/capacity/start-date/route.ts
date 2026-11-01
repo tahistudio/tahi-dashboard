@@ -15,6 +15,11 @@ import { schema } from '@/db/d1'
 import { eq, and } from 'drizzle-orm'
 import { scopedOrgIds } from '@/lib/access-scope'
 import { internalOrgFilter } from '@/lib/internal-route-access'
+import {
+  INACTIVE_MEMBER_EMAILS_SETTING_KEY,
+  isActiveTeamMember,
+  resolveInactiveMemberEmails,
+} from '@/lib/capacity-active-members'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -51,12 +56,26 @@ export async function POST(req: NextRequest) {
   const orgScope = await scopedOrgIds({ userId, orgId })
 
   // 1. Total team capacity = sum of all team members' weeklyCapacityHours
-  const members = await database
-    .select({ weeklyCapacityHours: schema.teamMembers.weeklyCapacityHours })
-    .from(schema.teamMembers)
+  //    Only active members count, the same rule the pipeline capacity route
+  //    uses (lib/capacity-active-members.ts), so both figures agree.
+  const [allMembers, inactiveRows] = await Promise.all([
+    database
+      .select({
+        email: schema.teamMembers.email,
+        weeklyCapacityHours: schema.teamMembers.weeklyCapacityHours,
+      })
+      .from(schema.teamMembers),
+    database
+      .select({ value: schema.settings.value })
+      .from(schema.settings)
+      .where(eq(schema.settings.key, INACTIVE_MEMBER_EMAILS_SETTING_KEY))
+      .limit(1),
+  ])
+  const inactiveAddresses = resolveInactiveMemberEmails(inactiveRows[0]?.value ?? null)
+  const members = allMembers.filter(m => isActiveTeamMember(m, inactiveAddresses))
 
   const totalTeamCapacity = members.reduce(
-    (sum, m) => sum + (m.weeklyCapacityHours ?? 40),
+    (sum, m) => sum + (m.weeklyCapacityHours ?? 0),
     0,
   )
 

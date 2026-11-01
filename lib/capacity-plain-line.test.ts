@@ -1,5 +1,61 @@
 import { describe, it, expect } from 'vitest'
-import { buildCapacityLine, formatStartDate, monthlyFreeHours } from './capacity-plain-line'
+import {
+  buildCapacityLine,
+  buildCapacityLineFromWeek,
+  formatStartDate,
+  monthlyFreeHours,
+  nextMondayIso,
+} from './capacity-plain-line'
+
+describe('nextMondayIso', () => {
+  it('is the next Monday at midnight UTC, strictly after today', () => {
+    // Tuesday 1 Sep 2026
+    expect(nextMondayIso(new Date('2026-09-01T10:00:00.000Z'))).toBe('2026-09-07T00:00:00.000Z')
+    // A Monday rolls to the following Monday
+    expect(nextMondayIso(new Date('2026-09-07T10:00:00.000Z'))).toBe('2026-09-14T00:00:00.000Z')
+    // A Sunday rolls to the next day
+    expect(nextMondayIso(new Date('2026-09-06T10:00:00.000Z'))).toBe('2026-09-07T00:00:00.000Z')
+    // Month boundary
+    expect(nextMondayIso(new Date('2026-09-30T10:00:00.000Z'))).toBe('2026-10-05T00:00:00.000Z')
+  })
+})
+
+describe('buildCapacityLineFromWeek (owner card figures)', () => {
+  const now = new Date('2026-09-01T10:00:00.000Z')
+
+  it('available 0 reads as fully booked this week', () => {
+    expect(buildCapacityLineFromWeek(80, 0, now)).toEqual({ state: 'full', text: 'Fully booked this week.' })
+  })
+
+  it('the 487 percent booked case (80h capacity, 0h available) is fully booked', () => {
+    expect(buildCapacityLineFromWeek(80, 0, now).text).toBe('Fully booked this week.')
+    // negative available must never read as free time
+    expect(buildCapacityLineFromWeek(80, -309.5, now).state).toBe('full')
+  })
+
+  it('small positive available is free hours with no start date', () => {
+    expect(buildCapacityLineFromWeek(80, 4, now)).toEqual({
+      state: 'nearly_full',
+      text: 'Free about 17 hours a month, but not enough yet to start a new retainer.',
+    })
+  })
+
+  it('just under 8 hours has no start date', () => {
+    expect(buildCapacityLineFromWeek(80, 7.9, now).text).toContain('not enough yet')
+  })
+
+  it('exactly 8 hours can start next Monday', () => {
+    expect(buildCapacityLineFromWeek(80, 8, now)).toEqual({
+      state: 'nearly_full',
+      text: 'Free about 35 hours a month, can start 7 Sep.',
+    })
+  })
+
+  it('no data is unknown', () => {
+    expect(buildCapacityLineFromWeek(0, 0, now).state).toBe('unknown')
+    expect(buildCapacityLineFromWeek(undefined, undefined, now).state).toBe('unknown')
+  })
+})
 
 const NOW = new Date('2026-09-01T10:00:00.000Z')
 
@@ -76,7 +132,7 @@ describe('buildCapacityLine', () => {
     )
     expect(r).toEqual({
       state: 'full',
-      text: 'Fully booked, with no room to start new work in the next 12 weeks.',
+      text: 'Fully booked this week.',
     })
   })
 
@@ -85,7 +141,7 @@ describe('buildCapacityLine', () => {
       { totalTeamCapacity: 80, availableHoursPerWeek: 4, earliestDate: null },
       NOW,
     )
-    expect(r.text).toBe('Free about 17 hours a month, but no start date fits in the next 12 weeks.')
+    expect(r.text).toBe('Free about 17 hours a month, but not enough yet to start a new retainer.')
   })
 
   it('rolls the year over', () => {

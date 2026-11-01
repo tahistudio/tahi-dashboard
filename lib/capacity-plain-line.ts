@@ -99,7 +99,7 @@ export function buildCapacityLine(input: CapacityLineInput, now: Date = new Date
       state: 'full',
       text: startPhrase
         ? `Fully booked right now, ${startPhrase}.`
-        : 'Fully booked, with no room to start new work in the next 12 weeks.',
+        : 'Fully booked this week.',
     }
   }
 
@@ -108,5 +108,39 @@ export function buildCapacityLine(input: CapacityLineInput, now: Date = new Date
   const freePhrase = `Free about ${monthly} ${hoursWord(monthly)} a month`
 
   if (startPhrase) return { state, text: `${freePhrase}, ${startPhrase}.` }
-  return { state, text: `${freePhrase}, but no start date fits in the next 12 weeks.` }
+  return { state, text: `${freePhrase}, but not enough yet to start a new retainer.` }
+}
+
+/** Weekly hours a standard new retainer needs (the Maintain plan size). */
+export const STANDARD_RETAINER_HOURS_PER_WEEK = 8
+
+/** Start of the next Monday in UTC, strictly after `now`, as an ISO string. */
+export function nextMondayIso(now: Date = new Date()): string {
+  const dow = now.getUTCDay()
+  const daysUntilMonday = dow === 0 ? 1 : 8 - dow
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday),
+  ).toISOString()
+}
+
+/**
+ * Builds the line from the two figures the owner capacity card already holds
+ * (totalCapacity and availableCapacity, weekly hours). The start date is next
+ * Monday when a standard retainer fits in the free hours, otherwise none.
+ */
+export function buildCapacityLineFromWeek(
+  totalCapacity: number | null | undefined,
+  availableCapacity: number | null | undefined,
+  now: Date = new Date(),
+): CapacityLine {
+  const fits =
+    typeof availableCapacity === 'number' && availableCapacity >= STANDARD_RETAINER_HOURS_PER_WEEK
+  return buildCapacityLine(
+    {
+      totalTeamCapacity: totalCapacity,
+      availableHoursPerWeek: availableCapacity,
+      earliestDate: fits ? nextMondayIso(now) : null,
+    },
+    now,
+  )
 }

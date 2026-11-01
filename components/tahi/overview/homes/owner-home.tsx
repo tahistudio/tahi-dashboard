@@ -1179,7 +1179,10 @@ function StudioCapacity({ go }: { go: (id: string) => void }) {
       ) : (
         <>
           <div style={{ marginBottom: '0.75rem' }}>
-            <CapacityPlainLine scheme="overview" />
+            <CapacityPlainLine
+              totalCapacity={data.totalCapacity}
+              availableCapacity={data.availableCapacity}
+            />
           </div>
           <div className="ov-gauge-wrap">
             <Gauge value={util} max={100} size={112} color="#B0761F" />
