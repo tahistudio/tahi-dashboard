@@ -51,6 +51,8 @@ async function shouldLandOnSignUp(linkToken: string | null): Promise<boolean> {
 const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
+  // Crawlers must be able to read the disallow-all robots.txt (T1.7).
+  '/robots.txt',
   '/demo(.*)',
   '/api/webhooks/(.*)',
   '/api/case-study/(.*)',

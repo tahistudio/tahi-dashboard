@@ -1,0 +1,44 @@
+import { describe, it, expect, vi } from 'vitest'
+import robots from '@/app/robots'
+import { AI_CRAWLER_USER_AGENTS, NOINDEX_HEADER_VALUE } from '@/lib/robots-policy'
+
+describe('robots.txt (T1.7)', () => {
+  const rules = robots().rules
+  const list = Array.isArray(rules) ? rules : [rules]
+
+  it('disallows everything for the wildcard agent', () => {
+    expect(list).toContainEqual({ userAgent: '*', disallow: '/' })
+  })
+
+  it('names the common AI crawlers explicitly', () => {
+    for (const name of [
+      'GPTBot',
+      'ClaudeBot',
+      'anthropic-ai',
+      'CCBot',
+      'Google-Extended',
+      'PerplexityBot',
+      'Bytespider',
+      'Applebot-Extended',
+    ]) {
+      expect(AI_CRAWLER_USER_AGENTS).toContain(name)
+      expect(list).toContainEqual({ userAgent: name, disallow: '/' })
+    }
+  })
+
+  it('allows nothing anywhere', () => {
+    expect(list.every((r) => r.disallow === '/' && !r.allow)).toBe(true)
+  })
+})
+
+describe('X-Robots-Tag header (T1.7)', () => {
+  it('is sent on every route by next.config headers()', async () => {
+    vi.stubEnv('CI', '1')
+    const mod = await import('../../next.config')
+    const rules = (await mod.default.headers?.()) ?? []
+    const all = rules.find((r) => r.source === '/:path*')
+    expect(all?.headers).toContainEqual({ key: 'X-Robots-Tag', value: NOINDEX_HEADER_VALUE })
+    expect(NOINDEX_HEADER_VALUE).toBe('noindex, nofollow, noarchive')
+    vi.unstubAllEnvs()
+  })
+})

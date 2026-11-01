@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next'
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare'
+import { NOINDEX_HEADER_VALUE } from './lib/robots-policy'
 
 const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
@@ -92,6 +93,9 @@ const nextConfig: NextConfig = {
       { key: 'X-Frame-Options', value: 'DENY' },
     ]
     return [
+      // T1.7: nothing in this app is indexable. A response header only, so
+      // auth, webhooks and cron handlers behave exactly as before.
+      { source: '/:path*', headers: [{ key: 'X-Robots-Tag', value: NOINDEX_HEADER_VALUE }] },
       { source: '/mcp/:path*', headers: noFraming },
       { source: '/api/mcp/consent', headers: noFraming },
     ]
