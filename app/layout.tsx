@@ -9,6 +9,8 @@ export const metadata: Metadata = {
     template: '%s | Tahi Dashboard',
   },
   description: 'Tahi Studio client portal and operations dashboard.',
+  // T1.7: private app, never indexed or archived (also sent as X-Robots-Tag).
+  robots: { index: false, follow: false, noarchive: true },
   manifest: '/manifest.json',
   icons: {
     icon: '/favicon.png',

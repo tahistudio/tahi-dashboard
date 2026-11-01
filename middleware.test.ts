@@ -218,3 +218,21 @@ describe('middleware: cron-trigger targets are public', () => {
     expect(res.headers.get('location')).toBeNull()
   })
 })
+
+describe('middleware: robots.txt and share viewers are public (T1.7)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it.each(['/robots.txt', '/p/proposal/abcdefghijklmnopqrstuv', '/review/abcdefghijklmnopqrstuv'])(
+    'lets %s through signed-out',
+    async (path) => {
+      const protect = vi.fn(() => Promise.reject(new Error('Clerk would 404 here')))
+      const auth = Object.assign(signedOut(), { protect }) as FakeAuth
+      const res = await middleware(auth, new NextRequest(`https://portal.tahi.studio${path}`))
+
+      expect(protect).not.toHaveBeenCalled()
+      expect(res.headers.get('location')).toBeNull()
+    },
+  )
+})

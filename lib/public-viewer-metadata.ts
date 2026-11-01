@@ -13,6 +13,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { publicUrl } from '@/lib/app-url'
+import { SHARE_PREVIEW_IMAGE_PATH } from '@/lib/robots-policy'
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,64}$/
 
@@ -96,7 +97,7 @@ export async function resolveScheduleMetadata(token: string | undefined | null):
 /** Build the Next.js `Metadata` object shared by both viewers. */
 export function toMetadata(doc: PublicDocMetadata) {
   const url = doc.path ? publicUrl(doc.path) : undefined
-  const image = publicUrl('/tahi-logo.png')
+  const image = publicUrl(SHARE_PREVIEW_IMAGE_PATH)
   return {
     title: doc.title,
     description: doc.description,

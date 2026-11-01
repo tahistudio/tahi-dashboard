@@ -1,4 +1,7 @@
-export const metadata = { title: 'Share Your Experience - Tahi Studio' }
+export const metadata = {
+  title: 'Share Your Experience - Tahi Studio',
+  robots: { index: false, follow: false },
+}
 
 import { ReviewForm } from './review-form'
 
