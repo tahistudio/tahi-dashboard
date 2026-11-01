@@ -6,10 +6,10 @@
  * 8 Sep". Pure, so every wording state is unit tested without a clock, a
  * network or a D1 handle.
  *
- * Inputs mirror what POST /api/admin/capacity/start-date already returns, so
- * there is no second computation of capacity or start dates here. When the
- * numbers needed for a sentence are missing the result is an honest "unknown"
- * line instead of a guess.
+ * The owner card drives it from the same weekly figures as its gauge
+ * (buildCapacityLineFromWeek), so there is no second computation of capacity
+ * or start dates here. When the numbers needed for a sentence are missing the
+ * result is an honest "unknown" line instead of a guess.
  */
 
 /** Average weeks in a month (52 / 12), used to turn weekly hours into monthly. */

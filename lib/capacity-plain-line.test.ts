@@ -170,6 +170,6 @@ describe('buildCapacityLine', () => {
       { totalTeamCapacity: 80, availableHoursPerWeek: 0, earliestDate: null },
       { totalTeamCapacity: 0, availableHoursPerWeek: 0, earliestDate: null },
     ]
-    for (const i of inputs) expect(buildCapacityLine(i, NOW).text).not.toMatch(/[-–—]/)
+    for (const i of inputs) expect(buildCapacityLine(i, NOW).text).not.toMatch(/[-\u2013\u2014]/)
   })
 })
