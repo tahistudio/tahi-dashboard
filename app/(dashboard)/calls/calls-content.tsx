@@ -842,7 +842,7 @@ function CallDetailSlideOver({
             </div>
           </label>
 
-          {call && call.orgId && <ClientCallBriefPanel callId={call.id} />}
+          {call && (call.orgId || call.dealId || call.requestId) && <ClientCallBriefPanel callId={call.id} />}
 
           {/* Only rendered while a call is actually loaded: LinkedToPanel
               needs a real resourceId, and this keeps the panel's own fields

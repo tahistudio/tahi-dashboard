@@ -33,6 +33,8 @@ export const BRIEF_CAPS = {
   raise: 6,
 } as const
 
+/** Calls that did not take place say nothing, so they are not history. */
+const NOT_HISTORY = new Set(['cancelled', 'no_show', 'rescheduled'])
 const SUMMARY_MAX_CHARS = 400
 const DECISION_MAX_CHARS = 300
 const SOON_DAYS = 3
@@ -120,6 +122,8 @@ export interface ClientCallBriefInput {
   blockers: readonly BriefBlockerRow[]
   /** Null means the viewer may NOT see finance. An empty array means they may and there is none. */
   invoices: readonly BriefInvoiceRow[] | null
+  /** True when the viewer lacks the requests or tasks feature, so an empty brief may be a permissions gap. */
+  sectionsHidden?: boolean
   now: Date
 }
 
@@ -201,7 +205,8 @@ export interface BriefFinance {
     href: string
   } | null
   overdue: Array<{ id: string; reference: string; total: number; currency: string; dueDate: string | null; href: string }>
-  overdueTotalUsd: number
+  /** Per currency, never converted or summed across currencies. */
+  overdueTotals: Array<{ currency: string; total: number }>
 }
 
 /** Counts before the caps were applied, so the UI can say "and 4 more". */
@@ -221,6 +226,8 @@ export interface ClientCallBrief {
   generatedAt: string
   /** 'no_org' = the call is not linked to a client yet, so there is no history to assemble. */
   state: 'ready' | 'no_org'
+  /** Some sections were left out because of the viewer's permissions. */
+  sectionsHidden: boolean
   org: { id: string; name: string; href: string } | null
   pastCalls: BriefPastCall[]
   openRequests: BriefRequest[]
@@ -284,6 +291,16 @@ function money(total: number, currency: string): string {
   return `${currency} ${total.toFixed(2)}`
 }
 
+/** Group on the invoice's own currency. Amounts are never converted or added across currencies. */
+function totalsByCurrency(rows: readonly BriefInvoiceRow[]): Array<{ currency: string; total: number }> {
+  const sums = new Map<string, number>()
+  for (const i of rows) {
+    const cur = i.currency ?? 'USD'
+    sums.set(cur, (sums.get(cur) ?? 0) + i.totalUsd)
+  }
+  return [...sums.entries()].map(([currency, total]) => ({ currency, total })).sort((a, b) => a.currency.localeCompare(b.currency))
+}
+
 function invoiceReference(row: BriefInvoiceRow): string {
   return row.number?.trim() || `#${row.id.slice(0, 8)}`
 }
@@ -311,6 +328,7 @@ export function buildClientCallBrief(input: ClientCallBriefInput): ClientCallBri
     callTitle: call.title,
     scheduledAt: call.scheduledAt,
     generatedAt: now.toISOString(),
+    sectionsHidden: input.sectionsHidden === true,
   }
 
   if (!org) {
@@ -332,10 +350,10 @@ export function buildClientCallBrief(input: ClientCallBriefInput): ClientCallBri
   }
 
   // Past calls: other calls with this client that have already happened,
-  // newest first. A cancelled call said nothing, so it is not history.
+  // newest first. Cancelled, no-show and rescheduled calls are not history.
   const callMs = instant(call.scheduledAt)
   const history = input.pastCalls
-    .filter(c => c.id !== call.id && c.status !== 'cancelled')
+    .filter(c => c.id !== call.id && !NOT_HISTORY.has(c.status))
     .filter(c => {
       const ms = instant(c.scheduledAt)
       if (ms === null) return false
@@ -455,7 +473,7 @@ export function buildClientCallBrief(input: ClientCallBriefInput): ClientCallBri
         dueDate: i.dueDate,
         href: invoiceHref(i.id),
       })),
-      overdueTotalUsd: overdueRows.reduce((sum, i) => sum + i.totalUsd, 0),
+      overdueTotals: totalsByCurrency(overdueRows),
     }
   }
 
@@ -466,7 +484,7 @@ export function buildClientCallBrief(input: ClientCallBriefInput): ClientCallBri
     raise.push(
       overdueRows.length === 1
         ? `Invoice ${invoiceReference(first)} is overdue (${money(first.totalUsd, first.currency ?? 'USD')}).`
-        : `${overdueRows.length} invoices are overdue, ${money(finance.overdueTotalUsd, 'USD')} in total.`,
+        : `${overdueRows.length} invoices are overdue: ${finance.overdueTotals.map(t => money(t.total, t.currency)).join(' and ')}.`,
     )
   }
   for (const h of handoffRows.slice(0, 2)) {

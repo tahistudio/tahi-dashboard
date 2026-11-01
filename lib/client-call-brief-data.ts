@@ -18,11 +18,12 @@
  * different client is dropped rather than shown.
  */
 
-import { and, desc, eq, inArray, ne } from 'drizzle-orm'
+import { and, desc, eq, inArray, ne, notInArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { resolveCallOrgId } from '@/lib/calls'
 import { can, resolvePermissions } from '@/lib/permissions'
 import { isBlockerOpen } from '@/lib/blockers'
+import { REQUEST_CLOSED_STATUSES } from '@/lib/status-config'
 import {
   buildClientCallBrief,
   type BriefBlockerRow,
@@ -164,7 +165,10 @@ export async function loadClientCallBrief(
         })
         .from(schema.requests)
         .leftJoin(schema.contacts, eq(schema.requests.waitingOnContactId, schema.contacts.id))
-        .where(eq(schema.requests.orgId, org.id))
+        .where(and(
+          eq(schema.requests.orgId, org.id),
+          notInArray(schema.requests.status, [...REQUEST_CLOSED_STATUSES, 'draft']),
+        ))
         .orderBy(desc(schema.requests.createdAt))
         .limit(REQUEST_READ)
     : []
@@ -193,29 +197,30 @@ export async function loadClientCallBrief(
   for (const r of requestRows) subjects.set(`request:${r.id}`, { title: r.title, status: r.status })
   for (const t of taskRows) subjects.set(`task:${t.id}`, { title: t.title, status: t.status })
   const blockers: BriefBlockerRow[] = []
-  if (sections.tasks) {
-    const blockedIds = taskRows.map(t => t.id)
-    for (let i = 0; i < blockedIds.length; i += ID_CHUNK) {
+  const blockedSets: Array<{ type: 'task' | 'request'; ids: string[] }> = []
+  if (sections.tasks) blockedSets.push({ type: 'task', ids: taskRows.map(t => t.id) })
+  if (sections.requests) blockedSets.push({ type: 'request', ids: requestRows.map(r => r.id) })
+  for (const set of blockedSets) {
+    for (let i = 0; i < set.ids.length; i += ID_CHUNK) {
       const rows = await database
         .select({
-          blockedType: schema.workBlockers.blockedType,
           blockedId: schema.workBlockers.blockedId,
           blockerType: schema.workBlockers.blockerType,
           blockerId: schema.workBlockers.blockerId,
         })
         .from(schema.workBlockers)
         .where(and(
-          eq(schema.workBlockers.blockedType, 'task'),
-          inArray(schema.workBlockers.blockedId, blockedIds.slice(i, i + ID_CHUNK)),
+          eq(schema.workBlockers.blockedType, set.type),
+          inArray(schema.workBlockers.blockedId, set.ids.slice(i, i + ID_CHUNK)),
         ))
       for (const row of rows) {
-        const blocked = subjects.get(`task:${row.blockedId}`)
+        const blocked = subjects.get(`${set.type}:${row.blockedId}`)
         const blocker = subjects.get(`${row.blockerType}:${row.blockerId}`)
         if (!blocked || !blocker) continue
         if (row.blockerType !== 'task' && row.blockerType !== 'request') continue
         if (!isBlockerOpen(row.blockerType, blocker.status)) continue
         blockers.push({
-          blockedType: 'task',
+          blockedType: set.type,
           blockedId: row.blockedId,
           blockedTitle: blocked.title,
           blockerTitle: blocker.title,
@@ -253,6 +258,7 @@ export async function loadClientCallBrief(
       tasks,
       blockers,
       invoices,
+      sectionsHidden: !sections.requests || !sections.tasks,
       now,
     }),
   }

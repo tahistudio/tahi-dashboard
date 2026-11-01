@@ -66,7 +66,7 @@ function Section({ title, count, total, children }: { title: string; count: numb
 
 function Row({ href, title, meta }: { href: string; title: string; meta?: string }) {
   return (
-    <Link href={href} className="tahi-focus-ring" style={rowLink}>
+    <Link href={href} className="tahi-focus-ring tahi-brief-row" style={rowLink}>
       <span style={{ fontWeight: 600 }}>{title}</span>
       {meta && <span style={metaText}>{meta}</span>}
     </Link>
@@ -96,7 +96,7 @@ export function ClientCallBriefPanel({ callId }: { callId: string }) {
     <div className="flex flex-col" style={{ gap: '0.875rem' }} data-private>
       <div className="flex items-center justify-between" style={{ gap: '0.5rem' }}>
         <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-text)' }}>Pre-call brief</h3>
-        <Link href={data.org.href} className="tahi-focus-ring" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-brand-dark)', minHeight: '2.75rem', display: 'inline-flex', alignItems: 'center' }}>
+        <Link href={data.org.href} className="tahi-focus-ring" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-link)', minHeight: '2.75rem', display: 'inline-flex', alignItems: 'center' }}>
           {data.org.name}
         </Link>
       </div>
@@ -110,11 +110,12 @@ export function ClientCallBriefPanel({ callId }: { callId: string }) {
         </section>
       )}
 
-      {nothing && <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>Nothing on record yet for this client.</p>}
+      {nothing && <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>{data.sectionsHidden ? 'Some sections are hidden by your permissions.' : 'Nothing on record yet for this client.'}</p>}
+      {!nothing && data.sectionsHidden && <p style={metaText}>Some sections are hidden by your permissions.</p>}
 
       <Section title="Past calls" count={data.pastCalls.length} total={t.pastCalls}>
         {data.pastCalls.map(c => (
-          <Link key={c.id} href={c.href} className="tahi-focus-ring" style={rowLink}>
+          <Link key={c.id} href={c.href} className="tahi-focus-ring tahi-brief-row" style={rowLink}>
             <span style={{ fontWeight: 600 }}>{c.title}</span>
             <span style={metaText}>{shortDate(c.scheduledAt)}</span>
             {c.summary && <span style={{ color: 'var(--color-text-muted)' }}>{c.summary}</span>}
@@ -143,7 +144,7 @@ export function ClientCallBriefPanel({ callId }: { callId: string }) {
 
       <Section title="Blockers" count={data.blockers.length} total={t.blockers}>
         {data.blockers.map(b => (
-          <Row key={`${b.blockedId}-${b.blockerTitle}`} href={b.href} title={b.blockedTitle} meta={`Blocked by ${b.blockerTitle}`} />
+          <Row key={`${b.blockedType}-${b.blockedId}-${b.blockerTitle}`} href={b.href} title={b.blockedTitle} meta={`Blocked by ${b.blockerTitle}`} />
         ))}
       </Section>
 

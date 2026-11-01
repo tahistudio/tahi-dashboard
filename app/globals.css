@@ -2839,3 +2839,8 @@ body[data-qa-wide="true"] button[data-feedback-ball="true"] {
     0%, 100% { outline-color: var(--color-brand); }
   }
 }
+
+/* Rows in the pre-call brief (components/tahi/client-call-brief.tsx). */
+.tahi-brief-row:hover {
+  background: var(--color-bg-secondary) !important;
+}

@@ -75,6 +75,8 @@ describe('buildClientCallBrief', () => {
       ...Array.from({ length: 9 }, (_, i) => past(i)),
       past(20, { id: 'call_now' }),
       past(21, { status: 'cancelled' }),
+      past(23, { status: 'no_show' }),
+      past(24, { status: 'rescheduled' }),
       past(22, { id: 'later', scheduledAt: '2026-12-01T00:00:00Z' }),
     ]
     const brief = buildClientCallBrief(input({ pastCalls: rows }))
@@ -156,14 +158,30 @@ describe('buildClientCallBrief', () => {
     }))
     expect(brief.finance!.lastInvoice!.reference).toBe('INV-2')
     expect(brief.finance!.overdue).toHaveLength(1)
-    expect(brief.finance!.overdueTotalUsd).toBe(250)
+    expect(brief.finance!.overdueTotals).toEqual([{ currency: 'USD', total: 250 }])
     expect(brief.raise[0]).toContain('INV-2')
     expect(brief.sources.some(s => s.href === '/invoices/inv_20000000')).toBe(true)
   })
 
+  it('totals overdue per currency and never mixes them', () => {
+    const two = buildClientCallBrief(input({ invoices: [
+      inv(1, { status: 'overdue', dueDate: '2026-10-01', totalUsd: 1000, currency: 'GBP' }),
+      inv(2, { status: 'overdue', dueDate: '2026-10-02', totalUsd: 850, currency: 'GBP' }),
+    ] }))
+    expect(two.finance!.overdueTotals).toEqual([{ currency: 'GBP', total: 1850 }])
+    expect(two.raise[0]).toBe('2 invoices are overdue: GBP 1850.00.')
+    const mix = buildClientCallBrief(input({ invoices: [
+      inv(1, { status: 'overdue', dueDate: '2026-10-01', totalUsd: 1000, currency: 'GBP' }),
+      inv(2, { status: 'overdue', dueDate: '2026-10-02', totalUsd: 75, currency: 'GBP' }),
+      inv(3, { status: 'overdue', dueDate: '2026-10-03', totalUsd: 200, currency: 'NZD' }),
+    ] }))
+    expect(mix.finance!.overdueTotals).toEqual([{ currency: 'GBP', total: 1075 }, { currency: 'NZD', total: 200 }])
+    expect(mix.raise[0]).toBe('3 invoices are overdue: GBP 1075.00 and NZD 200.00.')
+  })
+
   it('allowed finance with no invoices is an empty section, not null', () => {
     const brief = buildClientCallBrief(input({ invoices: [] }))
-    expect(brief.finance).toEqual({ lastInvoice: null, overdue: [], overdueTotalUsd: 0 })
+    expect(brief.finance).toEqual({ lastInvoice: null, overdue: [], overdueTotals: [] })
   })
 
   it('caps the raise list and dedupes sources', () => {
