@@ -21,10 +21,20 @@ export const NOINDEX_HEADER_VALUE = 'noindex, nofollow, noarchive'
  * X-Robots-Tag header and a robots meta tag, but a crawler can only see a
  * noindex it is allowed to fetch: a Disallow would hide it from Google (a
  * blocked URL can still be indexed from external links) and would also break
- * link previews in Slack, X and LinkedIn. Google applies the longest matching
+ * link previews on crawlers that honour robots.txt (X and LinkedIn do; Slack
+ * does not, it is unaffected either way). Google applies the longest matching
  * rule, so `Allow: /p/` beats `Disallow: /`. AI crawlers stay fully disallowed.
  */
 export const PUBLIC_SHARE_PATH_PREFIXES = ['/p/', '/review/'] as const
+
+/**
+ * Preview image behind og:image and twitter:image on shared proposals and
+ * schedules. lib/public-viewer-metadata.ts imports this same constant, so the
+ * image and the robots.txt allow entry cannot drift apart. It must stay
+ * fetchable or X and LinkedIn cards lose their image.
+ */
+export const SHARE_PREVIEW_IMAGE_PATH = '/tahi-logo.png'
+export const PUBLIC_PREVIEW_ASSETS = [SHARE_PREVIEW_IMAGE_PATH] as const
 
 /** Common AI and training crawlers, named explicitly in robots.txt. */
 export const AI_CRAWLER_USER_AGENTS = [

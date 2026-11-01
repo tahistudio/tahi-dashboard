@@ -7,7 +7,19 @@ describe('robots.txt (T1.7)', () => {
   const list = Array.isArray(rules) ? rules : [rules]
 
   it('disallows everything for the wildcard agent except the share prefixes', () => {
-    expect(list).toContainEqual({ userAgent: '*', allow: ['/p/', '/review/'], disallow: '/' })
+    expect(list).toContainEqual({ userAgent: '*', allow: ['/p/', '/review/', '/tahi-logo.png'],
+      disallow: '/',
+    })
+  })
+
+  it('allows every og and twitter image path used by the public viewer metadata', async () => {
+    const { toMetadata } = await import('@/lib/public-viewer-metadata')
+    const meta = toMetadata({ title: 't', description: 'd', path: '/p/proposal/x' })
+    const urls = [...meta.openGraph.images.map((i) => i.url), ...meta.twitter.images]
+    const wildcard = list.find((r) => r.userAgent === '*')
+    const allowed = new Set(wildcard?.allow)
+    expect(urls.length).toBeGreaterThan(0)
+    for (const u of urls) expect(allowed.has(new URL(u).pathname)).toBe(true)
   })
 
   it('names the common AI crawlers explicitly', () => {
