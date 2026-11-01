@@ -26,6 +26,8 @@ interface IncomeGoalData extends IncomeGoalResult {
     skippedHours: number
     pipelineDeals: number
     pipelineRolledOverDeals: number
+    pipelineStaleDeals: number
+    unknownDateInvoices: number
     twinsExcluded: number
     targetAnnualNzd: { liam: number; staci: number }
   }
@@ -53,7 +55,13 @@ function Shim({ h }: { h: number }) {
   return <div className="tahi-shimmer" style={{ height: `${h / 16}rem`, borderRadius: '0.625rem', background: 'var(--bg-secondary)' }} />
 }
 
-export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void }) {
+export function IncomeGoalCard({
+  onOpenFinance,
+  onOpenPipeline,
+}: {
+  onOpenFinance: () => void
+  onOpenPipeline: () => void
+}) {
   const { money } = useOvFormat()
   const { data, error } = useResource<IncomeGoalData>('/api/admin/reports/income-goal')
 
@@ -92,9 +100,9 @@ export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void })
   const headline = data.paidMeetsTarget
     ? 'Target reached on invoices marked paid.'
     : data.projectedMeetsTarget
-      ? `Target covered if everything lands, ${money(data.overByNzd)} over.`
+      ? `Target covered if everything is paid, ${money(data.overByNzd)} over.`
       : data.hasTarget
-        ? `${money(data.gapNzd)} short even if everything lands.`
+        ? `${money(data.gapNzd)} short even if everything is paid.`
         : 'No target set.'
 
   // The target marker sits where the target falls on the bar. The bar is as
@@ -169,18 +177,30 @@ export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void })
         Take-home target, before costs and tax: {money(data.notes.targetAnnualNzd.liam)} and{' '}
         {money(data.notes.targetAnnualNzd.staci)} a year, added together and divided by 12, set on the finance page.
         Marked paid plus invoiced plus unbilled is {money(data.committedNzd)}; adding the pipeline forecast makes{' '}
-        {money(data.projectedNzd)}. Invoice amounts are in NZD without GST.
+        {money(data.projectedNzd)}. Invoice amounts are in NZD without GST, except a Stripe charge
+        with no matching invoice, which includes any GST. The month runs on UTC dates.
         {data.olderOutstandingNzd > 0 &&
           ` Older outstanding, unpaid invoices issued before ${monthLabel(data.month)}: ${money(data.olderOutstandingNzd)}. This is not in the bar or the gap.`}
         {data.notes.pipelineRolledOverDeals > 0 &&
           ` ${data.notes.pipelineRolledOverDeals} pipeline ${data.notes.pipelineRolledOverDeals === 1 ? 'deal is' : 'deals are'} past the expected close date and counted this month.`}
+        {data.notes.unknownDateInvoices > 0 &&
+          ` ${data.notes.unknownDateInvoices} ${data.notes.unknownDateInvoices === 1 ? 'invoice has' : 'invoices have'} an unreadable date and ${data.notes.unknownDateInvoices === 1 ? 'is' : 'are'} not counted.`}
         {data.notes.twinsExcluded > 0 &&
-          ` ${data.notes.twinsExcluded} duplicate Stripe charge ${data.notes.twinsExcluded === 1 ? 'row was' : 'rows were'} left out.`}
+          ` ${data.notes.twinsExcluded} duplicate Stripe ${data.notes.twinsExcluded === 1 ? 'row was' : 'rows were'} left out.`}
         {data.notes.unratedHours > 0 &&
           ` ${data.notes.unratedHours} billable hours have no hourly rate and are not priced.`}
         {data.notes.skippedHours > 0 &&
           ` ${data.notes.skippedHours} hours belong to clients billed in an unsupported currency and are not priced.`}
       </p>
+      {data.notes.pipelineStaleDeals > 0 && (
+        <p className="ov-goal-foot">
+          {data.notes.pipelineStaleDeals} stale {data.notes.pipelineStaleDeals === 1 ? 'deal' : 'deals'} (close date more than 90
+          days ago) not counted.{' '}
+          <button type="button" className="ov-goal-link" onClick={onOpenPipeline}>
+            Update their close dates in the pipeline
+          </button>
+        </p>
+      )}
     </Card>
   )
 }

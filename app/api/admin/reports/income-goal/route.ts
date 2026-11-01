@@ -1,5 +1,5 @@
 /**
- * GET /api/admin/reports/income-goal?month=YYYY-MM
+ * GET /api/admin/reports/income-goal   (current UTC month only; ?month= other than the current one returns 400)
  *
  * LP.7: the data behind the overview "Income goal" bar. One month, NZD, five
  * numbers: paid, invoiced, unbilled, pipeline, and the gap to the take-home
@@ -25,10 +25,12 @@
  *              resolveRate() from lib/hourly-export.ts. Entries with no usable
  *              rate are counted in unratedHours and left out of the amount.
  *  - pipeline  open, non-archived deals whose expected_close_date is inside the
- *              month OR already passed (rolled into this month), upfront_value_nzd
- *              times the stage probability: the same weighting as the
- *              pipeline-forecast route. No close date means left out. Monthly
- *              recurring value is not counted.
+ *              month, or already passed by up to 90 days (rolled into this month),
+ *              upfront_value_nzd times the stage probability: the same weighting
+ *              as the pipeline-forecast route. No close date, or more than 90
+ *              days overdue, means left out (stale deals are counted in
+ *              notes.pipelineStaleDeals). Monthly recurring value is not
+ *              counted. Only the current month is supported.
  *  - target    (finance.liamTakeHomeAnnual + finance.staciTakeHomeAnnual) / 12,
  *              take-home only, before costs and tax. These keys already exist
  *              (the finance page edits them). When one is unset this route
@@ -46,10 +48,10 @@ import { schema } from '@/db/d1'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireAdmin } from '@/lib/require-admin'
 import { requireFeature } from '@/lib/require-feature'
-import { owedStatusList } from '@/lib/invoice-status'
+import { owedStatusList, paidStatusList } from '@/lib/invoice-status'
 import { resolveOrgCurrency, resolveRate } from '@/lib/hourly-export'
 import { computeIncomeGoal, monthlyTargetFromAnnual, pipelineDealPlacement, type MoneyItem } from '@/lib/income-goal'
-import { bucketInvoices, chargeTwinIds, type GoalInvoiceRow } from '@/lib/income-goal-invoices'
+import { bucketInvoices, resolveChargeTwins, type GoalInvoiceRow } from '@/lib/income-goal-invoices'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,18 +77,20 @@ export async function GET(req: NextRequest) {
   const featureDenied = await requireFeature({ userId, orgId }, 'financial_reports')
   if (featureDenied) return featureDenied
 
-  // The month, in UTC (the worker clock). Default is the current month.
+  // The current month only, in UTC (the worker clock). The figures mix
+  // point-in-time facts (what is unpaid now, deals open now) with the month,
+  // so a past or future month would not be a snapshot of that month. A
+  // `month` that is not the current one is refused rather than answered
+  // misleadingly.
   const monthParam = new URL(req.url).searchParams.get('month')
   const now = new Date()
-  let year = now.getUTCFullYear()
-  let month = now.getUTCMonth() + 1
-  if (monthParam !== null) {
-    const m = MONTH_RE.exec(monthParam)
-    if (!m) return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 })
-    year = Number(m[1])
-    month = Number(m[2])
-  }
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth() + 1
   const monthKey = `${year}-${pad(month)}`
+  if (monthParam !== null && !(MONTH_RE.test(monthParam) && monthParam === monthKey)) {
+    return NextResponse.json({ error: `Only the current month (${monthKey}) is supported` }, { status: 400 })
+  }
+  const todayDate = now.toISOString().slice(0, 10)
   const nextYear = month === 12 ? year + 1 : year
   const nextMonth = month === 12 ? 1 : month + 1
   const startIso = new Date(Date.UTC(year, month - 1, 1)).toISOString()
@@ -123,8 +127,11 @@ export async function GET(req: NextRequest) {
         xeroInvoiceId: schema.invoices.xeroInvoiceId,
       })
       .from(schema.invoices)
+      // Wide on purpose: paid_at comes in several string shapes (including
+      // '/Date(ms)/'), so a SQL range would lose rows. Dates are compared in
+      // JS after normalising (lib/income-goal-invoices.ts).
       .where(or(
-        and(gte(schema.invoices.paidAt, startIso), lt(schema.invoices.paidAt, endIso)),
+        inArray(schema.invoices.status, paidStatusList()),
         and(inArray(schema.invoices.status, owedStatusList()), isNull(schema.invoices.paidAt)),
         eq(schema.invoices.source, 'stripe'),
       )),
@@ -208,10 +215,15 @@ export async function GET(req: NextRequest) {
     status: r.status,
     discountAmountUsd: r.discountAmountUsd ?? null,
   }))
-  const buckets = bucketInvoices(goalRows, chargeTwinIds(goalRows.filter(r => r.source === 'stripe')), startIso, endIso)
+  const buckets = bucketInvoices(goalRows, resolveChargeTwins(goalRows.filter(r => r.source === 'stripe')), startIso, endIso)
 
-  const pipelineItems: MoneyItem[] = dealRows
-    .filter(d => pipelineDealPlacement(d.expectedCloseDate, startDate, endDate) !== 'out')
+  const placed = dealRows.map(d => ({
+    deal: d,
+    where: pipelineDealPlacement(d.expectedCloseDate, startDate, endDate, { isCurrentMonth: true, todayDate }),
+  }))
+  const counted = placed.filter(p => p.where === 'in' || p.where === 'rolled')
+  const pipelineItems: MoneyItem[] = counted
+    .map(p => p.deal)
     .map(d => ({
     amount: (d.upfrontNzd ?? 0) * ((d.probability ?? 0) / 100),
     currency: 'NZD',
@@ -240,8 +252,10 @@ export async function GET(req: NextRequest) {
       unbilledHours: round1(unbilledHours),
       unratedHours: round1(unratedHours),
       skippedHours: round1(skippedHours),
-      pipelineDeals: dealRows.length,
-      pipelineRolledOverDeals: dealRows.filter(d => pipelineDealPlacement(d.expectedCloseDate, startDate, endDate) === 'rolled').length,
+      pipelineDeals: counted.length,
+      pipelineRolledOverDeals: placed.filter(p => p.where === 'rolled').length,
+      pipelineStaleDeals: placed.filter(p => p.where === 'stale').length,
+      unknownDateInvoices: buckets.unknownDate,
       twinsExcluded: buckets.twinsExcluded,
       targetAnnualNzd: { liam: liamAnnual, staci: staciAnnual },
     },

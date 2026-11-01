@@ -517,6 +517,9 @@
 .ov-goal-item .gi-sw.forecast{ background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 0.15625rem, transparent 0.15625rem 0.3125rem); }
 .ov-goal-item .gi-val{ margin-left:auto; font-variant-numeric:tabular-nums; }
 .ov-goal-item .gi-def{ margin:0.125rem 0 0 1.125rem; font:500 0.75rem/1.45 'Manrope',sans-serif; color:var(--text-muted); }
+.ov-goal-link{ display:inline-flex; align-items:center; min-height:2.75rem; padding:0; border:none; background:none; color:var(--brand-strong); font:600 0.75rem 'Manrope',sans-serif; cursor:pointer; text-decoration:underline; }
+.ov-goal-link:hover{ color:var(--text); }
+.ov-goal-link:focus-visible{ outline:0.125rem solid var(--brand); outline-offset:0.0625rem; border-radius:0.25rem; }
 .ov-goal-foot{ margin-top:0.75rem; font:500 0.75rem/1.5 'Manrope',sans-serif; color:var(--text-muted); }
 @media (min-width: 48rem){
   .ov-goal-legend{ grid-template-columns:1fr 1fr; }

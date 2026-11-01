@@ -368,7 +368,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
       </div>
 
       <Zone label="Books">
-        <IncomeGoalCard onOpenFinance={() => go('financialreports')} />
+        <IncomeGoalCard onOpenFinance={() => go('financialreports')} onOpenPipeline={() => go('deals')} />
         <TakeHomeInk />
         <CashRunway cash={ov?.cash ?? null} loading={!ov} go={go} />
         <CashFlowRibbon go={go} />

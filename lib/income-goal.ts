@@ -84,7 +84,7 @@ export interface IncomeGoalResult {
   projectedNzd: number
   /** target minus paid, floored at 0: what is still to be received this month. */
   remainingToReceiveNzd: number
-  /** target minus projected, floored at 0: the shortfall even if everything lands. */
+  /** target minus projected, floored at 0: the shortfall even if everything is paid. */
   gapNzd: number
   /** projected minus target, floored at 0. */
   overByNzd: number
@@ -118,27 +118,43 @@ export const INCOME_GOAL_SEGMENTS: Record<IncomeGoalSegmentKey, { label: string;
   pipeline: {
     label: 'Pipeline',
     definition:
-      'Open deals expected to close this month, plus open deals whose close date has already passed: upfront value times the stage win chance. A forecast, not money. Deals with no close date are left out, and monthly recurring value is not counted.',
+      'Open deals expected to close this month, plus open deals whose close date passed in the last 90 days: upfront value times the stage win chance. A forecast, not money. Deals with no close date or more than 90 days overdue are left out, and monthly recurring value is not counted.',
   },
 }
 
 const SEGMENT_ORDER: IncomeGoalSegmentKey[] = ['paid', 'invoiced', 'unbilled', 'pipeline']
 
+/** A deal this many days past its expected close date is stale and not counted. */
+export const PIPELINE_STALE_DAYS = 90
+
 /**
- * Where an open deal sits for a month. 'in': expected to close inside it.
- * 'rolled': the expected close date has passed, so it is counted in the
- * current month. 'out': no close date, an unreadable one, or a later month.
- * Dates are YYYY-MM-DD (a longer ISO string is cut to its date).
+ * Where an open deal sits for a month.
+ *   'in'     expected to close inside the month.
+ *   'rolled' close date has passed (within the stale limit) and the requested
+ *            month is the current one, so it counts now. Only ever for the
+ *            current month: any other month counts only deals dated inside it.
+ *   'stale'  close date more than PIPELINE_STALE_DAYS before today. Not counted;
+ *            the card lists how many so their dates can be updated.
+ *   'out'    no or unreadable close date, or a later month.
+ * Dates are YYYY-MM-DD (a longer ISO string is cut to its date). `todayDate`
+ * is today's UTC date.
  */
 export function pipelineDealPlacement(
   expectedCloseDate: string | null | undefined,
   monthStartDate: string,
   monthEndDate: string,
-): 'in' | 'rolled' | 'out' {
+  opts: { isCurrentMonth: boolean; todayDate: string },
+): 'in' | 'rolled' | 'stale' | 'out' {
   const d = typeof expectedCloseDate === 'string' ? expectedCloseDate.slice(0, 10) : ''
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'out'
   if (d >= monthEndDate) return 'out'
-  return d >= monthStartDate ? 'in' : 'rolled'
+  if (d >= monthStartDate) return 'in'
+  if (!opts.isCurrentMonth) return 'out'
+  const today = Date.parse(`${opts.todayDate}T00:00:00.000Z`)
+  const closed = Date.parse(`${d}T00:00:00.000Z`)
+  if (Number.isNaN(today) || Number.isNaN(closed)) return 'out'
+  const daysPast = Math.floor((today - closed) / 86_400_000)
+  return daysPast > PIPELINE_STALE_DAYS ? 'stale' : 'rolled'
 }
 
 export function roundCents(value: number): number {
@@ -153,9 +169,10 @@ function cleanTarget(value: number | null | undefined): number {
 }
 
 /**
- * Sum one bucket in NZD. Negative items (credit notes, refunds) net against the
- * positives, and the bucket is floored at zero so a net-negative bucket can
- * never pull the bar backwards.
+ * Sum one bucket in NZD. This helper itself nets any negative item against the
+ * positives and floors the bucket at zero. Invoice rows never arrive negative:
+ * lib/income-goal-invoices.ts floors each row at zero first, so a credit note
+ * simply contributes nothing.
  */
 export function sumItemsNzd(
   items: readonly MoneyItem[],

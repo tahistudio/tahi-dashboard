@@ -13,15 +13,23 @@
  *   - ManyRequests amount = subtotal (before tax and before discount),
  *                  total = charged amount, discount = the discount.
  *   - Manual       amount = total = what was typed, no tax column written.
- *   - Stripe       amount = total = the Stripe figure, which includes any tax
- *                  Stripe collected. There is no ex-tax figure to subtract, so
- *                  a Stripe NZD invoice with Stripe-collected GST would still
- *                  count GST. The studio's NZD invoices are raised through
- *                  Xero, so this is expected to be rare.
+ *   - Stripe in_   amount = Stripe subtotal (before discount and tax),
+ *                  total = Stripe total (after discount, with tax)
+ *                  (lib/stripe-import.ts).
+ *   - Stripe ch_   amount = total = the full amount charged, INCLUDING any GST
+ *                  Stripe collected. There is no ex-tax figure for a charge,
+ *                  so an un-twinned ch_ row counts any GST in it.
  * tax_amount_usd is NOT reliable (INV-0071 has amount 3000, total 3450, tax 0),
  * so GST is never derived from it. For NZD rows the figure used is
- * amount minus discount, floored at 0, which is ex-GST for every source above.
- * Non-NZD rows use total, unchanged, because tax treatment there is unknown.
+ * amount minus discount; for Stripe rows it is also capped at total, so an
+ * invoice-level Stripe discount is respected. Every row is floored at 0: a
+ * credit note never reduces the month's income. Non-NZD rows use total
+ * (floored), because tax treatment there is unknown.
+ *
+ * Dates. Stored timestamps come in several shapes (ISO with Z, Xero's naive
+ * 'YYYY-MM-DDTHH:MM:SS' which is UTC, a bare date, '/Date(ms+0000)/'). They are
+ * all normalised to an instant with normaliseXeroDate before any comparison.
+ * An unreadable date is counted in `unknownDate` and never silently dropped.
  */
 
 import {
@@ -30,7 +38,8 @@ import {
   isInvoiceRow,
   type InvoiceRowLike,
 } from '@/lib/stripe-dedupe'
-import { isOwedInvoice, isPaidInvoice } from '@/lib/invoice-status'
+import { isIssuedInvoice, isOwedInvoice, isPaidInvoice } from '@/lib/invoice-status'
+import { normaliseXeroDate } from '@/lib/xero-status'
 import type { MoneyItem } from '@/lib/income-goal'
 
 export interface GoalInvoiceRow extends InvoiceRowLike {
@@ -40,39 +49,74 @@ export interface GoalInvoiceRow extends InvoiceRowLike {
   sentAt: string | null
 }
 
-/** The amount a row contributes: ex-GST for NZD, the total otherwise. */
-export function goalAmount(row: Pick<GoalInvoiceRow, 'currency' | 'amountUsd' | 'discountAmountUsd' | 'totalUsd'>): MoneyItem {
+/** The amount a row contributes: ex-GST for NZD, the total otherwise; never negative. */
+export function goalAmount(
+  row: Pick<GoalInvoiceRow, 'currency' | 'amountUsd' | 'discountAmountUsd' | 'totalUsd'> & { source?: string | null },
+): MoneyItem {
   const currency = (row.currency ?? '').trim().toUpperCase() || 'NZD'
   if (currency === 'NZD') {
-    const net = (row.amountUsd ?? 0) - (row.discountAmountUsd ?? 0)
+    let net = (row.amountUsd ?? 0) - (row.discountAmountUsd ?? 0)
+    if (row.source === 'stripe') net = Math.min(net, row.totalUsd ?? net)
     return { amount: Math.max(0, net), currency }
   }
-  return { amount: row.totalUsd, currency }
+  return { amount: Math.max(0, row.totalUsd), currency }
+}
+
+/** Any stored timestamp as epoch milliseconds, or null when unreadable. */
+export function toInstantMs(value: string | null | undefined): number | null {
+  const iso = normaliseXeroDate(value)
+  if (!iso) return null
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? null : ms
+}
+
+/** The date an invoice was issued: sent_at, else created_at (raw string). */
+export function issuedAt(row: Pick<GoalInvoiceRow, 'sentAt' | 'createdAt'>): string | null {
+  return row.sentAt || row.createdAt || null
+}
+
+export interface TwinResolution {
+  /** ch_/py_ rows that duplicate an in_ row which itself records the payment. Leave out of Paid. */
+  dropCharges: Set<string>
+  /** Owed in_ rows whose money already arrived as a paid ch_ row. Leave out of Invoiced and older outstanding. */
+  claimedInvoices: Set<string>
 }
 
 /**
- * Ids of Stripe charge rows (ch_ or py_) that duplicate an in_ invoice row,
- * under exactly the rule the cleanup route uses. Nothing is deleted or changed;
- * the caller just leaves these rows out. Needs EVERY stripe-source row, not
- * only the ones in the month, because the twin can sit in an earlier window.
+ * Match Stripe charge rows to in_ rows under the rule lib/stripe-dedupe.ts
+ * uses (same org, amount within 0.005, same currency, 3 day window, one to
+ * one, closest wins), but only against an ISSUED in_ row. Void, written off
+ * and draft in_ rows are never matched, and an in_ row marked paid with no
+ * paid_at is not evidence of payment, so the charge is kept.
+ *
+ *   in_ paid (with paid_at)  -> the ch_ is the duplicate: drop it, keep the in_.
+ *   in_ owed                 -> the charge shows the money arrived: keep the
+ *                               ch_ in Paid and leave the in_ out of Invoiced.
+ *
+ * Nothing is deleted or changed; the caller just leaves rows out.
  */
-export function chargeTwinIds(stripeRows: readonly GoalInvoiceRow[]): Set<string> {
+export function resolveChargeTwins(stripeRows: readonly GoalInvoiceRow[]): TwinResolution {
+  const out: TwinResolution = { dropCharges: new Set(), claimedInvoices: new Set() }
   const chargeRows = stripeRows.filter(isChargeRow)
-  const invoiceRows = stripeRows.filter(isInvoiceRow)
-  const twins = new Set<string>()
-  if (chargeRows.length === 0 || invoiceRows.length === 0) return twins
+  const invoiceRows = stripeRows.filter(r =>
+    isInvoiceRow(r)
+    && isIssuedInvoice(r.status)
+    && !(isPaidInvoice(r.status) && !r.paidAt),
+  )
+  if (chargeRows.length === 0 || invoiceRows.length === 0) return out
+  const statusById = new Map(invoiceRows.map(r => [r.id, r.status]))
   const claimed = new Set<string>()
   const ordered = [...chargeRows].sort(
     (a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id),
   )
   for (const charge of ordered) {
     const twin = findInvoiceTwin(charge, invoiceRows, claimed)
-    if (twin) {
-      claimed.add(twin.id)
-      twins.add(charge.id)
-    }
+    if (!twin) continue
+    claimed.add(twin.id)
+    if (isPaidInvoice(statusById.get(twin.id))) out.dropCharges.add(charge.id)
+    else out.claimedInvoices.add(twin.id)
   }
-  return twins
+  return out
 }
 
 export interface GoalInvoiceBuckets {
@@ -81,47 +125,50 @@ export interface GoalInvoiceBuckets {
   invoiced: MoneyItem[]
   /** Owed and unpaid, issued before the month. Never part of the bar's totals. */
   olderOutstanding: MoneyItem[]
+  /** Duplicate or already-paid rows left out (dropped charges plus claimed in_ rows). */
   twinsExcluded: number
-}
-
-/** The date an invoice was issued: sent_at, else created_at. */
-export function issuedAt(row: Pick<GoalInvoiceRow, 'sentAt' | 'createdAt'>): string | null {
-  return row.sentAt || row.createdAt || null
+  /** Rows whose paid or issue date could not be read. They are in no bucket. */
+  unknownDate: number
 }
 
 /**
- * Sort rows into the buckets. `rows` is every invoice that could matter
- * (paid in the month, or still owed); `monthStartIso` and `monthEndIso` are
- * the half open window. A row is in at most one bucket by construction: Paid
- * needs a paid status and a paid_at inside the window, the other two need an
- * owed status and no paid_at.
+ * Sort rows into the buckets. `monthStartIso` and `monthEndIso` are the half
+ * open window. A row is in at most one bucket by construction: Paid needs a
+ * paid status, the other two need an owed status and no paid date.
  */
 export function bucketInvoices(
   rows: readonly GoalInvoiceRow[],
-  twins: ReadonlySet<string>,
+  twins: TwinResolution,
   monthStartIso: string,
   monthEndIso: string,
 ): GoalInvoiceBuckets {
-  const out: GoalInvoiceBuckets = { paid: [], invoiced: [], olderOutstanding: [], twinsExcluded: 0 }
+  const start = Date.parse(monthStartIso)
+  const end = Date.parse(monthEndIso)
+  const out: GoalInvoiceBuckets = { paid: [], invoiced: [], olderOutstanding: [], twinsExcluded: 0, unknownDate: 0 }
   for (const row of rows) {
-    const paidAt = row.paidAt ?? null
     if (isPaidInvoice(row.status)) {
-      if (paidAt && paidAt >= monthStartIso && paidAt < monthEndIso) {
-        if (twins.has(row.id)) out.twinsExcluded++
-        else out.paid.push(goalAmount(row))
+      const paid = toInstantMs(row.paidAt)
+      if (paid === null) {
+        out.unknownDate++
+        continue
       }
+      if (paid < start || paid >= end) continue
+      if (twins.dropCharges.has(row.id)) out.twinsExcluded++
+      else out.paid.push(goalAmount(row))
       continue
     }
-    if (!isOwedInvoice(row.status) || paidAt) continue
-    if (twins.has(row.id)) {
+    if (!isOwedInvoice(row.status) || row.paidAt) continue
+    if (twins.claimedInvoices.has(row.id)) {
       out.twinsExcluded++
       continue
     }
-    const issued = issuedAt(row)
-    if (!issued) continue
-    if (issued < monthStartIso) out.olderOutstanding.push(goalAmount(row))
-    else if (issued < monthEndIso) out.invoiced.push(goalAmount(row))
+    const issued = toInstantMs(issuedAt(row))
+    if (issued === null) {
+      out.unknownDate++
+      continue
+    }
+    if (issued < start) out.olderOutstanding.push(goalAmount(row))
+    else if (issued < end) out.invoiced.push(goalAmount(row))
   }
   return out
 }
-
