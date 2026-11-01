@@ -6,8 +6,8 @@ describe('robots.txt (T1.7)', () => {
   const rules = robots().rules
   const list = Array.isArray(rules) ? rules : [rules]
 
-  it('disallows everything for the wildcard agent', () => {
-    expect(list).toContainEqual({ userAgent: '*', disallow: '/' })
+  it('disallows everything for the wildcard agent except the share prefixes', () => {
+    expect(list).toContainEqual({ userAgent: '*', allow: ['/p/', '/review/'], disallow: '/' })
   })
 
   it('names the common AI crawlers explicitly', () => {
@@ -26,8 +26,10 @@ describe('robots.txt (T1.7)', () => {
     }
   })
 
-  it('allows nothing anywhere', () => {
-    expect(list.every((r) => r.disallow === '/' && !r.allow)).toBe(true)
+  it('allows nothing for any AI crawler', () => {
+    const ai = list.filter((r) => r.userAgent !== '*')
+    expect(ai).toHaveLength(AI_CRAWLER_USER_AGENTS.length)
+    expect(ai.every((r) => r.disallow === '/' && !r.allow)).toBe(true)
   })
 })
 
