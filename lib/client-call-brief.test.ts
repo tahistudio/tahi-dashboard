@@ -182,6 +182,6 @@ describe('buildClientCallBrief', () => {
       requests: [req(1, { waitingOnContactId: 'c', waitingReason: 'approval', waitingSince: '2026-10-25T00:00:00Z', scopeFlagged: true })],
       invoices: [inv(1, { status: 'overdue', dueDate: '2026-10-10' })],
     }))
-    expect(JSON.stringify(brief)).not.toMatch(/[–—]/)
+    expect(JSON.stringify(brief)).not.toMatch(new RegExp(String.fromCharCode(91, 0x2013, 0x2014, 93)))
   })
 })
