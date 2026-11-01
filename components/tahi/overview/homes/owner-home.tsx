@@ -25,6 +25,7 @@ import { useResource } from '@/lib/use-resource'
 import { useDailyBrief } from '@/components/tahi/daily-brief-provider'
 import type { BriefRow } from '@/lib/overview-brief'
 import { usePermissions } from '@/components/tahi/permissions-context'
+import { CapacityPlainLine } from '@/components/tahi/capacity-plain-line'
 import { stageColour } from '@/lib/chart-colors'
 import { cashFlowBasisLine } from '@/lib/cash-flow-basis'
 import type { YieldFreshness } from '@/lib/yield-holdings'
@@ -1177,6 +1178,9 @@ function StudioCapacity({ go }: { go: (id: string) => void }) {
         <EmptyLine>No one in the studio yet.</EmptyLine>
       ) : (
         <>
+          <div style={{ marginBottom: '0.75rem' }}>
+            <CapacityPlainLine scheme="overview" />
+          </div>
           <div className="ov-gauge-wrap">
             <Gauge value={util} max={100} size={112} color="#B0761F" />
             <div className="ov-gauge-legend">

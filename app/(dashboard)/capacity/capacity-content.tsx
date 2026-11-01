@@ -16,6 +16,7 @@ import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { PageHeader } from '@/components/tahi/page-header'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
+import { CapacityPlainLine } from '@/components/tahi/capacity-plain-line'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -218,6 +219,8 @@ export function CapacityContent() {
           Refresh
         </button>
       </PageHeader>
+
+      <CapacityPlainLine />
 
       {/* Projected Capacity KPI Cards */}
       <KPIStrip>
