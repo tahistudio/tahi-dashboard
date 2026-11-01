@@ -125,6 +125,8 @@ export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
   'sync_airwallex',
   // Finance block (the brief includes invoices over MCP); revisit when the designer-finance policy is decided.
   'get_client_call_brief',
+  // The income goal carries the founders' take-home target, so it stays with the full profile.
+  'get_income_goal',
   // Shared brief cache regeneration stays with the full profile.
   'refresh_daily_brief',
   'link_stripe_customer', 'confirm_xero_contact',

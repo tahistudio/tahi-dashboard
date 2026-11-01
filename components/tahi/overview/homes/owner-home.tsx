@@ -40,6 +40,7 @@ import {
 import { healthBucket } from '@/lib/retainer-health-bucket'
 import { isProposalLiveStatus } from '@/lib/proposal-live-status'
 import type { OverviewCtx } from '@/components/tahi/overview/ctx'
+import { IncomeGoalCard } from '@/components/tahi/overview/income-goal-card'
 import {
   Icon,
   useOvFormat,
@@ -368,6 +369,7 @@ export function OwnerHome({ ctx }: { ctx: OverviewCtx }) {
       </div>
 
       <Zone label="Books">
+        <IncomeGoalCard onOpenFinance={() => go('financialreports')} onOpenPipeline={() => go('deals')} />
         <TakeHomeInk />
         <CashRunway cash={ov?.cash ?? null} loading={!ov} go={go} />
         <CashFlowRibbon go={go} />

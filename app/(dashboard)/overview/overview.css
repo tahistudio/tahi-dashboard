@@ -504,6 +504,27 @@
   .ov-wire-when{ margin-left:0; flex-basis:100%; padding-left:16px; }
 }
 
+/* ---------- income goal bar (LP.7) ---------- */
+.ov-goal-top{ display:flex; align-items:baseline; flex-wrap:wrap; gap:0.25rem 0.75rem; }
+.ov-goal-bar{ position:relative; display:flex; height:0.875rem; border-radius:0.5rem; overflow:hidden; margin-top:0.75rem; background:var(--bg-tertiary); }
+.ov-goal-bar i{ display:block; height:100%; min-width:0; }
+.ov-goal-bar i.forecast{ background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 0.25rem, transparent 0.25rem 0.5rem); }
+.ov-goal-mark{ position:absolute; top:-0.1875rem; bottom:-0.1875rem; width:0.125rem; background:var(--text); border-radius:0.0625rem; }
+.ov-goal-legend{ display:grid; grid-template-columns:1fr; gap:0.5rem 1.5rem; margin-top:1rem; }
+.ov-goal-item{ display:block; min-height:2.75rem; padding:0.25rem 0; }
+.ov-goal-item .gi-row{ display:flex; align-items:center; gap:0.5rem; font:600 0.8125rem 'Manrope',sans-serif; color:var(--text); }
+.ov-goal-item .gi-sw{ width:0.625rem; height:0.625rem; border-radius:0.1875rem; flex-shrink:0; }
+.ov-goal-item .gi-sw.forecast{ background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 0.15625rem, transparent 0.15625rem 0.3125rem); }
+.ov-goal-item .gi-val{ margin-left:auto; font-variant-numeric:tabular-nums; }
+.ov-goal-item .gi-def{ margin:0.125rem 0 0 1.125rem; font:500 0.75rem/1.45 'Manrope',sans-serif; color:var(--text-muted); }
+.ov-goal-link{ display:inline-flex; align-items:center; min-height:2.75rem; padding:0; border:none; background:none; color:var(--brand-strong); font:600 0.75rem 'Manrope',sans-serif; cursor:pointer; text-decoration:underline; }
+.ov-goal-link:hover{ color:var(--text); }
+.ov-goal-link:focus-visible{ outline:0.125rem solid var(--brand); outline-offset:0.0625rem; border-radius:0.25rem; }
+.ov-goal-foot{ margin-top:0.75rem; font:500 0.75rem/1.5 'Manrope',sans-serif; color:var(--text-muted); }
+@media (min-width: 48rem){
+  .ov-goal-legend{ grid-template-columns:1fr 1fr; }
+}
+
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce){
   .ov-needs.live::after{ animation:none; }
