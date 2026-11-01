@@ -338,7 +338,7 @@ beforeEach(() => {
     ['project_manager', 'member', 'user_member'], ['admin', 'admin', 'user_admin'], ['super_admin', 'super', 'user_super'],
   ]) {
     fixture.insert(schema.roles, { id: 'role-' + id, name })
-    fixture.insert(schema.teamMembers, { id, clerk_user_id: user, name: id, role: id === 'member' ? 'member' : 'admin', weekly_capacity_hours: 40 })
+    fixture.insert(schema.teamMembers, { id, clerk_user_id: user, name: id, email: `${id}@example.test`, role: id === 'member' ? 'member' : 'admin', weekly_capacity_hours: 40 })
     fixture.insert(schema.teamMemberRoles, { id: 'assignment-' + id, team_member_id: id, role_id: 'role-' + id, ended_at: null })
   }
   for (const resource of ['organisations', 'requests', 'tasks', 'invoices', 'deals', 'time_entries', 'capacity', 'reports', 'settings', 'content_studio', 'financial_reports', 'billing', 'team', 'leads']) {

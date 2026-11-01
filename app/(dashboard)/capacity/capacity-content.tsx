@@ -16,7 +16,6 @@ import { LoadingSkeleton } from '@/components/tahi/loading-skeleton'
 import { EmptyState } from '@/components/tahi/empty-state'
 import { PageHeader } from '@/components/tahi/page-header'
 import { KPIStrip, KPICell } from '@/components/tahi/kpi-strip'
-
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface TeamMember {
