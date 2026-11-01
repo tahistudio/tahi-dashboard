@@ -62,7 +62,7 @@ export const DESIGNER_READ_TOOLS: ReadonlySet<string> = new Set([
   'list_contracts', 'get_contract', 'list_contract_templates', 'list_leads', 'get_lead', 'get_lead_ai_briefing',
   'list_lead_calls', 'list_deal_calls', 'list_deals', 'get_pipeline_stages', 'get_deal', 'list_deal_activities',
   'list_deal_contacts', 'list_nudge_templates', 'list_deal_nudges', 'list_calls', 'list_all_calls',
-  'list_call_transcripts', 'get_call_transcript', 'list_schedules', 'get_schedule', 'get_schedule_delivery_status',
+  'list_call_transcripts', 'get_call_transcript', 'get_client_call_brief', 'list_schedules', 'get_schedule', 'get_schedule_delivery_status',
   'list_meeting_recordings', 'get_meeting_recording',
   'get_schedule_linked_work', 'get_engagement_delivery_status', 'list_off_track_engagements', 'get_share_analytics',
   'list_schedule_templates', 'list_proposals', 'get_proposal',
