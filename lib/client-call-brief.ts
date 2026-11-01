@@ -295,10 +295,12 @@ function money(total: number, currency: string): string {
 function totalsByCurrency(rows: readonly BriefInvoiceRow[]): Array<{ currency: string; total: number }> {
   const sums = new Map<string, number>()
   for (const i of rows) {
-    const cur = i.currency ?? 'USD'
+    const cur = i.currency?.trim() || 'USD'
     sums.set(cur, (sums.get(cur) ?? 0) + i.totalUsd)
   }
-  return [...sums.entries()].map(([currency, total]) => ({ currency, total })).sort((a, b) => a.currency.localeCompare(b.currency))
+  return [...sums.entries()]
+    .map(([currency, total]) => ({ currency, total: Math.round(total * 100) / 100 }))
+    .sort((a, b) => a.currency.localeCompare(b.currency))
 }
 
 function invoiceReference(row: BriefInvoiceRow): string {
