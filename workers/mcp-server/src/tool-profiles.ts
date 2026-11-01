@@ -123,6 +123,8 @@ export const CONDITIONAL_CONFIRM_TOOLS: ReadonlySet<string> = new Set(['update_r
 export const DESIGNER_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
   // Finance sync writes stay with the full profile.
   'sync_airwallex',
+  // The income goal carries the founders' take-home target, so it stays with the full profile.
+  'get_income_goal',
   // Shared brief cache regeneration stays with the full profile.
   'refresh_daily_brief',
   'link_stripe_customer', 'confirm_xero_contact',

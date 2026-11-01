@@ -129,7 +129,7 @@ export const GUIDE_SECTIONS: ReadonlyArray<GuideSection> = [
     audience: 'team',
     body:
       'The Tahi Dashboard MCP server lets an AI assistant work the dashboard the same way a person would, through the same access rules, so nothing it does bypasses what a Tahi admin is allowed to do. Tool families, by name:\n\n' +
-      '- **get_overview, get_reports, get_billing_summary, get_response_time** - the numbers: KPIs, reports, billing and response-time summaries.\n' +
+      '- **get_overview, get_reports, get_billing_summary, get_response_time, get_income_goal** - the numbers: KPIs, reports, billing and response-time summaries, and the monthly income goal (full profile only).\n' +
       '- **list_requests, get_request, create_request, update_request_fields, update_request_status, assign_request, post_request_message** - read, create and move work requests, and talk in their threads.\n' +
       '- **hand_off_request, hand_back_request, list_requests_waiting_on_clients** - point a request at a client contact, hand it back, and see everything currently waiting on someone.\n' +
       '- **list_clients, get_client, create_client, update_client, list_client_contacts** - client organisations and the people at them.\n' +

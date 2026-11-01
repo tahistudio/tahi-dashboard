@@ -1533,7 +1533,7 @@ scheduled; each needs a scope before building.
 - [ ] LP.5 - [FE/BE] "Client owes us" checklist per project (brand files, copy,
   CMS access; uploaded or waiting), visible in the portal.
 - [ ] LP.6 - [FE/BE] Weekly timesheet grid and a PDF time report.
-- [ ] LP.7 - [FE] Income goal bar: paid, invoiced, unbilled, pipeline, gap to
+- [~] LP.7 - [FE] Income goal bar: paid, invoiced, unbilled, pipeline, gap to
   the take-home target.
 - [ ] LP.8 - [BE/FE] Share links for notes, transcripts, audio recordings
   and files, public or invite-only, with the existing share view analytics.
