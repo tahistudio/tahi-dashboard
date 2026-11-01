@@ -1535,8 +1535,8 @@ scheduled; each needs a scope before building.
   the /calls detail slide-over. DoD items 4 to 7 (live smoke, 375px, dark mode,
   screenshot) are pending, and a design pass is still to do. Known gap:
   scheduled_calls (portal-booked kickoffs) are not read, only discovery_calls.
-  Open policy question for Liam: the designer MCP profile reads finance, so
-  get_client_call_brief shows it invoice data too.
+  get_client_call_brief is blocked for designer until Liam decides designer
+  finance policy.
 - [ ] LP.5 - [FE/BE] "Client owes us" checklist per project (brand files, copy,
   CMS access; uploaded or waiting), visible in the portal.
 - [ ] LP.6 - [FE/BE] Weekly timesheet grid and a PDF time report.
