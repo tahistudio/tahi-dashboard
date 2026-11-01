@@ -208,6 +208,15 @@ describe('resolveChargeTwins', () => {
     expect(bucketInvoices(rows, t, START, END).paid).toHaveLength(1)
   })
 
+  it('in_ paid with an unreadable paid_at never claims a charge; the in_ is an unknown date', () => {
+    const rows = [inv({ paidAt: 'garbage' }), ch('c1')]
+    const t = resolveChargeTwins(rows)
+    expect(t.dropCharges.size).toBe(0)
+    const b = bucketInvoices(rows, t, START, END, Date.parse('2026-11-20T00:00:00Z'))
+    expect(b.paid).toHaveLength(1)
+    expect(b.unknownDate).toBe(1)
+  })
+
   it('one in_ and two ch_ stays one to one: the closest is dropped, the other kept', () => {
     const rows = [inv(), ch('near', '2026-11-03T00:00:00.000Z'), ch('far', '2026-11-04T12:00:00.000Z')]
     const t = resolveChargeTwins(rows)

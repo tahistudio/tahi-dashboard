@@ -1534,7 +1534,10 @@ scheduled; each needs a scope before building.
   CMS access; uploaded or waiting), visible in the portal.
 - [ ] LP.6 - [FE/BE] Weekly timesheet grid and a PDF time report.
 - [~] LP.7 - [FE] Income goal bar: paid, invoiced, unbilled, pipeline, gap to
-  the take-home target.
+  the take-home target. Built, awaiting live check. Known gaps: the Stripe
+  webhook overwrites paid_at with the receipt time, so an event more than 3
+  days late can double count a charge and its invoice; an invoice with a blank
+  currency never pairs with a USD charge in twin matching.
 - [ ] LP.8 - [BE/FE] Share links for notes, transcripts, audio recordings
   and files, public or invite-only, with the existing share view analytics.
 - [ ] LP.9 - [BE] Client-scoped MCP on the Loopsii model: OAuth consent,

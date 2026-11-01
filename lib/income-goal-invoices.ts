@@ -125,7 +125,7 @@ export function resolveChargeTwins(stripeRows: readonly GoalInvoiceRow[]): TwinR
   const invoiceRows = stripeRows.filter(r =>
     isInvoiceRow(r)
     && isIssuedInvoice(r.status)
-    && !(isPaidInvoice(r.status) && !r.paidAt),
+    && !(isPaidInvoice(r.status) && toInstantMs(r.paidAt) === null),
   )
   if (chargeRows.length === 0 || invoiceRows.length === 0) return out
   const statusById = new Map(invoiceRows.map(r => [r.id, r.status]))
