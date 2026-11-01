@@ -7,30 +7,40 @@
  * rows and says where each came from.
  *
  * Sources (each reuses an existing definition):
- *  - paid      invoices.paid_at inside the month, same basis as the finance
- *              summary's thisMonth revenue. Native amounts converted to NZD.
- *  - invoiced  owedStatusList() invoices (lib/invoice-status.ts), the same set
- *              as Receivables. Not limited to the month: an invoice sent last
- *              month and still unpaid is still money the studio is waiting on.
+ *  - paid      invoices with a paid status and paid_at inside the month. This is
+ *              what Xero or Stripe marked paid, not bank cash. NZD rows count
+ *              ex-GST (amount minus discount); other currencies use total.
+ *              Rules in lib/income-goal-invoices.ts.
+ *  - invoiced  owed, unpaid invoices ISSUED this month (sent_at, else
+ *              created_at). Older unpaid invoices come back as
+ *              olderOutstandingNzd and stay out of projected and the gap.
+ *  - Stripe charge twins (ch_ or py_ rows with an in_ twin under
+ *    lib/stripe-dedupe.ts) are left out of Paid and Invoiced at read time and
+ *    counted in notes.twinsExcluded. Nothing is deleted or changed. The import
+ *    guard in lib/stripe-sync.ts can still write new twins, so this stays on.
+ *  - Month boundaries are UTC, like the finance summary.
  *  - unbilled  billable time_entries dated in the month with no invoice link
  *              and no invoiced_at stamp, for clients whose billing_model is
  *              'hourly' (the export's own eligibility rule), priced with
  *              resolveRate() from lib/hourly-export.ts. Entries with no usable
  *              rate are counted in unratedHours and left out of the amount.
  *  - pipeline  open, non-archived deals whose expected_close_date is inside the
- *              month, upfront_value_nzd times the stage probability: the same
- *              weighting as the pipeline-forecast route and the overview's
- *              Pipeline ahead card.
- *  - target    (finance.liamTakeHomeAnnual + finance.staciTakeHomeAnnual) / 12.
- *              These keys already exist (the finance page edits them); when
- *              one is unset the confirmed NZ$64k a year is used.
+ *              month OR already passed (rolled into this month), upfront_value_nzd
+ *              times the stage probability: the same weighting as the
+ *              pipeline-forecast route. No close date means left out. Monthly
+ *              recurring value is not counted.
+ *  - target    (finance.liamTakeHomeAnnual + finance.staciTakeHomeAnnual) / 12,
+ *              take-home only, before costs and tax. These keys already exist
+ *              (the finance page edits them). When one is unset this route
+ *              uses the confirmed NZ$64k a year, whereas the finance summary
+ *              falls back to a stale NZ$52k; they differ only if a key is unset.
  *
  * Admin only: Tahi admin org, full admin, and the financial_reports feature,
  * the same three guards as the finance summary.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
@@ -38,7 +48,8 @@ import { requireAdmin } from '@/lib/require-admin'
 import { requireFeature } from '@/lib/require-feature'
 import { owedStatusList } from '@/lib/invoice-status'
 import { resolveOrgCurrency, resolveRate } from '@/lib/hourly-export'
-import { computeIncomeGoal, monthlyTargetFromAnnual, type MoneyItem } from '@/lib/income-goal'
+import { computeIncomeGoal, monthlyTargetFromAnnual, pipelineDealPlacement, type MoneyItem } from '@/lib/income-goal'
+import { bucketInvoices, chargeTwinIds, type GoalInvoiceRow } from '@/lib/income-goal-invoices'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,20 +96,38 @@ export async function GET(req: NextRequest) {
 
   const database = await db()
 
-  const [rates, settingRows, paidRows, invoicedRows, timeRows, dealRows] = await Promise.all([
+  const [rates, settingRows, invoiceRows, timeRows, dealRows] = await Promise.all([
     database.select().from(schema.exchangeRates),
     database
       .select({ key: schema.settings.key, value: schema.settings.value })
       .from(schema.settings)
       .where(inArray(schema.settings.key, ['finance.liamTakeHomeAnnual', 'finance.staciTakeHomeAnnual'])),
+    // Invoices that can matter: paid in the month, owed and unpaid (any issue
+    // date), and every Stripe row (twin detection needs the in_ side wherever
+    // it sits). bucketInvoices() does the real sorting.
     database
-      .select({ amount: schema.invoices.totalUsd, currency: schema.invoices.currency })
+      .select({
+        id: schema.invoices.id,
+        orgId: schema.invoices.orgId,
+        stripeInvoiceId: schema.invoices.stripeInvoiceId,
+        source: schema.invoices.source,
+        status: schema.invoices.status,
+        amountUsd: schema.invoices.amountUsd,
+        discountAmountUsd: schema.invoices.discountAmountUsd,
+        totalUsd: schema.invoices.totalUsd,
+        currency: schema.invoices.currency,
+        createdAt: schema.invoices.createdAt,
+        sentAt: schema.invoices.sentAt,
+        paidAt: schema.invoices.paidAt,
+        manyrequestsId: schema.invoices.manyrequestsId,
+        xeroInvoiceId: schema.invoices.xeroInvoiceId,
+      })
       .from(schema.invoices)
-      .where(and(gte(schema.invoices.paidAt, startIso), lt(schema.invoices.paidAt, endIso))),
-    database
-      .select({ amount: schema.invoices.totalUsd, currency: schema.invoices.currency })
-      .from(schema.invoices)
-      .where(inArray(schema.invoices.status, owedStatusList())),
+      .where(or(
+        and(gte(schema.invoices.paidAt, startIso), lt(schema.invoices.paidAt, endIso)),
+        and(inArray(schema.invoices.status, owedStatusList()), isNull(schema.invoices.paidAt)),
+        eq(schema.invoices.source, 'stripe'),
+      )),
     database
       .select({
         orgId: schema.timeEntries.orgId,
@@ -116,6 +145,7 @@ export async function GET(req: NextRequest) {
     database
       .select({
         upfrontNzd: schema.deals.upfrontValueNzd,
+        expectedCloseDate: schema.deals.expectedCloseDate,
         probability: schema.pipelineStages.probability,
       })
       .from(schema.deals)
@@ -124,7 +154,9 @@ export async function GET(req: NextRequest) {
         eq(schema.pipelineStages.isClosedWon, 0),
         eq(schema.pipelineStages.isClosedLost, 0),
         sql`(${schema.deals.closeReason} IS NULL OR ${schema.deals.closeReason} != 'archived')`,
-        sql`substr(${schema.deals.expectedCloseDate}, 1, 10) >= ${startDate}`,
+        // A close date at or before the end of the month. A date that has
+        // already passed rolls into this month. NULL fails the comparison and
+        // so stays out.
         sql`substr(${schema.deals.expectedCloseDate}, 1, 10) < ${endDate}`,
       )),
   ])
@@ -171,7 +203,16 @@ export async function GET(req: NextRequest) {
     unbilledItems.push({ amount: hours * rate, currency })
   }
 
-  const pipelineItems: MoneyItem[] = dealRows.map(d => ({
+  const goalRows: GoalInvoiceRow[] = invoiceRows.map(r => ({
+    ...r,
+    status: r.status,
+    discountAmountUsd: r.discountAmountUsd ?? null,
+  }))
+  const buckets = bucketInvoices(goalRows, chargeTwinIds(goalRows.filter(r => r.source === 'stripe')), startIso, endIso)
+
+  const pipelineItems: MoneyItem[] = dealRows
+    .filter(d => pipelineDealPlacement(d.expectedCloseDate, startDate, endDate) !== 'out')
+    .map(d => ({
     amount: (d.upfrontNzd ?? 0) * ((d.probability ?? 0) / 100),
     currency: 'NZD',
   }))
@@ -182,8 +223,9 @@ export async function GET(req: NextRequest) {
 
   const result = computeIncomeGoal({
     targetMonthlyNzd: monthlyTargetFromAnnual(liamAnnual, staciAnnual),
-    paid: paidRows,
-    invoiced: invoicedRows,
+    paid: buckets.paid,
+    invoiced: buckets.invoiced,
+    olderOutstanding: buckets.olderOutstanding,
     unbilled: unbilledItems,
     pipeline: pipelineItems,
     rates,
@@ -199,6 +241,8 @@ export async function GET(req: NextRequest) {
       unratedHours: round1(unratedHours),
       skippedHours: round1(skippedHours),
       pipelineDeals: dealRows.length,
+      pipelineRolledOverDeals: dealRows.filter(d => pipelineDealPlacement(d.expectedCloseDate, startDate, endDate) === 'rolled').length,
+      twinsExcluded: buckets.twinsExcluded,
       targetAnnualNzd: { liam: liamAnnual, staci: staciAnnual },
     },
   })

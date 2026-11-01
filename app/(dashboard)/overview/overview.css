@@ -514,6 +514,7 @@
 .ov-goal-item{ display:block; min-height:2.75rem; padding:0.25rem 0; }
 .ov-goal-item .gi-row{ display:flex; align-items:center; gap:0.5rem; font:600 0.8125rem 'Manrope',sans-serif; color:var(--text); }
 .ov-goal-item .gi-sw{ width:0.625rem; height:0.625rem; border-radius:0.1875rem; flex-shrink:0; }
+.ov-goal-item .gi-sw.forecast{ background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 0.15625rem, transparent 0.15625rem 0.3125rem); }
 .ov-goal-item .gi-val{ margin-left:auto; font-variant-numeric:tabular-nums; }
 .ov-goal-item .gi-def{ margin:0.125rem 0 0 1.125rem; font:500 0.75rem/1.45 'Manrope',sans-serif; color:var(--text-muted); }
 .ov-goal-foot{ margin-top:0.75rem; font:500 0.75rem/1.5 'Manrope',sans-serif; color:var(--text-muted); }

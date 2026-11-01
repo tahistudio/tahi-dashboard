@@ -25,6 +25,8 @@ interface IncomeGoalData extends IncomeGoalResult {
     unratedHours: number
     skippedHours: number
     pipelineDeals: number
+    pipelineRolledOverDeals: number
+    twinsExcluded: number
     targetAnnualNzd: { liam: number; staci: number }
   }
 }
@@ -48,7 +50,7 @@ function monthLabel(key: string): string {
 }
 
 function Shim({ h }: { h: number }) {
-  return <div className="tahi-shimmer" style={{ height: h, borderRadius: 10, background: 'var(--bg-secondary)' }} />
+  return <div className="tahi-shimmer" style={{ height: `${h / 16}rem`, borderRadius: '0.625rem', background: 'var(--bg-secondary)' }} />
 }
 
 export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void }) {
@@ -88,7 +90,7 @@ export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void })
 
   const empty = data.projectedNzd <= 0
   const headline = data.paidMeetsTarget
-    ? 'Target reached with cash received.'
+    ? 'Target reached on invoices marked paid.'
     : data.projectedMeetsTarget
       ? `Target covered if everything lands, ${money(data.overByNzd)} over.`
       : data.hasTarget
@@ -111,7 +113,7 @@ export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void })
         <div className="ov-stat">
           <div className="st-num">{money(data.paidNzd)}</div>
           <div className="st-lbl">
-            paid{data.hasTarget ? ` of ${money(data.targetNzd)} target` : ''}
+            marked paid{data.hasTarget ? ` of ${money(data.targetNzd)} take-home target` : ''}
           </div>
         </div>
         <div className="ov-mini" style={{ flex: '1 1 14rem' }}>{headline}</div>
@@ -132,7 +134,7 @@ export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void })
               <i
                 key={s.key}
                 className={s.key === 'pipeline' ? 'forecast' : undefined}
-                style={{ width: `${s.barPct}%`, background: SEG_COLOUR[s.key] }}
+                style={{ width: `${s.barPct}%`, backgroundColor: SEG_COLOUR[s.key] }}
                 title={`${INCOME_GOAL_SEGMENTS[s.key].label}: ${money(s.nzd)}`}
               />
             ) : null,
@@ -147,7 +149,10 @@ export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void })
         {data.segments.map(s => (
           <div className="ov-goal-item" key={s.key}>
             <div className="gi-row">
-              <i className="gi-sw" style={{ background: SEG_COLOUR[s.key] }} />
+              <i
+                className={s.key === 'pipeline' ? 'gi-sw forecast' : 'gi-sw'}
+                style={{ backgroundColor: SEG_COLOUR[s.key] }}
+              />
               <span>{INCOME_GOAL_SEGMENTS[s.key].label}</span>
               <span className="gi-val">{money(s.nzd)}</span>
             </div>
@@ -161,10 +166,16 @@ export function IncomeGoalCard({ onOpenFinance }: { onOpenFinance: () => void })
       </div>
 
       <p className="ov-goal-foot">
-        Target: combined monthly take-home, {money(data.notes.targetAnnualNzd.liam)} and{' '}
-        {money(data.notes.targetAnnualNzd.staci)} a year divided by 12, set on the finance page. It is pay only, before any
-        business costs. Paid plus invoiced plus unbilled is {money(data.committedNzd)}; adding the pipeline forecast makes{' '}
-        {money(data.projectedNzd)}.
+        Take-home target, before costs and tax: {money(data.notes.targetAnnualNzd.liam)} and{' '}
+        {money(data.notes.targetAnnualNzd.staci)} a year, added together and divided by 12, set on the finance page.
+        Marked paid plus invoiced plus unbilled is {money(data.committedNzd)}; adding the pipeline forecast makes{' '}
+        {money(data.projectedNzd)}. Invoice amounts are in NZD without GST.
+        {data.olderOutstandingNzd > 0 &&
+          ` Older outstanding, unpaid invoices issued before ${monthLabel(data.month)}: ${money(data.olderOutstandingNzd)}. This is not in the bar or the gap.`}
+        {data.notes.pipelineRolledOverDeals > 0 &&
+          ` ${data.notes.pipelineRolledOverDeals} pipeline ${data.notes.pipelineRolledOverDeals === 1 ? 'deal is' : 'deals are'} past the expected close date and counted this month.`}
+        {data.notes.twinsExcluded > 0 &&
+          ` ${data.notes.twinsExcluded} duplicate Stripe charge ${data.notes.twinsExcluded === 1 ? 'row was' : 'rows were'} left out.`}
         {data.notes.unratedHours > 0 &&
           ` ${data.notes.unratedHours} billable hours have no hourly rate and are not priced.`}
         {data.notes.skippedHours > 0 &&

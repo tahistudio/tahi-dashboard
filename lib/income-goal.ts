@@ -16,13 +16,24 @@
  *
  * Segments (the plain-words definitions live in INCOME_GOAL_SEGMENTS so the
  * card and the tests read the same text):
- *   paid      cash received this month
- *   invoiced  issued and still unpaid
+ *   paid      invoices marked paid in Xero or Stripe this month (not bank cash)
+ *   invoiced  unpaid invoices issued this month
  *   unbilled  logged billable hours not yet on an invoice
- *   pipeline  open deals expected to close this month, probability weighted
+ *   pipeline  open deals expected to close this month or overdue, weighted
  *
- * The segments are separate buckets and never overlap by construction (an
- * invoice is paid OR owed; time is billed OR not; a deal is open OR won).
+ * Unpaid invoices issued BEFORE the month are reported separately as
+ * olderOutstandingNzd and are never part of projected or the gap.
+ *
+ * The invoice buckets never overlap by construction
+ * (lib/income-goal-invoices.ts: paid needs a paid status, invoiced needs an
+ * owed status and no paid date). Unbilled time can overlap Invoiced if hours
+ * were billed by hand without the invoiced stamp; see the unbilled definition.
+ *
+ * Period. The month is a UTC calendar month, the same convention as the
+ * finance summary route.
+ *
+ * GST. Which amount is used per invoice (ex-GST for NZD) is decided before
+ * this module, in lib/income-goal-invoices.ts.
  */
 
 import { buildRateMap, toNzd, type ExchangeRate, type RateMap } from '@/lib/currency'
@@ -43,6 +54,8 @@ export interface IncomeGoalInput {
   invoiced: readonly MoneyItem[]
   unbilled: readonly MoneyItem[]
   pipeline: readonly MoneyItem[]
+  /** Unpaid invoices issued before the month. Reported, never added to the bar. */
+  olderOutstanding?: readonly MoneyItem[]
   /** Rows of the exchange_rates table. */
   rates: readonly ExchangeRate[]
 }
@@ -79,33 +92,54 @@ export interface IncomeGoalResult {
   paidMeetsTarget: boolean
   /** True when projected is at or above a set target. */
   projectedMeetsTarget: boolean
-  /** Total skipped items across segments. */
+  /** Total skipped items across segments and the older outstanding total. */
   unconvertedCount: number
+  /** Unpaid invoices issued before the month. Outside projected and gap. */
+  olderOutstandingNzd: number
 }
 
 /** The wording on the card. One place, so UI and tests agree. */
 export const INCOME_GOAL_SEGMENTS: Record<IncomeGoalSegmentKey, { label: string; definition: string }> = {
   paid: {
     label: 'Paid',
-    definition: 'Invoices whose payment landed this month, in NZD.',
+    definition:
+      'Invoices marked paid in Xero or Stripe this month, in NZD and without GST. This follows the invoice records, not the bank, so it can differ from Airwallex.',
   },
   invoiced: {
     label: 'Invoiced',
-    definition: 'Invoices sent but not yet paid, from any month, including overdue ones.',
+    definition:
+      'Invoices issued this month that are not marked paid yet, in NZD and without GST. Older unpaid invoices are listed separately below and are not in this bar.',
   },
   unbilled: {
     label: 'Unbilled',
     definition:
-      'Billable hours logged this month for hourly clients that are not on an invoice yet, at the entry rate or the client default rate. Hours with no rate are left out.',
+      'Billable hours logged this month for hourly clients that are not on an invoice yet, at the entry rate or the client default rate. Hours with no rate are left out. If hours were billed by hand in Xero without being marked as invoiced here, they can also appear under Invoiced, so this can double count.',
   },
   pipeline: {
     label: 'Pipeline',
     definition:
-      'Open deals expected to close this month: upfront value times the stage win chance. A forecast, not money. Deals with no expected close date are left out.',
+      'Open deals expected to close this month, plus open deals whose close date has already passed: upfront value times the stage win chance. A forecast, not money. Deals with no close date are left out, and monthly recurring value is not counted.',
   },
 }
 
 const SEGMENT_ORDER: IncomeGoalSegmentKey[] = ['paid', 'invoiced', 'unbilled', 'pipeline']
+
+/**
+ * Where an open deal sits for a month. 'in': expected to close inside it.
+ * 'rolled': the expected close date has passed, so it is counted in the
+ * current month. 'out': no close date, an unreadable one, or a later month.
+ * Dates are YYYY-MM-DD (a longer ISO string is cut to its date).
+ */
+export function pipelineDealPlacement(
+  expectedCloseDate: string | null | undefined,
+  monthStartDate: string,
+  monthEndDate: string,
+): 'in' | 'rolled' | 'out' {
+  const d = typeof expectedCloseDate === 'string' ? expectedCloseDate.slice(0, 10) : ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'out'
+  if (d >= monthEndDate) return 'out'
+  return d >= monthStartDate ? 'in' : 'rolled'
+}
 
 export function roundCents(value: number): number {
   if (!Number.isFinite(value)) return 0
@@ -164,6 +198,7 @@ export function computeIncomeGoal(input: IncomeGoalInput): IncomeGoalResult {
   const hasTarget = targetNzd > 0
 
   const sums = SEGMENT_ORDER.map(key => ({ key, ...sumItemsNzd(input[key], rateMap) }))
+  const older = sumItemsNzd(input.olderOutstanding ?? [], rateMap)
   const projectedNzd = roundCents(sums.reduce((a, s) => a + s.nzd, 0))
   const paidNzd = sums[0].nzd
   const committedNzd = roundCents(sums[0].nzd + sums[1].nzd + sums[2].nzd)
@@ -192,7 +227,8 @@ export function computeIncomeGoal(input: IncomeGoalInput): IncomeGoalResult {
     overByNzd: hasTarget ? Math.max(0, roundCents(projectedNzd - targetNzd)) : 0,
     paidMeetsTarget: hasTarget && paidNzd >= targetNzd,
     projectedMeetsTarget: hasTarget && projectedNzd >= targetNzd,
-    unconvertedCount: sums.reduce((a, s) => a + s.skipped, 0),
+    unconvertedCount: sums.reduce((a, s) => a + s.skipped, 0) + older.skipped,
+    olderOutstandingNzd: older.nzd,
   }
 }
 
