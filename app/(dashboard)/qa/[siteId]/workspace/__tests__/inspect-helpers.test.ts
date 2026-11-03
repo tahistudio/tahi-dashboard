@@ -16,6 +16,7 @@ import {
   inspectScrollStep,
   isTokenFresh,
   parseViewMode,
+  showInspectScanNote,
   showsSingleFrame,
   viewAtFullSizeFeatures,
   viewAtFullSizeHint,
@@ -95,6 +96,16 @@ describe('allViewportsScanned and the short labels', () => {
     expect(allViewportsScanned(states({ tablet: 'loading' }))).toBe(false)
     expect(allViewportsScanned(states({ mobile_p: 'no_scan' }))).toBe(false)
     expect(allViewportsScanned(states({ xl: 'failed' }))).toBe(false)
+  })
+
+  it('shows the Inspect scan hint only on an editable round with something left to scan', () => {
+    expect(showInspectScanNote(false, states({ tablet: 'loading' }))).toBe(true)
+    expect(showInspectScanNote(false, states({ mobile_p: 'no_scan' }))).toBe(true)
+    // Closed round, or a browser outside the round: nothing is stored, so no hint.
+    expect(showInspectScanNote(true, states({ tablet: 'loading' }))).toBe(false)
+    expect(showInspectScanNote(true, states())).toBe(false)
+    // Everything already scanned: no hint.
+    expect(showInspectScanNote(false, states())).toBe(false)
   })
 
   it('has one distinct short code for each viewport', () => {

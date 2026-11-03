@@ -8,7 +8,7 @@ import { ViewportFrame, frameOuterWidthRem, type QaViewportDef } from './viewpor
 import { comparablePath } from './comparable-path'
 import { createRelayQueue, parseScrollMessage, relayTargets, scrollToFor, syncActive, type RelayQueue } from './scroll-helpers'
 import { viewportForSource } from './comments-helpers'
-import { INSPECT_SCAN_NOTE, VIEWPORT_SHORT_LABEL, allViewportsScanned, inspectDeviceOptions, type QaViewMode } from './inspect-helpers'
+import { INSPECT_SCAN_NOTE, VIEWPORT_SHORT_LABEL, inspectDeviceOptions, showInspectScanNote, type QaViewMode } from './inspect-helpers'
 import type { QaScanState, QaTickMap } from './qa-types'
 
 const ROW_REM = 28
@@ -469,9 +469,9 @@ export function ViewportStrip({
           fill
           options={inspectDeviceOptions(availableWidth)}
         />
-        {readOnly || allViewportsScanned(scanStates) ? null : (
+        {showInspectScanNote(readOnly, scanStates) ? (
           <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem' }}>{INSPECT_SCAN_NOTE}</p>
-        )}
+        ) : null}
         <ViewportFrame key={v.key} {...frameProps(v, v.height / 16, false)} inspect columnWidthRem={availableWidth / 16} />
       </div>
     )

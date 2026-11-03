@@ -42,6 +42,15 @@ export function allViewportsScanned(states: Readonly<Record<QaViewportKey, QaSca
   return QA_VIEWPORTS.every(v => states[v.key] === 'scanned')
 }
 
+/**
+ * Whether the "Inspect scans only this device" hint shows. A read-only strip (closed round, or a
+ * browser that is not part of the round) stores no scans, so the hint would mislead; and it goes
+ * once every viewport already has a stored scan.
+ */
+export function showInspectScanNote(readOnly: boolean, states: Readonly<Record<QaViewportKey, QaScanState>>): boolean {
+  return !readOnly && !allViewportsScanned(states)
+}
+
 export const INSPECT_SCAN_NOTE = 'Inspect scans the device you are viewing. Switch device, or use Overview, to scan the others.'
 
 /** The one short-code map for viewport names: frame label bars and the device switchers use it. */

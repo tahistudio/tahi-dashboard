@@ -1477,8 +1477,9 @@ scheduled; each needs a scope before building.
   proxied pages; the service-worker refusal runs before the scanner route;
   nosniff on the scanner and proxied responses. Open before [x]: push, live
   render check (Inspect at 1920 and 375, DevTools shows no transform, Overview
-  note, View at 100% tab and popup, tab sandbox: alert() is blocked), dark
-  mode, 375px.
+  note, View at 100% tab and popup, tab sandbox: alert() is blocked, and the
+  "This link leaves the site" link, clicked from inside a frame, opens a page
+  that loads and runs its scripts), dark mode, 375px.
   Backlog (referrer): strip per-element `referrerpolicy` attributes in the
   qa-view HTMLRewriter so embeds on a proxied page cannot leak the view token
   URL (the `<meta name="referrer">` strip is done).
