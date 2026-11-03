@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { schema } from '@/db/d1'
 import { QA_DEFAULT_BROWSER, isQaBrowserKey, type QaBrowserKey, type QaLinkResult, type QaScanResult, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
 import { parseRoundBrowsers } from '@/lib/qa/browsers'
+import { parseRoundViewports } from '@/lib/qa/viewports'
 import { browserPageIssues, countIssues, type QaScansByBrowser } from '@/lib/qa/issue-rules'
 import { parseStoredScan } from '@/lib/qa/normalise-scan'
 import { isSafePublicUrl } from '@/lib/qa/ssrf'
@@ -59,16 +60,19 @@ export type LoadedRound = NonNullable<Awaited<ReturnType<typeof loadRound>>>
 /**
  * Groups stored scan rows by browser, then viewport. A row with an unknown browser counts as Chrome.
  * With `browsers`, rows from any other browser are left out: a browser removed from a round keeps its
- * data but no longer feeds counts, issues or badges.
+ * data but no longer feeds counts, issues or badges. With `viewports`, rows on any other viewport are
+ * left out the same way.
  */
 export function scansByBrowser(
   rows: readonly { viewport: string; browser: string; result: string }[],
   browsers?: readonly QaBrowserKey[],
+  viewports?: readonly QaViewportKey[],
 ): QaScansByBrowser {
   const out: QaScansByBrowser = {}
   for (const row of rows) {
     const browser: QaBrowserKey = isQaBrowserKey(row.browser) ? row.browser : QA_DEFAULT_BROWSER
     if (browsers && !browsers.includes(browser)) continue
+    if (viewports && !(viewports as readonly string[]).includes(row.viewport)) continue
     const perViewport: Partial<Record<QaViewportKey, QaScanResult>> = out[browser] ?? {}
     perViewport[row.viewport as QaViewportKey] = parseStoredScan(row.result)
     out[browser] = perViewport
@@ -87,7 +91,8 @@ export function scannedLinkUrls(scans: QaScansByBrowser): string[] {
 
 /**
  * Reads the stored scans (every browser) and link results for one round page and
- * rewrites its count columns. Identical issues across browsers count once. Pass the already-loaded round and site to skip three queries
+ * rewrites its count columns. Only the round's browsers and viewport set feed the counts (a legacy round
+ * reads the five legacy viewports, the only ones it ever stored). Identical issues across browsers count once. Pass the already-loaded round and site to skip three queries
  * per page when recomputing many pages of the same round.
  */
 export async function recomputeCounts(database: D1, roundPageId: string, preloaded?: LoadedRound): Promise<void> {
@@ -96,9 +101,9 @@ export async function recomputeCounts(database: D1, roundPageId: string, preload
   const { round, site } = loaded
   const scanRows = await database.select().from(schema.qaScanResults).where(eq(schema.qaScanResults.roundPageId, roundPageId))
   if (scanRows.length === 0) return
-  const scans = scansByBrowser(scanRows, parseRoundBrowsers(round.browsers))
+  const scans = scansByBrowser(scanRows, parseRoundBrowsers(round.browsers), parseRoundViewports(round.viewports))
   if (Object.keys(scans).length === 0) {
-    // Every stored scan belongs to a browser that is no longer in the round: the page reads as unscanned.
+    // Every stored scan belongs to a browser or viewport that is no longer in the round: the page reads as unscanned.
     await database.update(schema.qaRoundPages).set({
       a11yCritical: null, a11ySerious: null, a11yModerate: null, a11yMinor: null,
       brokenLinks: null, seoIssues: null, launchIssues: null, perfIssues: null,

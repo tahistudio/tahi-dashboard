@@ -5,7 +5,7 @@
 import type {
   QaBrowserKey, QaContent, QaIssue, QaLinkResult, QaPageCounts, QaPerf, QaScanResult, QaSeo, QaTarget, QaViewportKey, QaA11yViolation,
 } from './types'
-import { QA_BROWSER_KEYS, QA_PRIMARY_VIEWPORT } from './types'
+import { QA_BROWSER_KEYS, primaryViewportFor } from './types'
 import { mergeBrowserIssues } from './browsers'
 
 const LEGACY_FORMATS = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp'])
@@ -43,7 +43,8 @@ export function seoIssues(seo: QaSeo, target: QaTarget, targetHost: string): QaI
 
 export function launchIssues(scans: Partial<Record<QaViewportKey, QaScanResult>>): QaIssue[] {
   const out: QaIssue[] = []
-  const primary = scans[QA_PRIMARY_VIEWPORT] ?? Object.values(scans)[0]
+  const primaryKey = primaryViewportFor(Object.keys(scans))
+  const primary = primaryKey ? scans[primaryKey] : undefined
   if (primary) {
     const c: QaContent = primary.content
     for (const l of c.stagingLeftovers) out.push({ category: 'launch', code: 'staging_leftover', severity: 'fail', message: `Leftover ${l.kind.replace('_', ' ')}: "${l.sample}"`, selector: l.selector })
@@ -103,7 +104,8 @@ export function pageIssues(
   targetHost: string,
   linkResults: Map<string, QaLinkResult>,
 ): QaIssue[] {
-  const primary = scans[QA_PRIMARY_VIEWPORT] ?? Object.values(scans)[0]
+  const primaryKey = primaryViewportFor(Object.keys(scans))
+  const primary = primaryKey ? scans[primaryKey] : undefined
   if (!primary) return []
   const perf = (Object.entries(scans) as [QaViewportKey, QaScanResult][]).flatMap(([vp, s]) => perfIssues(s.perf, vp))
   // An image flagged at several widths is one problem: keep the first per code + url.
