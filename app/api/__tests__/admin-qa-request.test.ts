@@ -573,3 +573,54 @@ describe('viewport sets: report', () => {
     ])
   })
 })
+
+describe('viewport sets: requests', () => {
+  const CORE_SET = JSON.stringify(['phone_m', 'laptop_m'])
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 'sess_1' } as never)
+    vi.mocked(isTahiAdmin).mockImplementation((orgId: string | null) => orgId === 'org_tahi')
+    vi.mocked(requireFeature).mockResolvedValue(null)
+    vi.mocked(requireAdmin).mockResolvedValue(null)
+    vi.mocked(loadRoundPage).mockResolvedValue({
+      roundPage: { ...ROUND_PAGE }, round: { ...ROUND, viewports: CORE_SET }, site: { ...SITE },
+    } as never)
+    vi.mocked(createRequestRecord).mockResolvedValue({ ok: true, request: { id: 'req_1' } } as never)
+  })
+
+  function filedDescription(): string {
+    return (vi.mocked(createRequestRecord).mock.calls[0][1] as { description: string }).description
+  }
+
+  it('accepts a registry key outside the round set and names it from the registry', async () => {
+    const res = await POST(postRequest({ title: 'Old pin', viewport: 'xl' }), createParams())
+    expect(res.status).toBe(201)
+    expect(filedDescription()).toContain('Viewport: XL (1920px)')
+  })
+
+  it('names a new viewport with its label and width', async () => {
+    const res = await POST(postRequest({ title: 'Laptop bug', viewport: 'laptop_m' }), createParams())
+    expect(res.status).toBe(201)
+    expect(filedDescription()).toContain('Viewport: Laptop M (1440px)')
+  })
+
+  it('keeps the legacy text for a legacy round and a legacy key', async () => {
+    vi.mocked(loadRoundPage).mockResolvedValue({
+      roundPage: { ...ROUND_PAGE }, round: { ...ROUND, viewports: null }, site: { ...SITE },
+    } as never)
+    const res = await POST(postRequest({ title: 'Phone bug', viewport: 'tablet' }), createParams())
+    expect(res.status).toBe(201)
+    expect(filedDescription()).toContain('Viewport: Tablet (768px)')
+  })
+
+  it('refuses an unknown key and a label with 400 before any read', async () => {
+    const unknown = await POST(postRequest({ title: 'T', viewport: 'watch' }), createParams())
+    expect(unknown.status).toBe(400)
+    expect(((await unknown.json()) as { error: string }).error).toBe('viewport is not a known QA viewport')
+    const label = await POST(postRequest({ title: 'T', viewport: 'Laptop M' }), createParams())
+    expect(label.status).toBe(400)
+    expect(loadRoundPage).not.toHaveBeenCalled()
+    expect(createRequestRecord).not.toHaveBeenCalled()
+  })
+})

@@ -229,11 +229,6 @@ describe('webflowBreakpointFor', () => {
     expect(webflowBreakpointFor('mobile_p')).toBe('Mobile portrait (479px and below); this frame is 375px wide')
   })
 
-  it('matches the strings still held in lib/qa/comments.ts', () => {
-    const source = readFileSync(join(__dirname, '..', 'comments.ts'), 'utf8')
-    for (const key of QA_LEGACY_VIEWPORT_KEYS) expect(source).toContain(`'${webflowBreakpointFor(key)}'`)
-  })
-
   it('maps new keys by width and adds the frame width', () => {
     expect(webflowBreakpointFor('phone_landscape')).toContain('Tablet')
     expect(webflowBreakpointFor('phone_landscape')).toContain('852px wide')

@@ -11,10 +11,9 @@ import {
   QA_CONTEXT_MAX_ANCESTORS,
   QA_CONTEXT_MAX_BYTES,
   QA_CONTEXT_MAX_CLASSES,
-  QA_VIEWPORTS,
-  QA_VIEWPORT_KEYS,
   browserLabel,
   isQaBrowserKey,
+  isQaViewportKey,
   viewportDef,
   webflowBreakpointFor,
   type QaBrowserKey,
@@ -273,26 +272,21 @@ export function parseStoredContext(text: string | null): QaElementContext | null
 
 // Detail shape for MCP and the round comments endpoint
 
-const WEBFLOW_BREAKPOINTS: Partial<Record<QaViewportKey, string>> = {
-  xl: '1920px breakpoint if enabled, else 1440px, else 1280px, else Desktop (base)',
-  desktop: '1440px breakpoint if enabled, else 1280px, else Desktop (base)',
-  tablet: 'Tablet (991px and below)',
-  mobile_l: 'Mobile portrait (479px and below); this frame is 425px wide',
-  mobile_p: 'Mobile portrait (479px and below); this frame is 375px wide',
-}
+/** An unknown stored key falls back to the legacy desktop frame, as it always has. */
+const FALLBACK_VIEWPORT_KEY: QaViewportKey = 'desktop'
 
 export function viewportInfoFor(key: QaViewportKey): QaViewportInfo {
-  const vp = QA_VIEWPORTS.find(v => v.key === key) ?? QA_VIEWPORTS[1]
-  const def = viewportDef(vp.key) ?? vp
+  const def = viewportDef(key) ?? viewportDef(FALLBACK_VIEWPORT_KEY)
+  if (!def) throw new Error('The viewport registry has no desktop frame')
   return {
-    key: vp.key,
-    label: vp.label,
-    width: vp.width,
-    height: vp.height,
+    key: def.key,
+    label: def.label,
+    width: def.width,
+    height: def.height,
     dpr: def.dpr,
     tier: def.tier,
     kind: def.kind,
-    webflowBreakpoint: WEBFLOW_BREAKPOINTS[vp.key] ?? webflowBreakpointFor(vp.key),
+    webflowBreakpoint: webflowBreakpointFor(def.key),
   }
 }
 
@@ -341,7 +335,7 @@ export function toCommentDetail(
 export function parseCommentInput(body: unknown): ParseResult<CommentInput> {
   if (!isRecord(body)) return { ok: false, error: 'Request body must be a JSON object' }
 
-  if (typeof body.viewport !== 'string' || !QA_VIEWPORT_KEYS.includes(body.viewport as QaViewportKey)) {
+  if (!isQaViewportKey(body.viewport)) {
     return { ok: false, error: 'viewport is not a known QA viewport' }
   }
 

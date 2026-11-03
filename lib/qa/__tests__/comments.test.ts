@@ -13,7 +13,7 @@ import {
   viewportInfoFor,
   type CommentRow,
 } from '@/lib/qa/comments'
-import { QA_COMMENT_BODY_MAX, QA_CONTEXT_MAX_BYTES } from '@/lib/qa/types'
+import { QA_COMMENT_BODY_MAX, QA_CONTEXT_MAX_BYTES, webflowBreakpointFor } from '@/lib/qa/types'
 
 const validInput = {
   viewport: 'desktop',
@@ -152,6 +152,24 @@ describe('viewport info and comment detail', () => {
     expect(viewportInfoFor('mobile_p')).toMatchObject({ width: 375, webflowBreakpoint: 'Mobile portrait (479px and below); this frame is 375px wide' })
   })
 
+  it('gives registry size, dpr, tier, kind and breakpoint for the new viewports', () => {
+    expect(viewportInfoFor('phone_m')).toEqual({
+      key: 'phone_m', label: 'Phone M', width: 393, height: 852, dpr: 3, tier: 'core', kind: 'phone',
+      webflowBreakpoint: webflowBreakpointFor('phone_m'),
+    })
+    expect(viewportInfoFor('laptop_m')).toEqual({
+      key: 'laptop_m', label: 'Laptop M', width: 1440, height: 780, dpr: 2, tier: 'core', kind: 'laptop',
+      webflowBreakpoint: webflowBreakpointFor('laptop_m'),
+    })
+    expect(viewportInfoFor('phone_m').webflowBreakpoint).toContain('393px wide')
+  })
+
+  it('falls back to the desktop frame for an unknown stored key', () => {
+    const info = viewportInfoFor('watch' as never)
+    expect(info).toMatchObject({ key: 'desktop', label: 'Desktop', width: 1440, height: 900, tier: 'legacy' })
+    expect(info.webflowBreakpoint).toBe('1440px breakpoint if enabled, else 1280px, else Desktop (base)')
+  })
+
   it('builds the page URL from the site origin and path', () => {
     expect(pageUrlFor('https://acme.webflow.io', '/about')).toBe('https://acme.webflow.io/about')
     expect(pageUrlFor('https://acme.webflow.io/ignored/path', 'about')).toBe('https://acme.webflow.io/about')
@@ -235,6 +253,14 @@ describe('parseCommentInput', () => {
   it('rejects an unknown viewport', () => {
     const r = parseCommentInput({ ...validInput, viewport: 'watch' })
     expect(r).toEqual({ ok: false, error: 'viewport is not a known QA viewport' })
+  })
+
+  it('accepts any registry viewport key and refuses a label', () => {
+    const phone = parseCommentInput({ ...validInput, viewport: 'phone_m' })
+    expect(phone.ok).toBe(true)
+    if (phone.ok) expect(phone.value.viewport).toBe('phone_m')
+    expect(parseCommentInput({ ...validInput, viewport: 'laptop_m' }).ok).toBe(true)
+    expect(parseCommentInput({ ...validInput, viewport: 'Phone M' })).toEqual({ ok: false, error: 'viewport is not a known QA viewport' })
   })
 
   it('rejects a missing viewport', () => {

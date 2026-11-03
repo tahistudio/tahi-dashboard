@@ -10,7 +10,7 @@ import { loadRoundPage } from '@/lib/qa/server'
 import { groupNotes, numberComments, parseCommentInput, rowToComment, toCommentDetail } from '@/lib/qa/comments'
 import { targetOrigin } from '@/lib/qa/server'
 import { parseRoundBrowsers } from '@/lib/qa/browsers'
-import type { QaTarget } from '@/lib/qa/types'
+import { parseRoundViewports, type QaTarget } from '@/lib/qa/types'
 
 /** A comment body is at most 4000 characters and its context 8 KB, so 64 KB is generous. */
 const COMMENT_REQUEST_MAX_BYTES = 64 * 1024
@@ -98,6 +98,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const browser = parsed.value.browser ?? roundBrowsers[0]
   if (!roundBrowsers.includes(browser)) {
     return NextResponse.json({ error: 'That browser is not part of this round' }, { status: 400 })
+  }
+  const viewportSet = parseRoundViewports(loaded.round.viewports)
+  if (!viewportSet.includes(parsed.value.viewport)) {
+    return NextResponse.json({ error: `viewport ${parsed.value.viewport} is not part of this round (it uses: ${viewportSet.join(', ')})` }, { status: 400 })
   }
 
   // The recorded author is the MCP person when one is verified, otherwise the signed-in member.
