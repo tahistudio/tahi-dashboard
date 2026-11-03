@@ -33,7 +33,7 @@ vi.mock('@/db/d1', () => ({
     qaSites: { _table: 'qa_sites', id: 'id', orgId: 'org_id', name: 'name', archivedAt: 'archived_at', createdAt: 'created_at' },
     qaPages: { _table: 'qa_pages', id: 'id', siteId: 'site_id', path: 'path', removedAt: 'removed_at', source: 'source', groupKey: 'group_key' },
     qaRounds: { _table: 'qa_rounds', id: 'id', siteId: 'site_id', status: 'status', createdAt: 'created_at' },
-    qaBrowserTicks: { _table: 'qa_browser_ticks', roundPageId: 'round_page_id', browser: 'browser', ticked: 'ticked' },
+    qaBrowserTicks: { _table: 'qa_browser_ticks', roundPageId: 'round_page_id', browser: 'browser', viewport: 'viewport', ticked: 'ticked' },
     qaRoundPages: {
       _table: 'qa_round_pages', id: 'id', roundId: 'round_id', status: 'status', vpXl: 'vp_xl', vpDesktop: 'vp_desktop',
       vpTablet: 'vp_tablet', vpMobileL: 'vp_mobile_l', vpMobileP: 'vp_mobile_p', a11yCritical: 'a11y_critical',
@@ -231,6 +231,7 @@ describe('GET /api/admin/qa/sites', () => {
     expect(json.items[0].orgName).toBe('Acme Ltd')
     expect(json.items[0].openRound).toEqual({
       id: 'round_new', name: 'Pre-launch 26 Oct', target: 'staging', browsers: ['chromium'],
+      viewports: ['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'], legacyViewports: true,
       ticksDone: 13, ticksTotal: 20, failing: 2, issues: 7,
     })
   })
@@ -243,7 +244,7 @@ describe('GET /api/admin/qa/sites', () => {
         { id: 'round_new', siteId: 'site_1', name: 'Cross browser', target: 'staging', status: 'open', browsers: '["chromium","firefox"]', createdAt: '2026-10-20T00:00:00.000Z' },
       ],
       qa_round_pages: [{ roundId: 'round_new', pageCount: 4, ticksDone: 13, failing: 0, issues: 0 }],
-      qa_browser_ticks: [{ roundId: 'round_new', browser: 'firefox', n: 6 }],
+      qa_browser_ticks: [{ roundId: 'round_new', browser: 'firefox', viewport: 'desktop', n: 6 }],
     }
     const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
     expect(json.items[0].openRound).toMatchObject({ browsers: ['chromium', 'firefox'], ticksDone: 19, ticksTotal: 40 })
@@ -257,7 +258,7 @@ describe('GET /api/admin/qa/sites', () => {
         { id: 'round_new', siteId: 'site_1', name: 'Firefox only', target: 'staging', status: 'open', browsers: '["firefox"]', createdAt: '2026-10-20T00:00:00.000Z' },
       ],
       qa_round_pages: [{ roundId: 'round_new', pageCount: 4, ticksDone: 13, failing: 0, issues: 0 }],
-      qa_browser_ticks: [{ roundId: 'round_new', browser: 'firefox', n: 2 }],
+      qa_browser_ticks: [{ roundId: 'round_new', browser: 'firefox', viewport: 'desktop', n: 2 }],
     }
     const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
     expect(json.items[0].openRound).toMatchObject({ browsers: ['firefox'], ticksDone: 2, ticksTotal: 20 })
@@ -267,6 +268,89 @@ describe('GET /api/admin/qa/sites', () => {
     store.rows = { organisations: [{ id: 'org_acme', name: 'Acme Ltd' }], qa_sites: [site()], qa_rounds: [] }
     const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
     expect(json.items[0].openRound).toBeNull()
+  })
+
+  describe('viewport sets', () => {
+    const CORE_KEYS = [
+      'phone_s', 'phone_m', 'phone_l', 'phone_landscape', 'tablet_s', 'tablet_portrait',
+      'tablet_landscape', 'laptop_s', 'laptop_m', 'laptop_l', 'desktop_fhd',
+    ]
+    const ALL_BROWSERS = '["chromium","firefox","webkit"]'
+
+    function mixedFixture(): void {
+      store.rows = {
+        organisations: [{ id: 'org_acme', name: 'Acme Ltd' }],
+        qa_sites: [site({ id: 'site_legacy', name: 'A legacy' }), site({ id: 'site_core', name: 'B core' })],
+        qa_rounds: [
+          {
+            id: 'round_legacy', siteId: 'site_legacy', name: 'Legacy', target: 'staging', status: 'open',
+            browsers: ALL_BROWSERS, viewports: null, createdAt: '2026-10-20T00:00:00.000Z',
+          },
+          {
+            id: 'round_core', siteId: 'site_core', name: 'Core', target: 'staging', status: 'open',
+            browsers: '["chromium","firefox"]', viewports: JSON.stringify(CORE_KEYS), createdAt: '2026-11-03T00:00:00.000Z',
+          },
+        ],
+        // The core round's vp_* column sum (99) must never be used.
+        qa_round_pages: [
+          { roundId: 'round_legacy', pageCount: 4, ticksDone: 13, failing: 1, issues: 3 },
+          { roundId: 'round_core', pageCount: 2, ticksDone: 99, failing: 0, issues: 0 },
+        ],
+        qa_browser_ticks: [
+          { roundId: 'round_legacy', browser: 'firefox', viewport: 'desktop', n: 3 },
+          { roundId: 'round_legacy', browser: 'webkit', viewport: 'xl', n: 2 },
+          // A Chromium row on a legacy key (the column wins) and a key outside the legacy five.
+          { roundId: 'round_legacy', browser: 'chromium', viewport: 'xl', n: 9 },
+          { roundId: 'round_legacy', browser: 'firefox', viewport: 'laptop_m', n: 4 },
+          { roundId: 'round_core', browser: 'chromium', viewport: 'laptop_m', n: 2 },
+          { roundId: 'round_core', browser: 'chromium', viewport: 'phone_s', n: 1 },
+          { roundId: 'round_core', browser: 'firefox', viewport: 'laptop_m', n: 3 },
+          // Outside the set, and a browser outside the round.
+          { roundId: 'round_core', browser: 'firefox', viewport: 'xl', n: 5 },
+          { roundId: 'round_core', browser: 'webkit', viewport: 'phone_m', n: 6 },
+          { roundId: 'round_core', browser: 'chromium', viewport: 'desktop_qhd', n: 7 },
+        ],
+      }
+    }
+
+    it('keeps the legacy numbers: column sum plus Firefox and WebKit rows on the five keys', async () => {
+      mixedFixture()
+      const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
+      const legacy = json.items.find(i => i.id === 'site_legacy')?.openRound as Row
+      expect(legacy.viewports).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+      expect(legacy.legacyViewports).toBe(true)
+      expect(legacy.ticksDone).toBe(13 + 3 + 2)
+      expect(legacy.ticksTotal).toBe(4 * 5 * 3)
+      expect(legacy.failing).toBe(1)
+      expect(legacy.issues).toBe(3)
+    })
+
+    it('counts a core round from rows inside its browsers and set, never from the vp_* columns', async () => {
+      mixedFixture()
+      const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
+      const core = json.items.find(i => i.id === 'site_core')?.openRound as Row
+      expect(core.viewports).toEqual(CORE_KEYS)
+      expect(core.legacyViewports).toBe(false)
+      expect(core.browsers).toEqual(['chromium', 'firefox'])
+      expect(core.ticksDone).toBe(2 + 1 + 3)
+      expect(core.ticksTotal).toBe(2 * 11 * 2)
+    })
+
+    it('sizes the total by the stored set, not the core default', async () => {
+      store.rows = {
+        organisations: [{ id: 'org_acme', name: 'Acme Ltd' }],
+        qa_sites: [site()],
+        qa_rounds: [
+          { id: 'round_small', siteId: 'site_1', name: 'Small', target: 'staging', status: 'open', browsers: '["chromium"]', viewports: '["phone_m","laptop_m"]', createdAt: '2026-11-03T00:00:00.000Z' },
+        ],
+        qa_round_pages: [{ roundId: 'round_small', pageCount: 5, ticksDone: 0, failing: 0, issues: 0 }],
+        qa_browser_ticks: [{ roundId: 'round_small', browser: 'chromium', viewport: 'phone_m', n: 4 }],
+      }
+      const json = (await (await listSites(jsonReq('GET', '/sites'))).json()) as { items: Row[] }
+      expect(json.items[0].openRound).toMatchObject({
+        viewports: ['phone_m', 'laptop_m'], legacyViewports: false, ticksDone: 4, ticksTotal: 10,
+      })
+    })
   })
 })
 

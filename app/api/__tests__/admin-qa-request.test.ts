@@ -447,3 +447,129 @@ describe('browsers in the report and in filed requests', () => {
     expect(bad.status).toBe(400)
   })
 })
+
+describe('viewport sets: report', () => {
+  interface SetReportBody {
+    totals: { ticksDone: number; ticksTotal: number }
+    round: { browsers: string[]; viewports: string[]; legacyViewports: boolean }
+    viewportDefs: { key: string; label: string; width: number; height: number; webflowBreakpoint: string }[]
+    pages: { ticks: Record<string, boolean>; browserTicks: Record<string, Record<string, boolean>> }[]
+    comments: { viewport: string; viewportLabel: string }[]
+  }
+
+  const CORE = [
+    'phone_s', 'phone_m', 'phone_l', 'phone_landscape', 'tablet_s', 'tablet_portrait',
+    'tablet_landscape', 'laptop_s', 'laptop_m', 'laptop_l', 'desktop_fhd',
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getRequestAuth).mockResolvedValue({ userId: 'user_admin', orgId: 'org_tahi', sessionId: 'sess_1' } as never)
+    vi.mocked(isTahiAdmin).mockImplementation((orgId: string | null) => orgId === 'org_tahi')
+    vi.mocked(requireFeature).mockResolvedValue(null)
+    vi.mocked(requireAdmin).mockResolvedValue(null)
+    orgRows = [{ name: 'Acme Ltd' }]
+    commentRows = []
+    tickRows = []
+    pageRows = [
+      {
+        id: 'rp_1', path: '/', status: 'pass', note: null, requestIds: null,
+        vpXl: 1, vpDesktop: 1, vpTablet: 0, vpMobileL: 0, vpMobileP: 0,
+        a11yCritical: 0, a11ySerious: 0, a11yModerate: 0, a11yMinor: 0, brokenLinks: 0, seoIssues: 0, launchIssues: 0, perfIssues: 0,
+      },
+      {
+        id: 'rp_2', path: '/about', status: 'untested', note: null, requestIds: null,
+        vpXl: 0, vpDesktop: 0, vpTablet: 0, vpMobileL: 0, vpMobileP: 0,
+        a11yCritical: null, a11ySerious: null, a11yModerate: null, a11yMinor: null, brokenLinks: null, seoIssues: null, launchIssues: null, perfIssues: null,
+      },
+    ]
+  })
+
+  async function report(roundOverrides: Record<string, unknown>): Promise<SetReportBody> {
+    vi.mocked(loadRound).mockResolvedValue({ round: { ...ROUND, ...roundOverrides }, site: { ...SITE } } as never)
+    return (await (await GET(getRequest(), reportParams())).json()) as SetReportBody
+  }
+
+  it('a legacy round keeps the five viewports, the column map and the old total', async () => {
+    const body = await report({ viewports: null })
+    expect(body.round.viewports).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+    expect(body.round.legacyViewports).toBe(true)
+    expect(body.totals).toMatchObject({ ticksDone: 2, ticksTotal: 2 * 5 * 1 })
+    expect(body.pages[0].ticks).toEqual({ xl: true, desktop: true, tablet: false, mobile_l: false, mobile_p: false })
+    expect(body.pages[1].ticks).toEqual({ xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false })
+    expect(body.viewportDefs.map(d => d.key)).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+  })
+
+  it('a legacy round ignores a Chromium row on a legacy key', async () => {
+    tickRows = [{ roundPageId: 'rp_2', browser: 'chromium', viewport: 'xl', ticked: 1 }]
+    const body = await report({ viewports: null })
+    expect(body.pages[1].ticks.xl).toBe(false)
+    expect(body.totals.ticksDone).toBe(2)
+  })
+
+  it('a core round counts by its set size and reads Chromium ticks from rows', async () => {
+    tickRows = [
+      { roundPageId: 'rp_1', browser: 'chromium', viewport: 'laptop_m', ticked: 1 },
+      { roundPageId: 'rp_1', browser: 'chromium', viewport: 'phone_s', ticked: 1 },
+      { roundPageId: 'rp_2', browser: 'chromium', viewport: 'laptop_m', ticked: 0 },
+      { roundPageId: 'rp_1', browser: 'chromium', viewport: 'desktop_qhd', ticked: 1 },
+      { roundPageId: 'rp_1', browser: 'chromium', viewport: 'xl', ticked: 1 },
+    ]
+    const body = await report({ viewports: JSON.stringify(CORE) })
+    expect(body.round.viewports).toEqual(CORE)
+    expect(body.round.legacyViewports).toBe(false)
+    expect(body.totals).toMatchObject({ ticksDone: 2, ticksTotal: 2 * 11 * 1 })
+    expect(Object.keys(body.pages[0].ticks)).toEqual(CORE)
+    expect(body.pages[0].ticks.laptop_m).toBe(true)
+    expect(body.pages[0].ticks.phone_s).toBe(true)
+    expect(body.pages[0].ticks.desktop_fhd).toBe(false)
+    expect(body.pages[0].ticks).not.toHaveProperty('xl')
+    expect(body.pages[1].ticks.laptop_m).toBe(false)
+  })
+
+  it('totals scale with browsers and the set across a three browser round', async () => {
+    tickRows = [
+      { roundPageId: 'rp_1', browser: 'firefox', viewport: 'phone_m', ticked: 1 },
+      { roundPageId: 'rp_2', browser: 'webkit', viewport: 'laptop_m', ticked: 1 },
+      { roundPageId: 'rp_2', browser: 'chromium', viewport: 'laptop_m', ticked: 1 },
+    ]
+    const body = await report({ viewports: JSON.stringify(['phone_m', 'laptop_m']), browsers: '["chromium","firefox","webkit"]' })
+    expect(body.totals).toMatchObject({ ticksDone: 3, ticksTotal: 2 * 2 * 3 })
+    expect(body.pages[0].browserTicks.firefox.phone_m).toBe(true)
+    expect(body.pages[1].browserTicks.webkit.laptop_m).toBe(true)
+  })
+
+  it('queries the tick rows for a Chrome only round', async () => {
+    tickRows = [{ roundPageId: 'rp_1', browser: 'chromium', viewport: 'laptop_m', ticked: 1 }]
+    const body = await report({ viewports: JSON.stringify(['laptop_m']), browsers: '["chromium"]' })
+    expect(body.round.browsers).toEqual(['chromium'])
+    expect(body.pages[0].ticks).toEqual({ laptop_m: true })
+    expect(body.totals).toMatchObject({ ticksDone: 1, ticksTotal: 2 })
+  })
+
+  it('returns the viewport definitions of the set with a Webflow breakpoint each', async () => {
+    const body = await report({ viewports: JSON.stringify(['phone_m', 'laptop_m']) })
+    expect(body.round.viewports).toEqual(['phone_m', 'laptop_m'])
+    expect(body.viewportDefs.map(d => [d.key, d.label, d.width, d.height])).toEqual([
+      ['phone_m', 'Phone M', 393, 852],
+      ['laptop_m', 'Laptop M', 1440, 780],
+    ])
+    for (const d of body.viewportDefs) expect(d.webflowBreakpoint.length).toBeGreaterThan(0)
+    expect(body.viewportDefs[1].webflowBreakpoint).toContain('1440')
+  })
+
+  it('names the viewport of each comment', async () => {
+    const base = { selector: 'h1', ox: 0.5, oy: 0.5, elementTag: 'h1', elementText: 'Hi', authorName: 'Liam', updatedAt: '', resolvedAt: null, status: 'open', roundPageId: 'rp_1', elementContext: null, browser: 'chromium' }
+    commentRows = [
+      { comment: { ...base, id: 'c_a', body: 'A', viewport: 'laptop_m', createdAt: '2026-10-20T01:00:00.000Z' } },
+      { comment: { ...base, id: 'c_b', body: 'B', viewport: 'desktop', createdAt: '2026-10-20T02:00:00.000Z' } },
+      { comment: { ...base, id: 'c_c', body: 'C', viewport: 'mystery', createdAt: '2026-10-20T03:00:00.000Z' } },
+    ]
+    const body = await report({ viewports: JSON.stringify(CORE) })
+    expect(body.comments.map(c => [c.viewport, c.viewportLabel])).toEqual([
+      ['laptop_m', 'Laptop M'],
+      ['desktop', 'Desktop'],
+      ['mystery', 'mystery'],
+    ])
+  })
+})

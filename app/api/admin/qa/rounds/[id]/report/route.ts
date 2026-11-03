@@ -9,7 +9,16 @@ import { loadRound } from '@/lib/qa/server'
 import { numberComments, rowToComment } from '@/lib/qa/comments'
 import { reportCategoryTotals } from '@/lib/qa/category-summary'
 import { countTicks, mergeBrowserTicks, parseRoundBrowsers } from '@/lib/qa/browsers'
-import { QA_VIEWPORT_KEYS, type QaPageCounts, type QaPageStatus, type QaViewportKey } from '@/lib/qa/types'
+import {
+  isLegacyRoundViewports,
+  parseRoundViewports,
+  viewportDefsFor,
+  viewportLabel,
+  webflowBreakpointFor,
+  type QaPageCounts,
+  type QaPageStatus,
+  type QaViewportKey,
+} from '@/lib/qa/types'
 
 type Drizzle = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RoundPageRow = typeof schema.qaRoundPages.$inferSelect
@@ -43,7 +52,14 @@ function countsFor(row: RoundPageRow): QaPageCounts | null {
   }
 }
 
-/** Round report data: totals across every page plus the per-page checklist. */
+/**
+ * Round report data: totals across every page plus the per-page checklist.
+ * The round's viewport set drives every count: `round.viewports` (resolved keys),
+ * `round.legacyViewports` and the top level `viewportDefs` describe it, ticksTotal is
+ * pages x set size x browsers, and each page's `browserTicks` covers the set. A page's `ticks`
+ * is the Chromium map: the five vp_* columns for a legacy round (viewports NULL), the
+ * Chromium rows over the set for any other round.
+ */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { orgId, userId } = await getRequestAuth(req)
   if (!isTahiAdmin(orgId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -71,30 +87,33 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .orderBy(asc(schema.qaRoundPages.sortOrder))
 
   const browsers = parseRoundBrowsers(round.browsers)
-  // Firefox and WebKit ticks for the whole round in one query (one bound parameter).
-  const tickRows = browsers.some(b => b !== 'chromium')
-    ? await database
-      .select({
-        roundPageId: schema.qaBrowserTicks.roundPageId,
-        browser: schema.qaBrowserTicks.browser,
-        viewport: schema.qaBrowserTicks.viewport,
-        ticked: schema.qaBrowserTicks.ticked,
-      })
-      .from(schema.qaBrowserTicks)
-      .innerJoin(schema.qaRoundPages, eq(schema.qaBrowserTicks.roundPageId, schema.qaRoundPages.id))
-      .where(eq(schema.qaRoundPages.roundId, round.id))
-    : []
-  const browserTicks = mergeBrowserTicks(rows, tickRows, browsers)
+  const viewports = parseRoundViewports(round.viewports)
+  const legacyViewports = isLegacyRoundViewports(round.viewports)
+  // Every tick row for the whole round in one query (one bound parameter); the merge applies the round's set.
+  const tickRows = await database
+    .select({
+      roundPageId: schema.qaBrowserTicks.roundPageId,
+      browser: schema.qaBrowserTicks.browser,
+      viewport: schema.qaBrowserTicks.viewport,
+      ticked: schema.qaBrowserTicks.ticked,
+    })
+    .from(schema.qaBrowserTicks)
+    .innerJoin(schema.qaRoundPages, eq(schema.qaBrowserTicks.roundPageId, schema.qaRoundPages.id))
+    .where(eq(schema.qaRoundPages.roundId, round.id))
+  const browserTicks = mergeBrowserTicks(rows, tickRows, browsers, viewports)
 
   const pages = rows.map(row => {
-    // Chromium ticks, kept as they were before browsers existed; browserTicks has every browser of the round.
-    const ticks: Partial<Record<QaViewportKey, boolean>> = {
-      xl: row.vpXl === 1,
-      desktop: row.vpDesktop === 1,
-      tablet: row.vpTablet === 1,
-      mobile_l: row.vpMobileL === 1,
-      mobile_p: row.vpMobileP === 1,
-    }
+    // The Chromium map. A legacy round keeps exactly the five vp_* columns it always had; any other
+    // round reads Chromium from the merged rows over its set. browserTicks has every browser of the round.
+    const ticks: Partial<Record<QaViewportKey, boolean>> = legacyViewports
+      ? {
+        xl: row.vpXl === 1,
+        desktop: row.vpDesktop === 1,
+        tablet: row.vpTablet === 1,
+        mobile_l: row.vpMobileL === 1,
+        mobile_p: row.vpMobileP === 1,
+      }
+      : (browserTicks.get(row.id)?.chromium ?? {})
     return {
       id: row.id,
       path: row.path,
@@ -109,12 +128,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const sumCounts = (pick: (c: QaPageCounts) => number) =>
     pages.reduce((total, p) => total + (p.counts ? pick(p.counts) : 0), 0)
-  const ticksDone = pages.reduce((total, p) => total + countTicks(p.browserTicks, browsers), 0)
+  const ticksDone = pages.reduce((total, p) => total + countTicks(p.browserTicks, browsers, viewports), 0)
 
   const totals = {
     pages: pages.length,
     ticksDone,
-    ticksTotal: pages.length * QA_VIEWPORT_KEYS.length * browsers.length,
+    ticksTotal: pages.length * viewports.length * browsers.length,
     pass: pages.filter(p => p.status === 'pass').length,
     fail: pages.filter(p => p.status === 'fail').length,
     untested: pages.filter(p => p.status === 'untested').length,
@@ -153,6 +172,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       roundPageId: c.roundPageId,
       path: pagePath.get(c.roundPageId) ?? null,
       viewport: c.viewport,
+      viewportLabel: viewportLabel(c.viewport),
       browser: rowToComment(c).browser,
       browserLabel: rowToComment(c).browserLabel,
       n,
@@ -178,6 +198,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       target: round.target,
       status: round.status,
       browsers,
+      viewports,
+      legacyViewports,
       createdAt: round.createdAt,
       closedAt: round.closedAt,
       siteChecksAt: round.siteChecksAt,
@@ -191,6 +213,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       liveUrl: site.liveUrl,
     },
     orgName: org?.name ?? null,
+    viewportDefs: viewportDefsFor(viewports).map(d => ({ ...d, webflowBreakpoint: webflowBreakpointFor(d.key) })),
     totals,
     categories,
     pages,
