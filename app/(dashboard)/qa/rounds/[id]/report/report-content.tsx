@@ -46,7 +46,7 @@ const SITE_CHECK_LABELS: Record<string, string> = {
   favicon: 'Favicon',
 }
 
-const TICK_LABELS: Record<QaViewportKey, string> = {
+const TICK_LABELS: Partial<Record<QaViewportKey, string>> = {
   xl: 'XL',
   desktop: 'Desktop',
   tablet: 'Tablet',
@@ -206,7 +206,7 @@ function reportBrowsers(data: ReportData): QaBrowserKey[] {
 }
 
 /** One page's ticks for one browser. */
-function ticksOf(page: ReportPage, browser: QaBrowserKey): Record<QaViewportKey, boolean> {
+function ticksOf(page: ReportPage, browser: QaBrowserKey): Partial<Record<QaViewportKey, boolean>> {
   return page.browserTicks?.[browser] ?? (browser === 'chromium' ? page.ticks : { xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false })
 }
 

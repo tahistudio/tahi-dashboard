@@ -94,7 +94,7 @@ const WIDE_SECTION_STYLE: CSSProperties = {
   zIndex: QA_WIDE_Z_INDEX,
 }
 
-function emptyStates(): Record<QaViewportKey, QaScanState> {
+function emptyStates(): Partial<Record<QaViewportKey, QaScanState>> {
   return { xl: 'loading', desktop: 'loading', tablet: 'loading', mobile_l: 'loading', mobile_p: 'loading' }
 }
 
@@ -275,7 +275,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   const [detail, setDetail] = useState<QaRoundPageDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
-  const [scanStates, setScanStates] = useState<Record<QaViewportKey, QaScanState>>(emptyStates)
+  const [scanStates, setScanStates] = useState<Partial<Record<QaViewportKey, QaScanState>>>(emptyStates)
   const framesRef = useRef<Partial<Record<QaViewportKey, HTMLIFrameElement | null>>>({})
   // Highlights waiting for their frame to load or scan, one per viewport.
   const pendingHighlights = useRef<Partial<Record<QaViewportKey, string>>>({})

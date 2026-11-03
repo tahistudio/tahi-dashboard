@@ -66,7 +66,7 @@ export function parseBrowserInput(value: unknown): QaBrowserKey[] | null {
 }
 
 /** Ticks for one browser on one round page. */
-export type QaBrowserTickMap = Record<QaViewportKey, boolean>
+export type QaBrowserTickMap = Partial<Record<QaViewportKey, boolean>>
 
 export function emptyTickMap(): QaBrowserTickMap {
   return { xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false }

@@ -15,6 +15,8 @@ import {
   QA_VIEWPORT_KEYS,
   browserLabel,
   isQaBrowserKey,
+  viewportDef,
+  webflowBreakpointFor,
   type QaBrowserKey,
   type QaComment,
   type QaCommentDetail,
@@ -271,7 +273,7 @@ export function parseStoredContext(text: string | null): QaElementContext | null
 
 // Detail shape for MCP and the round comments endpoint
 
-const WEBFLOW_BREAKPOINTS: Record<QaViewportKey, string> = {
+const WEBFLOW_BREAKPOINTS: Partial<Record<QaViewportKey, string>> = {
   xl: '1920px breakpoint if enabled, else 1440px, else 1280px, else Desktop (base)',
   desktop: '1440px breakpoint if enabled, else 1280px, else Desktop (base)',
   tablet: 'Tablet (991px and below)',
@@ -281,7 +283,17 @@ const WEBFLOW_BREAKPOINTS: Record<QaViewportKey, string> = {
 
 export function viewportInfoFor(key: QaViewportKey): QaViewportInfo {
   const vp = QA_VIEWPORTS.find(v => v.key === key) ?? QA_VIEWPORTS[1]
-  return { key: vp.key, label: vp.label, width: vp.width, height: vp.height, webflowBreakpoint: WEBFLOW_BREAKPOINTS[vp.key] }
+  const def = viewportDef(vp.key) ?? vp
+  return {
+    key: vp.key,
+    label: vp.label,
+    width: vp.width,
+    height: vp.height,
+    dpr: def.dpr,
+    tier: def.tier,
+    kind: def.kind,
+    webflowBreakpoint: WEBFLOW_BREAKPOINTS[vp.key] ?? webflowBreakpointFor(vp.key),
+  }
 }
 
 /** The site origin plus the path, or null when the site has no usable URL for the target. */

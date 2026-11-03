@@ -87,7 +87,7 @@ describe('viewportOrphaned', () => {
 })
 
 describe('allViewportsScanned and the short labels', () => {
-  const states = (over: Partial<Record<QaViewportKey, QaScanState>> = {}): Record<QaViewportKey, QaScanState> => ({
+  const states = (over: Partial<Record<QaViewportKey, QaScanState>> = {}): Partial<Record<QaViewportKey, QaScanState>> => ({
     xl: 'scanned', desktop: 'scanned', tablet: 'scanned', mobile_l: 'scanned', mobile_p: 'scanned', ...over,
   })
 

@@ -38,7 +38,7 @@ export function viewportOrphaned(singleFrame: boolean, tied: QaViewportKey | nul
 }
 
 /** True when every viewport has a stored scan for the page, so the "scan the others" hint can go. */
-export function allViewportsScanned(states: Readonly<Record<QaViewportKey, QaScanState>>): boolean {
+export function allViewportsScanned(states: Readonly<Partial<Record<QaViewportKey, QaScanState>>>): boolean {
   return QA_VIEWPORTS.every(v => states[v.key] === 'scanned')
 }
 
@@ -47,14 +47,14 @@ export function allViewportsScanned(states: Readonly<Record<QaViewportKey, QaSca
  * browser that is not part of the round) stores no scans, so the hint would mislead; and it goes
  * once every viewport already has a stored scan.
  */
-export function showInspectScanNote(readOnly: boolean, states: Readonly<Record<QaViewportKey, QaScanState>>): boolean {
+export function showInspectScanNote(readOnly: boolean, states: Readonly<Partial<Record<QaViewportKey, QaScanState>>>): boolean {
   return !readOnly && !allViewportsScanned(states)
 }
 
 export const INSPECT_SCAN_NOTE = 'Inspect scans the device you are viewing. Switch device, or use Overview, to scan the others.'
 
 /** The one short-code map for viewport names: frame label bars and the device switchers use it. */
-export const VIEWPORT_SHORT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
+export const VIEWPORT_SHORT_LABEL: Partial<Record<QaViewportKey, string>> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
 
 /**
  * Whether the workspace mounts exactly one frame. True in Inspect (always) and in the narrow
@@ -83,7 +83,7 @@ export interface InspectDeviceOption {
 export function inspectDeviceOptions(availableWidthPx: number): InspectDeviceOption[] {
   return QA_VIEWPORTS.map(v => {
     const title = `${v.label} (${v.width}px)`
-    if (availableWidthPx > 0 && availableWidthPx < DEVICE_SHORT_LABEL_BELOW_PX) return { value: v.key, label: VIEWPORT_SHORT_LABEL[v.key], title }
+    if (availableWidthPx > 0 && availableWidthPx < DEVICE_SHORT_LABEL_BELOW_PX) return { value: v.key, label: VIEWPORT_SHORT_LABEL[v.key] ?? v.shortLabel, title }
     if (availableWidthPx >= DEVICE_WIDTH_LABEL_FROM_PX) return { value: v.key, label: `${v.label} ${v.width}`, title }
     return { value: v.key, label: v.label, title }
   })

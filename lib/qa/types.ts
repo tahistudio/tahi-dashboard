@@ -3,17 +3,27 @@
  * workers/qa-view, so nothing here may import Next.js, D1 or Node APIs.
  */
 
-export const QA_VIEWPORTS = [
-  { key: 'xl', label: 'XL', width: 1920, height: 1080 },
-  { key: 'desktop', label: 'Desktop', width: 1440, height: 900 },
-  { key: 'tablet', label: 'Tablet', width: 768, height: 1024 },
-  { key: 'mobile_l', label: 'Mobile L', width: 425, height: 860 },
-  { key: 'mobile_p', label: 'Mobile P', width: 375, height: 812 },
-] as const
+import {
+  QA_LEGACY_VIEWPORT_KEYS,
+  QA_VIEWPORT_REGISTRY,
+  type QaViewportDef,
+  type QaViewportKey,
+  type QaViewportKind,
+  type QaViewportTier,
+} from './viewports'
 
-export type QaViewportKey = (typeof QA_VIEWPORTS)[number]['key']
-export const QA_VIEWPORT_KEYS: readonly QaViewportKey[] = QA_VIEWPORTS.map(v => v.key)
-/** The viewport whose scan supplies the non-layout results (SEO, links, a11y). */
+export * from './viewports'
+
+const LEGACY_DEFS: readonly QaViewportDef[] = QA_VIEWPORT_REGISTRY.filter(v => v.tier === 'legacy')
+
+/** @deprecated removed in T13 */
+export const QA_VIEWPORTS: readonly QaViewportDef[] = LEGACY_DEFS
+/** @deprecated removed in T13 */
+export const QA_VIEWPORT_KEYS: readonly QaViewportKey[] = QA_LEGACY_VIEWPORT_KEYS
+/**
+ * The viewport whose scan supplies the non-layout results (SEO, links, a11y).
+ * @deprecated removed in T13
+ */
 export const QA_PRIMARY_VIEWPORT: QaViewportKey = 'desktop'
 
 /**
@@ -248,6 +258,9 @@ export interface QaViewportInfo {
   label: string
   width: number
   height: number
+  dpr: number
+  tier: QaViewportTier
+  kind: QaViewportKind
   webflowBreakpoint: string
 }
 
@@ -318,6 +331,7 @@ export interface QaViewTokenPayload {
   exp: number
 }
 
+/** @deprecated removed in T13 */
 export function viewportByWidth(width: number): QaViewportKey | null {
   const hit = QA_VIEWPORTS.find(v => v.width === width)
   return hit ? hit.key : null

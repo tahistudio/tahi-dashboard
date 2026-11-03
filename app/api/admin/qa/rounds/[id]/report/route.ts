@@ -88,7 +88,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const pages = rows.map(row => {
     // Chromium ticks, kept as they were before browsers existed; browserTicks has every browser of the round.
-    const ticks: Record<QaViewportKey, boolean> = {
+    const ticks: Partial<Record<QaViewportKey, boolean>> = {
       xl: row.vpXl === 1,
       desktop: row.vpDesktop === 1,
       tablet: row.vpTablet === 1,
