@@ -29,7 +29,9 @@ import {
 import { QA_RAIL_COLLAPSE_REM, QA_SINGLE_FRAME_REM, narrowerThanRem, useWorkspaceWidth } from './use-workspace-width'
 import { useRound, type QaPagePatch } from './use-round'
 import { useActiveBrowser } from './use-active-browser'
-import { useViewToken } from './use-view-token'
+import { fetchFreshViewBaseUrl, useViewToken } from './use-view-token'
+import { useViewMode } from './use-view-mode'
+import { defaultSingleFrameDevice, isTokenFresh, showsSingleFrame, viewportOrphaned, viewAtFullSizeFeatures, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
 import { useScanAll, SCAN_ALL_VIEWPORTS } from './scan-all'
 import { PageRail, filterPages, type QaRailFilter } from './page-rail'
 import { ViewportStrip } from './viewport-strip'
@@ -52,8 +54,10 @@ import {
   parsePickMessage,
   parsePinClickMessage,
   viewportForSource,
+  visibleFrameRect,
   type CommentView,
   type NumberedComment,
+  type RectLike,
 } from './comments-helpers'
 import { RefreshButton, ReloadFramesButton } from './refresh-button'
 import { CommentViewControl } from './comment-view-control'
@@ -73,7 +77,6 @@ const LATE_PINS_MS = 2000
 const FOCUS_AFTER_PINS_MS = 400
 /** Above the wide workspace (40), below the SlideOver scrim (60). */
 const COMPOSER_Z_INDEX = 55
-const MOBILE_DEFAULT: QaViewportKey = 'desktop'
 const WIDE_STORAGE_KEY = 'tahi-qa-wide'
 /**
  * Stacking level of the wide workspace. The dashboard chrome (sidebar, top nav) sets
@@ -102,6 +105,18 @@ function viewerOrigin(baseUrl: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * The part of a frame that is on screen: cut to the Inspect scroll box it sits in (marked
+ * data-qa-clip) and to the window, so the comment card lands over what the user can see.
+ */
+function frameVisibleRect(frame: HTMLElement): RectLike {
+  const box = frame.closest('[data-qa-clip]')
+  return visibleFrameRect(frame.getBoundingClientRect(), [
+    box ? box.getBoundingClientRect() : null,
+    { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
+  ])
 }
 
 /** Upstream page URL on the site (staging or live) for the Open page link. */
@@ -222,7 +237,15 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   const [railChoice, setRailChoice] = useState<boolean | null>(null)
   const railCollapsed = railChoice ?? narrowerThanRem(workspaceWidth, QA_RAIL_COLLAPSE_REM)
   const [railSheetOpen, setRailSheetOpen] = useState(false)
-  const [mobileViewport, setMobileViewport] = useState<QaViewportKey>(MOBILE_DEFAULT)
+  // Inspect (one frame at scale 1, the default) or Overview (all frames scaled). Remembered across visits.
+  const { mode: viewMode, setMode: setViewMode } = useViewMode()
+  // Inspect and the narrow layout mount exactly one frame; mobileViewport (despite the name) is which one.
+  const oneFrame = showsSingleFrame(isMobile, viewMode)
+  // The device the user picked, or null to follow the default for the layout (Mobile P in the narrow Inspect layout).
+  const [deviceChoice, setDeviceChoice] = useState<QaViewportKey | null>(null)
+  const mobileViewport = deviceChoice ?? defaultSingleFrameDevice(isMobile, viewMode)
+  // A view token fetched on demand by View at 100% when the hook's copy was about to expire.
+  const openTokenRef = useRef<{ baseUrl: string; expiresAtMs: number } | null>(null)
   const [issuesOpen, setIssuesOpen] = useState(true)
   // Wide mode is the user's saved choice; it only takes effect on the desktop layout.
   const [wide, setWide] = useState(false)
@@ -435,6 +458,13 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     if (!keepComposer) setComposer(null)
   }, [postToFrames, frameLoaded])
 
+  // The shown device can change without a click (rotating a phone across the narrow breakpoint swaps the
+  // default device). Comment mode or an open card tied to a frame that is no longer mounted is cleared.
+  useEffect(() => {
+    if (viewportOrphaned(oneFrame, commentViewportRef.current, mobileViewport)) applyCommentViewport(null)
+    if (viewportOrphaned(oneFrame, composerRef.current?.viewport ?? null, mobileViewport)) setComposer(null)
+  }, [oneFrame, mobileViewport, applyCommentViewport])
+
   // A new page reloads every frame, so comment mode, the composer and the selection start clean.
   useEffect(() => {
     applyCommentViewport(null)
@@ -545,7 +575,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
         // Only the frame in comment mode counts, on an open round, for the page on screen.
         if (latest.current.readOnly || commentViewportRef.current !== key) return
         if (comparablePath(pick.url) !== comparablePath(latest.current.path)) return
-        const rect = framesRef.current[key]?.getBoundingClientRect()
+        const frameEl = framesRef.current[key]
+        const rect = frameEl ? frameVisibleRect(frameEl) : null
         if (!rect) return
         if (pickAction(composerRef.current !== null, composerDraft.current) === 'ignore') {
           setComposerPulse(n => n + 1)
@@ -575,7 +606,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     if (!composerViewport) return
     function reposition() {
       if (!composerViewport) return
-      const rect = framesRef.current[composerViewport]?.getBoundingClientRect()
+      const frameEl = framesRef.current[composerViewport]
+      const rect = frameEl ? frameVisibleRect(frameEl) : null
       if (!rect) return
       const next = composerPlacement(rect, window.innerWidth, window.innerHeight)
       setComposer(c => (c && c.viewport === composerViewport && (c.left !== next.left || c.top !== next.top || c.width !== next.width) ? { ...c, ...next } : c))
@@ -597,14 +629,63 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
 
   /** Switches the single frame shown on small screens; the frame in comment mode may be the one leaving. */
   function changeMobileViewport(key: QaViewportKey) {
-    setMobileViewport(key)
+    setDeviceChoice(key)
     if (commentViewportRef.current && commentViewportRef.current !== key) applyCommentViewport(null)
+  }
+
+  /**
+   * Switches between Inspect and Overview. Every frame remounts, so an open comment card has nothing to
+   * sit on, and comment mode on a frame that Inspect will not show is switched off.
+   */
+  function changeViewMode(next: QaViewMode) {
+    if (next === viewMode) return
+    setComposer(null)
+    const deviceAfter = deviceChoice ?? defaultSingleFrameDevice(isMobile, next)
+    if (viewportOrphaned(showsSingleFrame(isMobile, next), commentViewportRef.current, deviceAfter)) applyCommentViewport(null)
+    setViewMode(next)
+  }
+
+  /**
+   * Opens the page on screen at its true size through the viewer: a normal tab for the wide frames, a
+   * window sized to the device for the tablet and phone frames (the OS may clamp that size). The cached
+   * view token is used while it has more than a minute left, so the window opens inside the click.
+   * Otherwise a fresh token is requested first. The URL carries the token and is only ever handed to
+   * window.open: it is not logged, shown, stored or put in a toast. noopener and noreferrer always apply.
+   */
+  async function openFullSize(viewportKey: QaViewportKey) {
+    const path = selectedRow?.path
+    const viewport = QA_VIEWPORTS.find(v => v.key === viewportKey)
+    if (!path || !viewport) return
+    let base: string | null = baseUrl && isTokenFresh(viewer.expiresAtMs, Date.now()) ? baseUrl : null
+    // A token fetched by an earlier click, kept so a second click can open the window synchronously.
+    const kept = openTokenRef.current
+    if (!base && kept && isTokenFresh(kept.expiresAtMs, Date.now())) base = kept.baseUrl
+    let fetchedFirst = false
+    if (!base) {
+      fetchedFirst = true
+      const fresh = await fetchFreshViewBaseUrl(siteId, round.target)
+      if (!fresh.ok) {
+        showToast(fresh.message, 'error')
+        return
+      }
+      openTokenRef.current = { baseUrl: fresh.baseUrl, expiresAtMs: fresh.expiresAtMs }
+      base = fresh.baseUrl
+    }
+    const url = viewAtFullSizeUrl(base, path)
+    if (!url) {
+      showToast('Could not build the page link.', 'error')
+      return
+    }
+    window.open(url, '_blank', viewAtFullSizeFeatures(viewport))
+    // After an async token fetch the browser may have dropped the click's permission to open a window,
+    // and a blocked noopener window cannot be detected. Say so; the next click uses the new token.
+    if (fetchedFirst) showToast('If nothing opened, click View at 100% again', 'info')
   }
 
   function showIssue(issue: QaIssue) {
     if (!issue.selector) return
     const key: QaViewportKey = issue.viewport ?? 'desktop'
-    if (isMobile && mobileViewport !== key) {
+    if (oneFrame && mobileViewport !== key) {
       // The other frame has not loaded yet; queue until it loads or scans.
       pendingHighlights.current[key] = issue.selector
       changeMobileViewport(key)
@@ -616,7 +697,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   function showComment(comment: NumberedComment) {
     setSelectedCommentId(comment.id)
     const key = comment.viewport
-    if (isMobile && mobileViewport !== key) {
+    if (oneFrame && mobileViewport !== key) {
       // The frame for that viewport is not mounted yet; focus the pin once it loads.
       pendingFocus.current[key] = comment.id
       changeMobileViewport(key)
@@ -1071,7 +1152,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
                 onChange={changeCommentView}
                 roundBrowsers={roundBrowsers}
                 activeBrowser={activeBrowser}
-                viewports={isMobile ? [mobileViewport] : QA_VIEWPORTS.map(v => v.key)}
+                viewports={oneFrame ? [mobileViewport] : QA_VIEWPORTS.map(v => v.key)}
                 shown={viewCount.shown}
                 total={viewCount.total}
               />
@@ -1114,6 +1195,9 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               onCommentToggle={toggleCommentViewport}
               onExpandedChange={handleExpandedChange}
               reloadKey={frameReload}
+              viewMode={viewMode}
+              onViewModeChange={changeViewMode}
+              onViewFull={key => void openFullSize(key)}
             />
           ) : (
             <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.875rem' }}>No pages in this round yet.</p>

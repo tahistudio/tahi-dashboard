@@ -1452,6 +1452,40 @@ scheduled; each needs a scope before building.
   returns per-category totals. Open before [x]: apply 0119 on production
   BEFORE the push, live smoke, 375px, dark mode. The SQA.5 plan now reserves
   0120 for its qa_via migration.
+- [ ] SQA.7 - [FE] Site QA Inspect mode and View at 100% (Liam, 2026-11-03: a
+  non-integer frame scale such as 0.864127 puts element edges between device
+  pixels, so a hairline shows that real Chrome does not; only scale 1 is
+  seam-free). Built and committed on a worktree branch, not merged: Inspect mode (default, one
+  device frame at scale 1 with no transform, sideways scroll in its own box,
+  device switcher, remembered in localStorage `tahi-qa-view-mode`), the old
+  all-frames layout kept as Overview with a "Scaled to fit" note, and a "View
+  at 100%" button on every frame header that opens the page in a new tab through
+  the proxy with a fresh token (a device-sized popup window for frames under
+  1024px, a normal tab otherwise). The Inspect comment card now sits over the
+  visible part of a frame wider than its scroll box. qa-view worker: top-level
+  loads (`Sec-Fetch-Dest: document`) get no scanner and a CSP `sandbox` equal to
+  the iframe's; a missing header keeps the old framed behaviour. No schema
+  change; the five viewports are unchanged. DEPLOY: workers/qa-view and
+  workers/mcp-server auto-deploy from GitHub Actions on push to main
+  (qa-view-deploy.yml, mcp-worker-deploy.yml), so the worker change ships with
+  the push; the dashboard and qa-view deploys run in parallel and can race.
+  View at 100% is safe either way because the dashboard never depends on the
+  worker change (before the worker lands the tab is unsandboxed with the
+  scanner injected, harmless). Worker hardening in the same change: static
+  pages get a locked CSP, no-referrer and nosniff; the "leaves the site" page
+  links only http(s) Locations; `<meta name="referrer">` is stripped from
+  proxied pages; the service-worker refusal runs before the scanner route;
+  nosniff on the scanner and proxied responses. Open before [x]: push, live
+  render check (Inspect at 1920 and 375, DevTools shows no transform, Overview
+  note, View at 100% tab and popup, tab sandbox: alert() is blocked, and the
+  "This link leaves the site" link, clicked from inside a frame, opens a page
+  that loads and runs its scripts), dark mode, 375px.
+  Backlog (referrer): strip per-element `referrerpolicy` attributes in the
+  qa-view HTMLRewriter so embeds on a proxied page cannot leak the view token
+  URL (the `<meta name="referrer">` strip is done).
+  Backlog (M1): all tokens share one qa-view origin, so one client page's
+  cookies and localStorage are visible to another's (allow-same-origin on the
+  iframe). Give qa-view a per-site origin (for example a subdomain per site).
 - [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
   build Next 15 since its support window ended (21 Oct 2026); the first
   dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build
