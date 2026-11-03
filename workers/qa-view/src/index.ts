@@ -1,7 +1,7 @@
 import scannerJs from './generated/scanner.bundle.js'
 import { verifyViewToken } from '../../../lib/qa/token'
 import { isSafePublicUrl } from '../../../lib/qa/ssrf'
-import { baseHrefFor, classifyRedirect, isTopLevelDocument, rewriteHref, scrubResponseHeaders, upstreamUrlFor } from '../../../lib/qa/proxy-rules'
+import { baseHrefFor, classifyRedirect, escapeHtml, isReferrerMetaName, isTopLevelDocument, leavesSiteBody, rewriteHref, scrubResponseHeaders, staticPageHeaders, upstreamUrlFor } from '../../../lib/qa/proxy-rules'
 
 interface Env { QA_VIEW_SECRET: string }
 
@@ -10,18 +10,17 @@ const UPSTREAM_TIMEOUT_MS = 20_000
 
 function page(status: number, title: string, body: string): Response {
   const html = `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font:14px/1.5 system-ui;padding:2rem;color:#121A0F"><h1 style="font-size:1rem">${title}</h1><p>${body}</p></body>`
-  return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } })
+  return new Response(html, { status, headers: staticPageHeaders() })
 }
-
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 
 const worker = {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url)
-    if (url.pathname === '/__qa/scanner.js') {
-      return new Response(scannerJs, { headers: { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'public, max-age=300' } })
-    }
+    // Refuse service-worker script fetches first, so no route (the scanner included) can serve one.
     if (req.headers.get('service-worker') === 'script') return page(403, 'Blocked', 'Service workers are not allowed on the QA viewer.')
+    if (url.pathname === '/__qa/scanner.js') {
+      return new Response(scannerJs, { headers: { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'public, max-age=300', 'x-content-type-options': 'nosniff' } })
+    }
     const m = url.pathname.match(/^\/v\/([^/]+)(\/.*)?$/)
     if (!m) return page(404, 'Not found', 'This is the Tahi QA viewer.')
     if (req.method !== 'GET' && req.method !== 'HEAD') return page(405, 'Read only', 'The QA viewer only loads pages.')
@@ -48,7 +47,7 @@ const worker = {
     if (upstream.status >= 300 && upstream.status < 400 && location) {
       const d = classifyRedirect(location, upstreamUrl, payload.o, proxyBase)
       if (d.kind === 'internal') return new Response(null, { status: 302, headers: { location: d.location, 'cache-control': 'no-store' } })
-      return page(200, 'This link leaves the site', `It redirects to <a href="${escapeHtml(d.location)}" target="_blank" rel="noopener">${escapeHtml(d.location)}</a>.`)
+      return page(200, 'This link leaves the site', leavesSiteBody(d.location))
     }
 
     // A top-level load (the dashboard's "View at 100%" tab) has no dashboard parent to talk to, so it gets
@@ -67,6 +66,8 @@ const worker = {
       // Fallback for documents with no <head>: inject at the start of <body>.
       .on('body', { element(el) { if (!headSeen) { headSeen = true; el.prepend(baseTag + scannerTag, { html: true }) } } })
       .on('meta[http-equiv]', { element(el) { if ((el.getAttribute('http-equiv') ?? '').toLowerCase() === 'content-security-policy') el.remove() } })
+      // A page-level referrer policy would override our header and could send the token in the URL to third parties.
+      .on('meta[name]', { element(el) { if (isReferrerMetaName(el.getAttribute('name'))) el.remove() } })
       .on('a[href]', { element(el) {
         const next = rewriteHref(el.getAttribute('href') ?? '', upstreamUrl, payload.o, proxyBase)
         if (next) el.setAttribute('href', next)

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   baseHrefFor, rewriteHref, fromProxyUrl, upstreamUrlFor, scrubResponseHeaders, classifyRedirect,
   isTopLevelDocument, QA_FRAME_SANDBOX,
+  staticPageHeaders, leavesSiteBody, isHttpUrl, isReferrerMetaName,
 } from '@/lib/qa/proxy-rules'
 
 const UP = 'https://acme.webflow.io'
@@ -162,6 +163,77 @@ describe('scrubResponseHeaders by load type', () => {
     for (const name of ['cache-control', 'x-robots-tag', 'referrer-policy', 'permissions-policy', 'content-type', 'x-frame-options', 'set-cookie']) {
       expect(top.get(name)).toBe(framed.get(name))
     }
+  })
+})
+
+describe('static page headers', () => {
+  it('lock the worker pages down: no sources, sandboxed, no referrer, no sniffing', () => {
+    const h = staticPageHeaders()
+    expect(h['content-security-policy']).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    expect(h['referrer-policy']).toBe('no-referrer')
+    expect(h['x-content-type-options']).toBe('nosniff')
+  })
+  it('keep what the pages already sent', () => {
+    const h = staticPageHeaders()
+    expect(h['content-type']).toBe('text/html; charset=utf-8')
+    expect(h['cache-control']).toBe('no-store')
+    expect(h['x-robots-tag']).toBe('noindex')
+  })
+})
+
+describe('leavesSiteBody', () => {
+  it('links an http or https Location', () => {
+    expect(leavesSiteBody('https://other.com/x?a=1&b=2')).toBe(
+      'It redirects to <a href="https://other.com/x?a=1&amp;b=2" target="_blank" rel="noopener">https://other.com/x?a=1&amp;b=2</a>.',
+    )
+    expect(leavesSiteBody('http://other.com/')).toContain('<a href="http://other.com/"')
+  })
+  it('shows a javascript: Location as escaped text with no anchor', () => {
+    const out = leavesSiteBody('javascript:alert(1)')
+    expect(out).toBe('It redirects to javascript:alert(1).')
+    expect(out).not.toContain('<a')
+    expect(out).not.toContain('href')
+  })
+  it('shows data:, vbscript: and unparseable Locations with no anchor, escaped', () => {
+    for (const bad of ['data:text/html,<script>alert(1)</script>', 'vbscript:x', 'http://[bad', '//other.com/x', '']) {
+      const out = leavesSiteBody(bad)
+      expect(out).not.toContain('<a')
+      expect(out).not.toContain('<script>')
+    }
+    expect(leavesSiteBody('data:text/html,<b>"hi"</b>')).toBe('It redirects to data:text/html,&lt;b&gt;&quot;hi&quot;&lt;/b&gt;.')
+  })
+  it('is not fooled by a scheme in odd case or with leading space', () => {
+    expect(leavesSiteBody('JaVaScRiPt:alert(1)')).not.toContain('<a')
+    expect(leavesSiteBody(' javascript:alert(1)')).not.toContain('<a')
+  })
+  it('isHttpUrl accepts only absolute http(s) URLs', () => {
+    expect(isHttpUrl('https://a.com')).toBe(true)
+    expect(isHttpUrl('HTTP://a.com')).toBe(true)
+    expect(isHttpUrl('ftp://a.com')).toBe(false)
+    expect(isHttpUrl('/relative')).toBe(false)
+  })
+})
+
+describe('isReferrerMetaName', () => {
+  it('matches a referrer meta in any case', () => {
+    expect(isReferrerMetaName('referrer')).toBe(true)
+    expect(isReferrerMetaName('Referrer')).toBe(true)
+    expect(isReferrerMetaName(' REFERRER ')).toBe(true)
+  })
+  it('leaves other metas and a missing name alone', () => {
+    expect(isReferrerMetaName('description')).toBe(false)
+    expect(isReferrerMetaName('referrer-policy')).toBe(false)
+    expect(isReferrerMetaName(null)).toBe(false)
+  })
+})
+
+describe('proxied responses carry nosniff', () => {
+  it('on the framed and the top-level path, with the framed CSP unchanged', () => {
+    const framed = scrubResponseHeaders(new Headers({ 'content-type': 'text/html' }), 'https://portal.tahi.studio', false)
+    const top = scrubResponseHeaders(new Headers({ 'content-type': 'text/html' }), 'https://portal.tahi.studio', true)
+    expect(framed.get('x-content-type-options')).toBe('nosniff')
+    expect(top.get('x-content-type-options')).toBe('nosniff')
+    expect(framed.get('content-security-policy')).toBe('frame-ancestors https://portal.tahi.studio')
   })
 })
 

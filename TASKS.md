@@ -1465,12 +1465,23 @@ scheduled; each needs a scope before building.
   visible part of a frame wider than its scroll box. qa-view worker: top-level
   loads (`Sec-Fetch-Dest: document`) get no scanner and a CSP `sandbox` equal to
   the iframe's; a missing header keeps the old framed behaviour. No schema
-  change; the five viewports are unchanged. DEPLOY ORDER: dashboard first, then
-  `workers/qa-view` (Liam deploys it; until then View at 100% opens an
-  unsandboxed tab with the scanner still injected, harmless but not sandboxed).
-  Open before [x]: push, worker deploy, live render check (Inspect at 1920 and
-  375, DevTools shows no transform, Overview note, View at 100% tab and popup,
-  tab sandbox: alert() is blocked), dark mode, 375px.
+  change; the five viewports are unchanged. DEPLOY: workers/qa-view and
+  workers/mcp-server auto-deploy from GitHub Actions on push to main
+  (qa-view-deploy.yml, mcp-worker-deploy.yml), so the worker change ships with
+  the push; the dashboard and qa-view deploys run in parallel and can race.
+  View at 100% is safe either way because the dashboard never depends on the
+  worker change (before the worker lands the tab is unsandboxed with the
+  scanner injected, harmless). Worker hardening in the same change: static
+  pages get a locked CSP, no-referrer and nosniff; the "leaves the site" page
+  links only http(s) Locations; `<meta name="referrer">` is stripped from
+  proxied pages; the service-worker refusal runs before the scanner route;
+  nosniff on the scanner and proxied responses. Open before [x]: push, live
+  render check (Inspect at 1920 and 375, DevTools shows no transform, Overview
+  note, View at 100% tab and popup, tab sandbox: alert() is blocked), dark
+  mode, 375px.
+  Backlog (M1): all tokens share one qa-view origin, so one client page's
+  cookies and localStorage are visible to another's (allow-same-origin on the
+  iframe). Give qa-view a per-site origin (for example a subdomain per site).
 - [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
   build Next 15 since its support window ended (21 Oct 2026); the first
   dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build

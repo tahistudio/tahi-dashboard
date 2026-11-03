@@ -101,8 +101,55 @@ export function scrubResponseHeaders(upstream: Headers, parentOrigin: string, to
   out.set('cache-control', 'no-store')
   out.set('x-robots-tag', 'noindex')
   out.set('referrer-policy', 'no-referrer')
+  out.set('x-content-type-options', 'nosniff')
   out.set('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), midi=()')
   return out
+}
+
+export const escapeHtml = (s: string): string =>
+  s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+
+/**
+ * CSP for the worker's own static pages (errors, "This link leaves the site"). They need no script,
+ * image or frame, only their inline style attribute, and run in an opaque origin.
+ */
+export const STATIC_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
+/** Headers for the worker's own static pages, on top of the status and content type. */
+export function staticPageHeaders(): Record<string, string> {
+  return {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-robots-tag': 'noindex',
+    'content-security-policy': STATIC_PAGE_CSP,
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+  }
+}
+
+/** True only for an absolute http or https URL. javascript:, data: and anything unparseable are false. */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Body text of the "This link leaves the site" page. The Location becomes a link only when it is an
+ * http(s) URL; any other scheme (javascript:, data:, a broken URL) is shown as escaped text with no anchor.
+ */
+export function leavesSiteBody(location: string): string {
+  const safe = escapeHtml(location)
+  if (!isHttpUrl(location)) return `It redirects to ${safe}.`
+  return `It redirects to <a href="${safe}" target="_blank" rel="noopener">${safe}</a>.`
+}
+
+/** True for the name of a `<meta name="referrer">` tag, which could override our no-referrer policy. */
+export function isReferrerMetaName(name: string | null): boolean {
+  return (name ?? '').trim().toLowerCase() === 'referrer'
 }
 
 export type RedirectDecision = { kind: 'internal'; location: string } | { kind: 'external'; location: string }
