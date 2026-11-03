@@ -31,7 +31,7 @@ import { useRound, type QaPagePatch } from './use-round'
 import { useActiveBrowser } from './use-active-browser'
 import { fetchFreshViewBaseUrl, useViewToken } from './use-view-token'
 import { useViewMode } from './use-view-mode'
-import { isTokenFresh, showsSingleFrame, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
+import { isTokenFresh, showsSingleFrame, viewAtFullSizeFeatures, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
 import { useScanAll, SCAN_ALL_VIEWPORTS } from './scan-all'
 import { PageRail, filterPages, type QaRailFilter } from './page-rail'
 import { ViewportStrip } from './viewport-strip'
@@ -54,8 +54,10 @@ import {
   parsePickMessage,
   parsePinClickMessage,
   viewportForSource,
+  visibleFrameRect,
   type CommentView,
   type NumberedComment,
+  type RectLike,
 } from './comments-helpers'
 import { RefreshButton, ReloadFramesButton } from './refresh-button'
 import { CommentViewControl } from './comment-view-control'
@@ -104,6 +106,18 @@ function viewerOrigin(baseUrl: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * The part of a frame that is on screen: cut to the Inspect scroll box it sits in (marked
+ * data-qa-clip) and to the window, so the comment card lands over what the user can see.
+ */
+function frameVisibleRect(frame: HTMLElement): RectLike {
+  const box = frame.closest('[data-qa-clip]')
+  return visibleFrameRect(frame.getBoundingClientRect(), [
+    box ? box.getBoundingClientRect() : null,
+    { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
+  ])
 }
 
 /** Upstream page URL on the site (staging or live) for the Open page link. */
@@ -551,7 +565,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
         // Only the frame in comment mode counts, on an open round, for the page on screen.
         if (latest.current.readOnly || commentViewportRef.current !== key) return
         if (comparablePath(pick.url) !== comparablePath(latest.current.path)) return
-        const rect = framesRef.current[key]?.getBoundingClientRect()
+        const frameEl = framesRef.current[key]
+        const rect = frameEl ? frameVisibleRect(frameEl) : null
         if (!rect) return
         if (pickAction(composerRef.current !== null, composerDraft.current) === 'ignore') {
           setComposerPulse(n => n + 1)
@@ -581,7 +596,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     if (!composerViewport) return
     function reposition() {
       if (!composerViewport) return
-      const rect = framesRef.current[composerViewport]?.getBoundingClientRect()
+      const frameEl = framesRef.current[composerViewport]
+      const rect = frameEl ? frameVisibleRect(frameEl) : null
       if (!rect) return
       const next = composerPlacement(rect, window.innerWidth, window.innerHeight)
       setComposer(c => (c && c.viewport === composerViewport && (c.left !== next.left || c.top !== next.top || c.width !== next.width) ? { ...c, ...next } : c))
@@ -619,14 +635,16 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   }
 
   /**
-   * Opens the page on screen at its true size in a new tab, through the viewer. The cached view token
-   * is used while it has more than a minute left, so the tab opens inside the click. Otherwise a fresh
-   * token is requested first. The URL carries the token and is only ever handed to window.open: it is
-   * not logged, shown, stored or put in a toast.
+   * Opens the page on screen at its true size through the viewer: a normal tab for the wide frames, a
+   * window sized to the device for the tablet and phone frames (the OS may clamp that size). The cached
+   * view token is used while it has more than a minute left, so the window opens inside the click.
+   * Otherwise a fresh token is requested first. The URL carries the token and is only ever handed to
+   * window.open: it is not logged, shown, stored or put in a toast. noopener and noreferrer always apply.
    */
-  async function openFullSize() {
+  async function openFullSize(viewportKey: QaViewportKey) {
     const path = selectedRow?.path
-    if (!path) return
+    const viewport = QA_VIEWPORTS.find(v => v.key === viewportKey)
+    if (!path || !viewport) return
     let base = baseUrl
     if (!base || !isTokenFresh(viewer.expiresAtMs, Date.now())) {
       const fresh = await fetchFreshViewBaseUrl(siteId, round.target)
@@ -641,7 +659,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
       showToast('Could not build the page link.', 'error')
       return
     }
-    window.open(url, '_blank', 'noopener,noreferrer')
+    window.open(url, '_blank', viewAtFullSizeFeatures(viewport))
   }
 
   function showIssue(issue: QaIssue) {
@@ -1159,7 +1177,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               reloadKey={frameReload}
               viewMode={viewMode}
               onViewModeChange={changeViewMode}
-              onViewFull={() => void openFullSize()}
+              onViewFull={key => void openFullSize(key)}
             />
           ) : (
             <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.875rem' }}>No pages in this round yet.</p>

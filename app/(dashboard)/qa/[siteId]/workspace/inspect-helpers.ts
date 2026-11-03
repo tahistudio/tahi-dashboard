@@ -92,6 +92,32 @@ export function viewAtFullSizeUrl(baseUrl: string, path: string): string | null 
   return `${base}${p}`
 }
 
+/** Frames narrower than this (the tablet and phone frames) open in a sized window; wider ones in a normal tab. */
+export const SIZED_WINDOW_BELOW_PX = 1024
+/**
+ * Extra width so the page's layout width equals the device width. window.open sizes the content
+ * area of a popup including its scrollbar, and a classic scrollbar takes about 15px of it.
+ */
+export const POPUP_SCROLLBAR_ALLOWANCE_PX = 16
+
+export type ViewAtFullSizeKind = 'tab' | 'window'
+
+/** Whether "View at 100%" for a frame of this width opens a normal tab or a window sized to the device. */
+export function viewAtFullSizeKind(viewportWidthPx: number): ViewAtFullSizeKind {
+  return viewportWidthPx < SIZED_WINDOW_BELOW_PX ? 'window' : 'tab'
+}
+
+/**
+ * The window.open features string. A tab needs only the opener guards. A device window adds
+ * `popup` and the content size: width plus the scrollbar allowance, and the device height. The
+ * browser or OS may clamp the size (a minimum window width, or the screen height), and the popup
+ * chrome (address bar) sits outside the content area. noopener and noreferrer are always present.
+ */
+export function viewAtFullSizeFeatures(viewport: { width: number; height: number }): string {
+  if (viewAtFullSizeKind(viewport.width) === 'tab') return 'noopener,noreferrer'
+  return `popup,width=${viewport.width + POPUP_SCROLLBAR_ALLOWANCE_PX},height=${viewport.height},noopener,noreferrer`
+}
+
 /** A cached view token is reused for a new tab only while at least this much of its life is left. */
 export const TOKEN_FRESH_MARGIN_MS = 60 * 1000
 

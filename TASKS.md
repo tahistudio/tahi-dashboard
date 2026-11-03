@@ -1460,11 +1460,17 @@ scheduled; each needs a scope before building.
   device switcher, remembered in localStorage `tahi-qa-view-mode`), the old
   all-frames layout kept as Overview with a "Scaled to fit" note, and a "View
   at 100%" button on every frame header that opens the page in a new tab through
-  the proxy with a fresh token. No schema change; the five viewports are
-  unchanged. Open before [x]: push, live render check (Inspect at 1920 and 375,
-  DevTools shows no transform, Overview note, View at 100% tab), dark mode, 375px.
-  Worker follow-ups (not done): skip the scanner and add a CSP sandbox on top-level
-  loads of the qa-view origin.
+  the proxy with a fresh token (a device-sized popup window for frames under
+  1024px, a normal tab otherwise). The Inspect comment card now sits over the
+  visible part of a frame wider than its scroll box. qa-view worker: top-level
+  loads (`Sec-Fetch-Dest: document`) get no scanner and a CSP `sandbox` equal to
+  the iframe's; a missing header keeps the old framed behaviour. No schema
+  change; the five viewports are unchanged. DEPLOY ORDER: dashboard first, then
+  `workers/qa-view` (Liam deploys it; until then View at 100% opens an
+  unsandboxed tab with the scanner still injected, harmless but not sandboxed).
+  Open before [x]: push, worker deploy, live render check (Inspect at 1920 and
+  375, DevTools shows no transform, Overview note, View at 100% tab and popup,
+  tab sandbox: alert() is blocked), dark mode, 375px.
 - [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
   build Next 15 since its support window ended (21 Oct 2026); the first
   dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build

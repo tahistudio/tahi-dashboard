@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   baseHrefFor, rewriteHref, fromProxyUrl, upstreamUrlFor, scrubResponseHeaders, classifyRedirect,
+  isTopLevelDocument, QA_FRAME_SANDBOX,
 } from '@/lib/qa/proxy-rules'
 
 const UP = 'https://acme.webflow.io'
@@ -106,6 +107,61 @@ describe('scrubResponseHeaders', () => {
     expect(out.get('referrer-policy')).toBe('no-referrer')
     expect(out.get('cross-origin-embedder-policy')).toBeNull()
     expect(out.get('cross-origin-opener-policy')).toBeNull()
+  })
+})
+
+describe('isTopLevelDocument', () => {
+  it('is true only for Sec-Fetch-Dest: document', () => {
+    expect(isTopLevelDocument('document')).toBe(true)
+    expect(isTopLevelDocument(' Document ')).toBe(true)
+  })
+  it('treats iframe, other destinations and a missing header as framed', () => {
+    expect(isTopLevelDocument('iframe')).toBe(false)
+    expect(isTopLevelDocument('frame')).toBe(false)
+    expect(isTopLevelDocument('empty')).toBe(false)
+    expect(isTopLevelDocument('')).toBe(false)
+    expect(isTopLevelDocument(null)).toBe(false)
+  })
+})
+
+describe('scrubResponseHeaders by load type', () => {
+  const portal = 'https://portal.tahi.studio'
+  const upstream = () => new Headers({
+    'content-type': 'text/html',
+    'content-security-policy': "default-src 'self'; sandbox",
+    'content-security-policy-report-only': "default-src 'none'",
+  })
+
+  it('shares the iframe sandbox value, without escape or extra permissions', () => {
+    expect(QA_FRAME_SANDBOX).toBe('allow-scripts allow-same-origin allow-forms allow-popups')
+    expect(QA_FRAME_SANDBOX).not.toContain('allow-popups-to-escape-sandbox')
+    expect(QA_FRAME_SANDBOX).not.toContain('allow-modals')
+    expect(QA_FRAME_SANDBOX).not.toContain('allow-downloads')
+    expect(QA_FRAME_SANDBOX).not.toContain('allow-top-navigation')
+  })
+
+  it('framed load: CSP is frame-ancestors only, exactly as before', () => {
+    const out = scrubResponseHeaders(upstream(), portal, false)
+    expect(out.get('content-security-policy')).toBe(`frame-ancestors ${portal}`)
+    expect(out.get('content-security-policy-report-only')).toBeNull()
+  })
+
+  it('default (no third argument) is the framed path', () => {
+    expect(scrubResponseHeaders(upstream(), portal).get('content-security-policy')).toBe(`frame-ancestors ${portal}`)
+  })
+
+  it('top-level load: adds the sandbox directive to our CSP and drops the upstream one', () => {
+    const out = scrubResponseHeaders(upstream(), portal, true)
+    expect(out.get('content-security-policy')).toBe(`frame-ancestors ${portal}; sandbox ${QA_FRAME_SANDBOX}`)
+    expect(out.get('content-security-policy-report-only')).toBeNull()
+  })
+
+  it('other headers match between the two paths', () => {
+    const framed = scrubResponseHeaders(upstream(), portal, false)
+    const top = scrubResponseHeaders(upstream(), portal, true)
+    for (const name of ['cache-control', 'x-robots-tag', 'referrer-policy', 'permissions-policy', 'content-type', 'x-frame-options', 'set-cookie']) {
+      expect(top.get(name)).toBe(framed.get(name))
+    }
   })
 })
 

@@ -160,6 +160,8 @@ import {
   commentRequestTitle,
   composerPlacement,
   filterForSelection,
+  intersectRects,
+  visibleFrameRect,
   parseEscapeMessage,
   REQUEST_DESCRIPTION_MAX,
   parseModeChangedMessage,
@@ -245,6 +247,42 @@ describe('viewportForSource', () => {
 
   it('does not match two frames whose window is missing', () => {
     expect(viewportForSource({ desktop: { contentWindow: null } }, null)).toBeNull()
+  })
+})
+
+describe('intersectRects and visibleFrameRect', () => {
+  const frame = { left: 100, top: 50, width: 1920, height: 900 }
+
+  it('returns the overlap of two rects', () => {
+    expect(intersectRects(frame, { left: 200, top: 0, width: 700, height: 600 })).toEqual({ left: 200, top: 50, width: 700, height: 550 })
+  })
+
+  it('returns null when the rects only touch or are apart', () => {
+    expect(intersectRects({ left: 0, top: 0, width: 10, height: 10 }, { left: 10, top: 0, width: 10, height: 10 })).toBeNull()
+    expect(intersectRects({ left: 0, top: 0, width: 10, height: 10 }, { left: 50, top: 50, width: 10, height: 10 })).toBeNull()
+  })
+
+  it('cuts a frame wider than its scroll box to the box, then to the window', () => {
+    const box = { left: 100, top: 50, width: 800, height: 900 }
+    const win = { left: 0, top: 0, width: 700, height: 1000 }
+    expect(visibleFrameRect(frame, [box, win])).toEqual({ left: 100, top: 50, width: 600, height: 900 })
+  })
+
+  it('skips missing clips and falls back to the frame when nothing overlaps', () => {
+    expect(visibleFrameRect(frame, [null])).toEqual(frame)
+    expect(visibleFrameRect(frame, [{ left: 5000, top: 0, width: 100, height: 100 }])).toEqual(frame)
+  })
+
+  it('puts the composer over the visible part, not the middle of the whole frame', () => {
+    const win = { left: 0, top: 0, width: 1400, height: 1000 }
+    const box = { left: 100, top: 50, width: 800, height: 900 }
+    const whole = composerPlacement(frame, win.width, win.height)
+    const visible = composerPlacement(visibleFrameRect(frame, [box, win]), win.width, win.height)
+    // The whole frame's centre is at x=1060; the visible part's centre is at x=500.
+    expect(visible.left).toBe(500 - 176)
+    expect(whole.left).not.toBe(visible.left)
+    expect(visible.left).toBeGreaterThanOrEqual(box.left)
+    expect(visible.left + visible.width).toBeLessThanOrEqual(box.left + box.width)
   })
 })
 

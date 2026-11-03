@@ -225,6 +225,36 @@ export function composerPlacement(frame: RectLike, windowWidth: number, windowHe
   return { left, top, width }
 }
 
+/**
+ * The overlap of two rects, or null when they do not overlap. Used to place the composer over the
+ * part of a frame that is really visible: a 1920px Inspect frame inside a narrower scroll box, or a
+ * frame partly outside the window.
+ */
+export function intersectRects(a: RectLike, b: RectLike): RectLike | null {
+  const left = Math.max(a.left, b.left)
+  const top = Math.max(a.top, b.top)
+  const right = Math.min(a.left + a.width, b.left + b.width)
+  const bottom = Math.min(a.top + a.height, b.top + b.height)
+  if (right <= left || bottom <= top) return null
+  return { left, top, width: right - left, height: bottom - top }
+}
+
+/**
+ * The part of a frame the user can see: the frame rect cut to each clip rect (the scroll box it sits
+ * in, the window) in turn. Falls back to the frame rect when nothing overlaps, so the composer still
+ * opens somewhere reachable.
+ */
+export function visibleFrameRect(frame: RectLike, clips: ReadonlyArray<RectLike | null>): RectLike {
+  let rect = frame
+  for (const clip of clips) {
+    if (!clip) continue
+    const next = intersectRects(rect, clip)
+    if (!next) return frame
+    rect = next
+  }
+  return rect
+}
+
 /* ------------------------------------------------------------------ */
 /* Create request from a comment                                         */
 /* ------------------------------------------------------------------ */

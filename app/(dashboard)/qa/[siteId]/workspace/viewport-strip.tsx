@@ -135,8 +135,8 @@ export interface ViewportStripProps {
    */
   viewMode: QaViewMode
   onViewModeChange: (mode: QaViewMode) => void
-  /** Opens the current page at its true size in a new tab. Omit to hide the "View at 100%" buttons. */
-  onViewFull?: () => void
+  /** Opens the current page at a frame's true size (a tab, or a device-sized window for narrow frames). Omit to hide the "View at 100%" buttons. */
+  onViewFull?: (viewport: QaViewportKey) => void
 }
 
 /** Shown under the mode control in Overview, and as the tooltip of its option. */
@@ -401,7 +401,7 @@ export function ViewportStrip({
       onExpand: () => setExpandedKey(expanded ? null : v.key),
       readOnly,
       readOnlyReason,
-      onViewFull,
+      onViewFull: onViewFull ? () => onViewFull(v.key) : undefined,
       commenting: commentViewport === v.key,
       onCommentToggle: () => onCommentToggle(v.key),
       onLoad: () => {

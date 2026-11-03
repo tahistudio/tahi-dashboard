@@ -1,7 +1,7 @@
 import scannerJs from './generated/scanner.bundle.js'
 import { verifyViewToken } from '../../../lib/qa/token'
 import { isSafePublicUrl } from '../../../lib/qa/ssrf'
-import { baseHrefFor, classifyRedirect, rewriteHref, scrubResponseHeaders, upstreamUrlFor } from '../../../lib/qa/proxy-rules'
+import { baseHrefFor, classifyRedirect, isTopLevelDocument, rewriteHref, scrubResponseHeaders, upstreamUrlFor } from '../../../lib/qa/proxy-rules'
 
 interface Env { QA_VIEW_SECRET: string }
 
@@ -51,12 +51,15 @@ const worker = {
       return page(200, 'This link leaves the site', `It redirects to <a href="${escapeHtml(d.location)}" target="_blank" rel="noopener">${escapeHtml(d.location)}</a>.`)
     }
 
-    const headers = scrubResponseHeaders(upstream.headers, payload.p)
+    // A top-level load (the dashboard's "View at 100%" tab) has no dashboard parent to talk to, so it gets
+    // no scanner, and a CSP sandbox that matches the iframe's. A missing header counts as framed.
+    const topLevel = isTopLevelDocument(req.headers.get('sec-fetch-dest'))
+    const headers = scrubResponseHeaders(upstream.headers, payload.p, topLevel)
     const type = upstream.headers.get('content-type') ?? ''
     if (!type.includes('text/html')) return new Response(upstream.body, { status: upstream.status, headers })
 
     const baseTag = `<base href="${escapeHtml(baseHrefFor(payload.o, path))}">`
-    const scannerTag = `<script src="${url.origin}/__qa/scanner.js?t=${token}" defer></script>`
+    const scannerTag = topLevel ? '' : `<script src="${url.origin}/__qa/scanner.js?t=${token}" defer></script>`
     let headSeen = false
     const rewriter = new HTMLRewriter()
       .on('head', { element(el) { headSeen = true; el.prepend(baseTag, { html: true }) } })

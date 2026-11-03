@@ -70,12 +70,34 @@ const DROP = [
   'service-worker-allowed', 'permissions-policy',
 ]
 
-export function scrubResponseHeaders(upstream: Headers, parentOrigin: string): Headers {
+/**
+ * The sandbox the dashboard puts on every QA frame. Shared so the worker can give a top-level tab
+ * exactly the same one through a CSP `sandbox` directive. allow-popups-to-escape-sandbox is
+ * deliberately absent: popups the page opens inherit the sandbox. No allow-modals, allow-downloads
+ * or allow-top-navigation either.
+ */
+export const QA_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups'
+
+/**
+ * True when a request is a top-level page load (`Sec-Fetch-Dest: document`), for example the
+ * "View at 100%" tab. An iframe sends `iframe`; a missing header (older browsers) counts as the
+ * framed path, so those keep the exact behaviour they had before.
+ */
+export function isTopLevelDocument(secFetchDest: string | null): boolean {
+  return secFetchDest !== null && secFetchDest.trim().toLowerCase() === 'document'
+}
+
+/**
+ * Response headers for a proxied page. The upstream CSP is dropped (replaced by ours), so the
+ * policy is just `frame-ancestors <dashboard>`. A top-level load adds `; sandbox <QA_FRAME_SANDBOX>`
+ * so the tab is sandboxed like the iframe; the framed path is byte for byte what it was.
+ */
+export function scrubResponseHeaders(upstream: Headers, parentOrigin: string, topLevel: boolean = false): Headers {
   const out = new Headers()
   upstream.forEach((value, key) => {
     if (!DROP.includes(key.toLowerCase())) out.set(key, value)
   })
-  out.set('content-security-policy', `frame-ancestors ${parentOrigin}`)
+  out.set('content-security-policy', topLevel ? `frame-ancestors ${parentOrigin}; sandbox ${QA_FRAME_SANDBOX}` : `frame-ancestors ${parentOrigin}`)
   out.set('cache-control', 'no-store')
   out.set('x-robots-tag', 'noindex')
   out.set('referrer-policy', 'no-referrer')

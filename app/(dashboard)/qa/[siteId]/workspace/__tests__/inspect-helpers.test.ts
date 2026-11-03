@@ -3,6 +3,8 @@ import { QA_VIEWPORTS } from '@/lib/qa/types'
 import {
   DEFAULT_INSPECT_DEVICE,
   DEFAULT_VIEW_MODE,
+  POPUP_SCROLLBAR_ALLOWANCE_PX,
+  SIZED_WINDOW_BELOW_PX,
   TOKEN_FRESH_MARGIN_MS,
   VIEW_MODE_STORAGE_KEY,
   inspectDeviceOptions,
@@ -12,6 +14,8 @@ import {
   parseViewMode,
   parseViewportKey,
   showsSingleFrame,
+  viewAtFullSizeFeatures,
+  viewAtFullSizeKind,
   viewAtFullSizeUrl,
 } from '../inspect-helpers'
 
@@ -128,6 +132,42 @@ describe('viewAtFullSizeUrl', () => {
     expect(viewAtFullSizeUrl('not a url', '/about')).toBeNull()
     expect(viewAtFullSizeUrl('javascript:alert(1)', '/about')).toBeNull()
     expect(viewAtFullSizeUrl('data:text/html,hi', '/about')).toBeNull()
+  })
+})
+
+describe('viewAtFullSizeKind and viewAtFullSizeFeatures', () => {
+  const byKey = (key: string) => {
+    const v = QA_VIEWPORTS.find(x => x.key === key)
+    if (!v) throw new Error(`no viewport ${key}`)
+    return v
+  }
+
+  it('opens a sized window below 1024px and a normal tab at or above it', () => {
+    expect(SIZED_WINDOW_BELOW_PX).toBe(1024)
+    expect(viewAtFullSizeKind(375)).toBe('window')
+    expect(viewAtFullSizeKind(768)).toBe('window')
+    expect(viewAtFullSizeKind(1023)).toBe('window')
+    expect(viewAtFullSizeKind(1024)).toBe('tab')
+    expect(viewAtFullSizeKind(1440)).toBe('tab')
+  })
+
+  it('sizes the window to the device width plus the scrollbar allowance, and the device height', () => {
+    expect(viewAtFullSizeFeatures(byKey('mobile_p'))).toBe(`popup,width=${375 + POPUP_SCROLLBAR_ALLOWANCE_PX},height=812,noopener,noreferrer`)
+    expect(viewAtFullSizeFeatures(byKey('mobile_l'))).toBe(`popup,width=${425 + POPUP_SCROLLBAR_ALLOWANCE_PX},height=860,noopener,noreferrer`)
+    expect(viewAtFullSizeFeatures(byKey('tablet'))).toBe(`popup,width=${768 + POPUP_SCROLLBAR_ALLOWANCE_PX},height=1024,noopener,noreferrer`)
+  })
+
+  it('gives the wide frames a plain tab with no size or popup flag', () => {
+    expect(viewAtFullSizeFeatures(byKey('desktop'))).toBe('noopener,noreferrer')
+    expect(viewAtFullSizeFeatures(byKey('xl'))).toBe('noopener,noreferrer')
+  })
+
+  it('always keeps noopener and noreferrer', () => {
+    for (const v of QA_VIEWPORTS) {
+      const features = viewAtFullSizeFeatures(v)
+      expect(features).toContain('noopener')
+      expect(features).toContain('noreferrer')
+    }
   })
 })
 

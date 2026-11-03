@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink, MessageSquarePlus } from 'lucide-react'
 import type { QaViewportKey } from '@/lib/qa/types'
 import { QA_VIEWPORTS } from '@/lib/qa/types'
-import { inspectOverflows, inspectScrollStep } from './inspect-helpers'
+import { QA_FRAME_SANDBOX } from '@/lib/qa/proxy-rules'
+import { inspectOverflows, inspectScrollStep, viewAtFullSizeKind } from './inspect-helpers'
 import type { QaScanState } from './qa-types'
 
 export type QaViewportDef = (typeof QA_VIEWPORTS)[number]
 
-export const QA_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups'
+// The value lives in lib/qa/proxy-rules.ts so the qa-view worker can send the same sandbox as a CSP for top-level tabs.
+export { QA_FRAME_SANDBOX }
 
 const SCAN_LABEL: Record<QaScanState, string> = {
   loading: 'Scanning',
@@ -154,8 +156,8 @@ export function ViewportFrame({
     <button
       type="button"
       onClick={onViewFull}
-      aria-label={`View at 100% for ${label}, opens in a new tab`}
-      title={`View ${label} (${viewport.width}px) at 100% in a new tab`}
+      aria-label={`View at 100% for ${label}, opens in a new ${viewAtFullSizeKind(viewport.width)}`}
+      title={`View ${label} (${viewport.width}px) at 100% in a new ${viewAtFullSizeKind(viewport.width)}`}
       className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
       style={{ gap: '0.25rem', padding: outerWidthRem >= VIEW_LABEL_FROM_REM ? '0 0.5rem' : 0, fontSize: '0.75rem', fontWeight: 600 }}
     >
@@ -327,6 +329,7 @@ function InspectBody({ viewport, src, frameRef, onLoad, commenting }: InspectBod
         ref={scrollerRef}
         onScroll={onScroll}
         role="region"
+        data-qa-clip=""
         aria-label={`${label} preview at ${viewport.width}px`}
         tabIndex={0}
         className="tahi-focus-ring w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-[var(--radius-leaf-sm)]"
