@@ -167,7 +167,7 @@ describe('scrubResponseHeaders by load type', () => {
 })
 
 describe('static page headers', () => {
-  it('lock the worker pages down: no sources, sandboxed, no referrer, no sniffing', () => {
+  it('lock the worker pages down: no sources, no referrer, no sniffing', () => {
     const h = staticPageHeaders()
     expect(h['content-security-policy']).toBe("default-src 'none'; style-src 'unsafe-inline'")
     expect(h['referrer-policy']).toBe('no-referrer')
