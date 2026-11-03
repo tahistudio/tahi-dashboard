@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, ExternalLink, MessageSquarePlus } from 'luci
 import type { QaViewportKey } from '@/lib/qa/types'
 import { QA_VIEWPORTS } from '@/lib/qa/types'
 import { QA_FRAME_SANDBOX } from '@/lib/qa/proxy-rules'
-import { inspectOverflows, inspectScrollStep, viewAtFullSizeKind } from './inspect-helpers'
+import { INSPECT_BORDER_PX, VIEWPORT_SHORT_LABEL, inspectOverflows, inspectScrollStep, viewAtFullSizeHint } from './inspect-helpers'
 import type { QaScanState } from './qa-types'
 
 export type QaViewportDef = (typeof QA_VIEWPORTS)[number]
@@ -38,9 +38,6 @@ export function frameScale(viewport: QaViewportDef, rowHeightRem: number): numbe
  * about 23rem, so 26rem leaves room before anything would overlap.
  */
 const COMPACT_BELOW_REM = 26
-
-/** Short codes for frames too narrow for the full viewport name. */
-const COMPACT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
 
 /** Bars at least this wide (rem) also spell out "View at 100%"; narrower bars show only its icon. */
 const VIEW_LABEL_FROM_REM = 36
@@ -152,12 +149,13 @@ export function ViewportFrame({
     </button>
   ) : null
 
+  const viewHint = viewAtFullSizeHint(label, viewport.width)
   const viewButton = onViewFull ? (
     <button
       type="button"
       onClick={onViewFull}
-      aria-label={`View at 100% for ${label}, opens in a new ${viewAtFullSizeKind(viewport.width)}`}
-      title={`View ${label} (${viewport.width}px) at 100% in a new ${viewAtFullSizeKind(viewport.width)}`}
+      aria-label={viewHint.aria}
+      title={viewHint.title}
       className="flex min-h-[2.75rem] min-w-[2.75rem] shrink-0 items-center justify-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
       style={{ gap: '0.25rem', padding: outerWidthRem >= VIEW_LABEL_FROM_REM ? '0 0.5rem' : 0, fontSize: '0.75rem', fontWeight: 600 }}
     >
@@ -187,7 +185,7 @@ export function ViewportFrame({
           // Narrow frames show the short code (ML, MP) so Mobile L and Mobile P stay
           // distinguishable on touch screens; the checkbox keeps the full name.
           <>
-            <span aria-hidden="true" title={label}>{COMPACT_LABEL[viewport.key]}</span>
+            <span aria-hidden="true" title={label}>{VIEWPORT_SHORT_LABEL[viewport.key]}</span>
             <span className="sr-only">{label}</span>
           </>
         ) : (
@@ -336,7 +334,7 @@ function InspectBody({ viewport, src, frameRef, onLoad, commenting }: InspectBod
       >
         <div
           className="relative shrink-0 overflow-hidden rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)]"
-          style={{ width: `${viewport.width + 2}px`, height: `${viewport.height + 2}px`, borderColor: commenting ? 'var(--color-brand)' : undefined }}
+          style={{ width: `${viewport.width + INSPECT_BORDER_PX}px`, height: `${viewport.height + INSPECT_BORDER_PX}px`, borderColor: commenting ? 'var(--color-brand)' : undefined }}
         >
           <iframe
             ref={frameRef}

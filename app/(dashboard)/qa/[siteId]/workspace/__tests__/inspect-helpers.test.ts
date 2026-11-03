@@ -1,20 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { QA_VIEWPORTS } from '@/lib/qa/types'
+import { QA_VIEWPORTS, type QaViewportKey } from '@/lib/qa/types'
+import type { QaScanState } from '../qa-types'
 import {
-  DEFAULT_INSPECT_DEVICE,
   DEFAULT_VIEW_MODE,
+  INSPECT_BORDER_PX,
   POPUP_SCROLLBAR_ALLOWANCE_PX,
   SIZED_WINDOW_BELOW_PX,
   TOKEN_FRESH_MARGIN_MS,
+  VIEWPORT_SHORT_LABEL,
   VIEW_MODE_STORAGE_KEY,
+  allViewportsScanned,
+  defaultSingleFrameDevice,
   inspectDeviceOptions,
   inspectOverflows,
   inspectScrollStep,
   isTokenFresh,
   parseViewMode,
-  parseViewportKey,
   showsSingleFrame,
   viewAtFullSizeFeatures,
+  viewAtFullSizeHint,
   viewAtFullSizeKind,
   viewAtFullSizeUrl,
 } from '../inspect-helpers'
@@ -44,16 +48,51 @@ describe('parseViewMode', () => {
   })
 })
 
-describe('parseViewportKey', () => {
-  it('accepts every real viewport key', () => {
-    for (const v of QA_VIEWPORTS) expect(parseViewportKey(v.key)).toBe(v.key)
+describe('defaultSingleFrameDevice', () => {
+  it('starts the narrow dashboard layout in Inspect on Mobile P', () => {
+    expect(defaultSingleFrameDevice(true, 'inspect')).toBe('mobile_p')
   })
 
-  it('falls back to Desktop, or to the fallback given', () => {
-    expect(DEFAULT_INSPECT_DEVICE).toBe('desktop')
-    expect(parseViewportKey('huge')).toBe('desktop')
-    expect(parseViewportKey(null)).toBe('desktop')
-    expect(parseViewportKey(undefined, 'tablet')).toBe('tablet')
+  it('starts everything else on Desktop', () => {
+    expect(defaultSingleFrameDevice(false, 'inspect')).toBe('desktop')
+    expect(defaultSingleFrameDevice(false, 'overview')).toBe('desktop')
+    expect(defaultSingleFrameDevice(true, 'overview')).toBe('desktop')
+  })
+})
+
+describe('allViewportsScanned and the short labels', () => {
+  const states = (over: Partial<Record<QaViewportKey, QaScanState>> = {}): Record<QaViewportKey, QaScanState> => ({
+    xl: 'scanned', desktop: 'scanned', tablet: 'scanned', mobile_l: 'scanned', mobile_p: 'scanned', ...over,
+  })
+
+  it('is true only when every viewport has a stored scan', () => {
+    expect(allViewportsScanned(states())).toBe(true)
+    expect(allViewportsScanned(states({ tablet: 'loading' }))).toBe(false)
+    expect(allViewportsScanned(states({ mobile_p: 'no_scan' }))).toBe(false)
+    expect(allViewportsScanned(states({ xl: 'failed' }))).toBe(false)
+  })
+
+  it('has one distinct short code for each viewport', () => {
+    const codes = QA_VIEWPORTS.map(v => VIEWPORT_SHORT_LABEL[v.key])
+    expect(new Set(codes).size).toBe(QA_VIEWPORTS.length)
+    expect(VIEWPORT_SHORT_LABEL.mobile_l).toBe('ML')
+    expect(VIEWPORT_SHORT_LABEL.mobile_p).toBe('MP')
+  })
+})
+
+describe('viewAtFullSizeHint', () => {
+  it('says a tab uses the window width, and starts with the visible label', () => {
+    const h = viewAtFullSizeHint('Desktop', 1440)
+    expect(h.title).toBe('View this page at 100% in a new tab (uses your window width)')
+    expect(h.aria.startsWith('View at 100%')).toBe(true)
+    expect(h.aria).toContain('new tab')
+  })
+
+  it('keeps the sized-window wording for the narrow frames', () => {
+    const h = viewAtFullSizeHint('Mobile P', 375)
+    expect(h.title).toBe('View Mobile P (375px) at 100% in a new window')
+    expect(h.aria.startsWith('View at 100%')).toBe(true)
+    expect(h.aria).toContain('new window 375 pixels wide')
   })
 })
 
@@ -99,8 +138,15 @@ describe('inspectOverflows and inspectScrollStep', () => {
   it('scrolls sideways only when the page is wider than the room', () => {
     expect(inspectOverflows(1920, 1000)).toBe(true)
     expect(inspectOverflows(375, 1000)).toBe(false)
-    expect(inspectOverflows(1000, 1000)).toBe(false)
+    expect(inspectOverflows(1000, 1002)).toBe(false)
     expect(inspectOverflows(1920, 0)).toBe(false)
+  })
+
+  it('counts the 1px border on each side, so a 1 to 2px overflow still shows the hint', () => {
+    expect(INSPECT_BORDER_PX).toBe(2)
+    expect(inspectOverflows(1000, 1000)).toBe(true)
+    expect(inspectOverflows(1000, 1001)).toBe(true)
+    expect(inspectOverflows(1000, 1002)).toBe(false)
   })
 
   it('moves most of the visible width per step, at least one pixel', () => {

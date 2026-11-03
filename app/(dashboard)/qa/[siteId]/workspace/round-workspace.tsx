@@ -31,7 +31,7 @@ import { useRound, type QaPagePatch } from './use-round'
 import { useActiveBrowser } from './use-active-browser'
 import { fetchFreshViewBaseUrl, useViewToken } from './use-view-token'
 import { useViewMode } from './use-view-mode'
-import { isTokenFresh, showsSingleFrame, viewAtFullSizeFeatures, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
+import { defaultSingleFrameDevice, isTokenFresh, showsSingleFrame, viewAtFullSizeFeatures, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
 import { useScanAll, SCAN_ALL_VIEWPORTS } from './scan-all'
 import { PageRail, filterPages, type QaRailFilter } from './page-rail'
 import { ViewportStrip } from './viewport-strip'
@@ -77,7 +77,6 @@ const LATE_PINS_MS = 2000
 const FOCUS_AFTER_PINS_MS = 400
 /** Above the wide workspace (40), below the SlideOver scrim (60). */
 const COMPOSER_Z_INDEX = 55
-const MOBILE_DEFAULT: QaViewportKey = 'desktop'
 const WIDE_STORAGE_KEY = 'tahi-qa-wide'
 /**
  * Stacking level of the wide workspace. The dashboard chrome (sidebar, top nav) sets
@@ -242,7 +241,11 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   const { mode: viewMode, setMode: setViewMode } = useViewMode()
   // Inspect and the narrow layout mount exactly one frame; mobileViewport (despite the name) is which one.
   const oneFrame = showsSingleFrame(isMobile, viewMode)
-  const [mobileViewport, setMobileViewport] = useState<QaViewportKey>(MOBILE_DEFAULT)
+  // The device the user picked, or null to follow the default for the layout (Mobile P in the narrow Inspect layout).
+  const [deviceChoice, setDeviceChoice] = useState<QaViewportKey | null>(null)
+  const mobileViewport = deviceChoice ?? defaultSingleFrameDevice(isMobile, viewMode)
+  // A view token fetched on demand by View at 100% when the hook's copy was about to expire.
+  const openTokenRef = useRef<{ baseUrl: string; expiresAtMs: number } | null>(null)
   const [issuesOpen, setIssuesOpen] = useState(true)
   // Wide mode is the user's saved choice; it only takes effect on the desktop layout.
   const [wide, setWide] = useState(false)
@@ -619,7 +622,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
 
   /** Switches the single frame shown on small screens; the frame in comment mode may be the one leaving. */
   function changeMobileViewport(key: QaViewportKey) {
-    setMobileViewport(key)
+    setDeviceChoice(key)
     if (commentViewportRef.current && commentViewportRef.current !== key) applyCommentViewport(null)
   }
 
@@ -630,7 +633,8 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   function changeViewMode(next: QaViewMode) {
     if (next === viewMode) return
     setComposer(null)
-    if (next === 'inspect' && commentViewportRef.current && commentViewportRef.current !== mobileViewport) applyCommentViewport(null)
+    const deviceAfter = deviceChoice ?? defaultSingleFrameDevice(isMobile, next)
+    if (next === 'inspect' && commentViewportRef.current && commentViewportRef.current !== deviceAfter) applyCommentViewport(null)
     setViewMode(next)
   }
 
@@ -645,13 +649,19 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     const path = selectedRow?.path
     const viewport = QA_VIEWPORTS.find(v => v.key === viewportKey)
     if (!path || !viewport) return
-    let base = baseUrl
-    if (!base || !isTokenFresh(viewer.expiresAtMs, Date.now())) {
+    let base: string | null = baseUrl && isTokenFresh(viewer.expiresAtMs, Date.now()) ? baseUrl : null
+    // A token fetched by an earlier click, kept so a second click can open the window synchronously.
+    const kept = openTokenRef.current
+    if (!base && kept && isTokenFresh(kept.expiresAtMs, Date.now())) base = kept.baseUrl
+    let fetchedFirst = false
+    if (!base) {
+      fetchedFirst = true
       const fresh = await fetchFreshViewBaseUrl(siteId, round.target)
       if (!fresh.ok) {
         showToast(fresh.message, 'error')
         return
       }
+      openTokenRef.current = { baseUrl: fresh.baseUrl, expiresAtMs: fresh.expiresAtMs }
       base = fresh.baseUrl
     }
     const url = viewAtFullSizeUrl(base, path)
@@ -660,6 +670,9 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
       return
     }
     window.open(url, '_blank', viewAtFullSizeFeatures(viewport))
+    // After an async token fetch the browser may have dropped the click's permission to open a window,
+    // and a blocked noopener window cannot be detected. Say so; the next click uses the new token.
+    if (fetchedFirst) showToast('If nothing opened, click View at 100% again', 'info')
   }
 
   function showIssue(issue: QaIssue) {

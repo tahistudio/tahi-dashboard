@@ -8,7 +8,7 @@ import { ViewportFrame, frameOuterWidthRem, type QaViewportDef } from './viewpor
 import { comparablePath } from './comparable-path'
 import { createRelayQueue, parseScrollMessage, relayTargets, scrollToFor, syncActive, type RelayQueue } from './scroll-helpers'
 import { viewportForSource } from './comments-helpers'
-import { inspectDeviceOptions, type QaViewMode } from './inspect-helpers'
+import { INSPECT_SCAN_NOTE, VIEWPORT_SHORT_LABEL, allViewportsScanned, inspectDeviceOptions, type QaViewMode } from './inspect-helpers'
 import type { QaScanState, QaTickMap } from './qa-types'
 
 const ROW_REM = 28
@@ -149,8 +149,6 @@ function isScanMessage(data: unknown): data is { type: 'qa:scan'; version: 1; ur
   return d.type === 'qa:scan' && d.version === 1 && typeof d.url === 'string' && typeof d.viewportWidth === 'number' && typeof d.result === 'object' && d.result !== null
 }
 
-/** Short switcher labels for narrow widths, so five options stay distinguishable. */
-const SHORT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
 /** Below this switcher width (px) the short labels are used. */
 const SHORT_LABEL_BELOW_PX = 560
 
@@ -471,6 +469,9 @@ export function ViewportStrip({
           fill
           options={inspectDeviceOptions(availableWidth)}
         />
+        {allViewportsScanned(scanStates) ? null : (
+          <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem' }}>{INSPECT_SCAN_NOTE}</p>
+        )}
         <ViewportFrame key={v.key} {...frameProps(v, v.height / 16, false)} inspect columnWidthRem={availableWidth / 16} />
       </div>
     )
@@ -498,7 +499,7 @@ export function ViewportStrip({
           fill
           options={QA_VIEWPORTS.map(x => (
             availableWidth > 0 && availableWidth < SHORT_LABEL_BELOW_PX
-              ? { value: x.key, label: SHORT_LABEL[x.key], title: `${x.label} (${x.width}px)` }
+              ? { value: x.key, label: VIEWPORT_SHORT_LABEL[x.key], title: `${x.label} (${x.width}px)` }
               : { value: x.key, label: x.label }
           ))}
         />

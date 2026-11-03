@@ -1,4 +1,5 @@
 import { QA_VIEWPORTS, type QaViewportKey } from '@/lib/qa/types'
+import type { QaScanState } from './qa-types'
 
 /**
  * Pure helpers for the workspace view modes.
@@ -18,14 +19,24 @@ export function parseViewMode(raw: unknown): QaViewMode {
   return raw === 'overview' || raw === 'inspect' ? raw : DEFAULT_VIEW_MODE
 }
 
-/** The device Inspect (and the narrow single-frame layout) shows before anything is picked. */
-export const DEFAULT_INSPECT_DEVICE: QaViewportKey = 'desktop'
-
-/** A viewport key from untrusted input, or the fallback. */
-export function parseViewportKey(raw: unknown, fallback: QaViewportKey = DEFAULT_INSPECT_DEVICE): QaViewportKey {
-  const hit = QA_VIEWPORTS.find(v => v.key === raw)
-  return hit ? hit.key : fallback
+/**
+ * The device the single frame shows before the user picks one. The narrow dashboard layout in
+ * Inspect starts on Mobile P (375 wide, the phone a 375px dashboard is held on); everything else
+ * starts on Desktop.
+ */
+export function defaultSingleFrameDevice(narrowLayout: boolean, mode: QaViewMode): QaViewportKey {
+  return narrowLayout && mode === 'inspect' ? 'mobile_p' : 'desktop'
 }
+
+/** True when every viewport has a stored scan for the page, so the "scan the others" hint can go. */
+export function allViewportsScanned(states: Readonly<Record<QaViewportKey, QaScanState>>): boolean {
+  return QA_VIEWPORTS.every(v => states[v.key] === 'scanned')
+}
+
+export const INSPECT_SCAN_NOTE = 'Inspect scans the device you are viewing. Switch device, or use Overview, to scan the others.'
+
+/** The one short-code map for viewport names: frame label bars and the device switchers use it. */
+export const VIEWPORT_SHORT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
 
 /**
  * Whether the workspace mounts exactly one frame. True in Inspect (always) and in the narrow
@@ -39,8 +50,6 @@ export function showsSingleFrame(narrowLayout: boolean, mode: QaViewMode): boole
 export const DEVICE_SHORT_LABEL_BELOW_PX = 560
 /** Below this switcher width (px) the long labels drop the pixel width. */
 export const DEVICE_WIDTH_LABEL_FROM_PX = 760
-
-const SHORT_LABEL: Record<QaViewportKey, string> = { xl: 'XL', desktop: 'Desk', tablet: 'Tab', mobile_l: 'ML', mobile_p: 'MP' }
 
 export interface InspectDeviceOption {
   value: QaViewportKey
@@ -56,15 +65,21 @@ export interface InspectDeviceOption {
 export function inspectDeviceOptions(availableWidthPx: number): InspectDeviceOption[] {
   return QA_VIEWPORTS.map(v => {
     const title = `${v.label} (${v.width}px)`
-    if (availableWidthPx > 0 && availableWidthPx < DEVICE_SHORT_LABEL_BELOW_PX) return { value: v.key, label: SHORT_LABEL[v.key], title }
+    if (availableWidthPx > 0 && availableWidthPx < DEVICE_SHORT_LABEL_BELOW_PX) return { value: v.key, label: VIEWPORT_SHORT_LABEL[v.key], title }
     if (availableWidthPx >= DEVICE_WIDTH_LABEL_FROM_PX) return { value: v.key, label: `${v.label} ${v.width}`, title }
     return { value: v.key, label: v.label, title }
   })
 }
 
-/** True when a frame at its true width is wider than the room it sits in, so it scrolls sideways. */
+/** Width of the Inspect box's 1px border on both sides together. The box is the viewport width plus this. */
+export const INSPECT_BORDER_PX = 2
+
+/**
+ * True when the Inspect box (the viewport width plus its border) is wider than the room it sits
+ * in, so it scrolls sideways. Counting the border means a 1 to 2px overflow still shows the hint.
+ */
 export function inspectOverflows(viewportWidthPx: number, availableWidthPx: number): boolean {
-  return availableWidthPx > 0 && viewportWidthPx > availableWidthPx
+  return availableWidthPx > 0 && viewportWidthPx + INSPECT_BORDER_PX > availableWidthPx
 }
 
 /**
@@ -95,8 +110,9 @@ export function viewAtFullSizeUrl(baseUrl: string, path: string): string | null 
 /** Frames narrower than this (the tablet and phone frames) open in a sized window; wider ones in a normal tab. */
 export const SIZED_WINDOW_BELOW_PX = 1024
 /**
- * Extra width so the page's layout width equals the device width. window.open sizes the content
- * area of a popup including its scrollbar, and a classic scrollbar takes about 15px of it.
+ * Extra width so the page's layout width roughly equals the device width. This is an approximation:
+ * window.open sizes the content area of a popup including its scrollbar, and a classic scrollbar
+ * takes about 15px of it (overlay scrollbars take none, and browsers or the OS may clamp the size).
  */
 export const POPUP_SCROLLBAR_ALLOWANCE_PX = 16
 
@@ -105,6 +121,23 @@ export type ViewAtFullSizeKind = 'tab' | 'window'
 /** Whether "View at 100%" for a frame of this width opens a normal tab or a window sized to the device. */
 export function viewAtFullSizeKind(viewportWidthPx: number): ViewAtFullSizeKind {
   return viewportWidthPx < SIZED_WINDOW_BELOW_PX ? 'window' : 'tab'
+}
+
+/**
+ * Accessible name and tooltip for a frame's View at 100% button. The name starts with the visible
+ * label ("View at 100%"). A tab takes the browser window's width, so the tooltip says so.
+ */
+export function viewAtFullSizeHint(label: string, viewportWidthPx: number): { aria: string; title: string } {
+  if (viewAtFullSizeKind(viewportWidthPx) === 'tab') {
+    return {
+      aria: `View at 100% for ${label}, opens in a new tab at your window width`,
+      title: 'View this page at 100% in a new tab (uses your window width)',
+    }
+  }
+  return {
+    aria: `View at 100% for ${label}, opens in a new window ${viewportWidthPx} pixels wide`,
+    title: `View ${label} (${viewportWidthPx}px) at 100% in a new window`,
+  }
 }
 
 /**
