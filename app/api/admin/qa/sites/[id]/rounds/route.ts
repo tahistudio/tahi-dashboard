@@ -1,13 +1,20 @@
 /**
  * GET  /api/admin/qa/sites/[id]/rounds
- *      Rounds for one site, newest first, each with its browsers, tick, status and page counts.
- *      Ticks count across all of the round's browsers.
+ *      Rounds for one site, newest first, each with its browsers, viewports, tick, status and page
+ *      counts. `viewports` is the resolved list of viewport keys the round covers (never the raw
+ *      column) and `legacyViewports` is true for a round made before the viewport set, which keeps
+ *      the five viewports it was made with. ticksTotal is pages x viewports x browsers. ticksDone
+ *      counts only ticks inside the round's browsers and viewports: Chromium ticks on a legacy
+ *      round come from the qa_round_pages vp_* columns, every other tick from qa_browser_ticks rows.
  *
  * POST /api/admin/qa/sites/[id]/rounds
  *      Snapshots the site's non-removed pages into a new round. Ungrouped pages
  *      are all included; for each template group only the sample paths are.
  *      Body: { name: string (1 to 120), target: 'staging' | 'live',
- *              browsers?: ('chromium' | 'firefox' | 'webkit')[] (non-empty, default ['chromium']) }.
+ *              browsers?: ('chromium' | 'firefox' | 'webkit')[] (non-empty, default ['chromium']),
+ *              viewports?: QaViewportKey[] (non-empty list of core or niche keys; a legacy key is refused) }.
+ *      Omitting viewports stores nothing, so the round is a legacy round. The item carries the
+ *      resolved `viewports` and `legacyViewports`.
  */
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
@@ -19,7 +26,17 @@ import { schema } from '@/db/d1'
 import { loadSite, targetOrigin } from '@/lib/qa/server'
 import { pickSamples } from '@/lib/qa/grouping'
 import { parseBrowserInput, parseRoundBrowsers } from '@/lib/qa/browsers'
-import { QA_DEFAULT_BROWSER, QA_VIEWPORT_KEYS, type QaBrowserKey, type QaTarget } from '@/lib/qa/types'
+import {
+  QA_DEFAULT_BROWSER,
+  isLegacyRoundViewports,
+  parseRoundViewports,
+  parseViewportInput,
+  serialiseRoundViewports,
+  tickStoreFor,
+  type QaBrowserKey,
+  type QaTarget,
+  type QaViewportKey,
+} from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type RoundPageRow = typeof schema.qaRoundPages.$inferSelect
@@ -46,23 +63,39 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out
 }
 
+/** Ticked qa_browser_ticks rows of one round, counted per browser and viewport. */
+interface TickedGroup { browser: string; viewport: string; n: number }
+
 /**
- * Ticks and status counts for one round. Ticks count across the round's browsers: Chromium from the
- * vp_* columns, the others from the number of ticked qa_browser_ticks rows per browser.
+ * Ticks and status counts for one round. A tick counts when its browser is one of the round's
+ * browsers and its viewport is in the round's set. Chromium ticks on a legacy round come from the
+ * vp_* columns; every other tick is a ticked qa_browser_ticks row (grouped), except a chromium row
+ * on a legacy key, which the column wins over. ticksTotal is pages x viewports x browsers.
  */
-function roundCounts(rows: RoundPageRow[], browsers: QaBrowserKey[], tickedByBrowser: Map<string, number>) {
+function roundCounts(
+  rows: RoundPageRow[],
+  browsers: QaBrowserKey[],
+  viewports: readonly QaViewportKey[],
+  legacy: boolean,
+  grouped: readonly TickedGroup[],
+) {
   let ticksDone = 0
   let pass = 0
   let fail = 0
   let untested = 0
   for (const r of rows) {
-    if (browsers.includes('chromium')) ticksDone += r.vpXl + r.vpDesktop + r.vpTablet + r.vpMobileL + r.vpMobileP
+    if (legacy && browsers.includes('chromium')) ticksDone += r.vpXl + r.vpDesktop + r.vpTablet + r.vpMobileL + r.vpMobileP
     if (r.status === 'pass') pass++
     else if (r.status === 'fail') fail++
     else untested++
   }
-  for (const b of browsers) if (b !== 'chromium') ticksDone += tickedByBrowser.get(b) ?? 0
-  return { ticksDone, ticksTotal: rows.length * QA_VIEWPORT_KEYS.length * browsers.length, pass, fail, untested }
+  const inSet = new Set<string>(viewports)
+  for (const g of grouped) {
+    if (!(browsers as string[]).includes(g.browser) || !inSet.has(g.viewport)) continue
+    if (tickStoreFor(g.browser, g.viewport) !== 'row') continue
+    ticksDone += g.n
+  }
+  return { ticksDone, ticksTotal: rows.length * viewports.length * browsers.length, pass, fail, untested }
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -87,26 +120,41 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     pageRows.push(...await database.select().from(schema.qaRoundPages).where(inArray(schema.qaRoundPages.roundId, ids)))
   }
 
-  // Ticked Firefox and WebKit ticks per round and browser: one grouped query per chunk of rounds.
-  const tickedCounts = new Map<string, Map<string, number>>()
+  // Ticked qa_browser_ticks rows per round, browser and viewport: one grouped query per chunk of rounds
+  // (90 round ids, so 91 bound values with the ticked flag). Filtered by each round's own set in code.
+  const tickedGroups = new Map<string, TickedGroup[]>()
   for (const ids of chunk(roundIds, ID_QUERY_CHUNK)) {
     const grouped = await database
-      .select({ roundId: schema.qaRoundPages.roundId, browser: schema.qaBrowserTicks.browser, n: sql<number>`count(*)` })
+      .select({
+        roundId: schema.qaRoundPages.roundId,
+        browser: schema.qaBrowserTicks.browser,
+        viewport: schema.qaBrowserTicks.viewport,
+        n: sql<number>`count(*)`,
+      })
       .from(schema.qaBrowserTicks)
       .innerJoin(schema.qaRoundPages, eq(schema.qaBrowserTicks.roundPageId, schema.qaRoundPages.id))
       .where(and(inArray(schema.qaRoundPages.roundId, ids), eq(schema.qaBrowserTicks.ticked, 1)))
-      .groupBy(schema.qaRoundPages.roundId, schema.qaBrowserTicks.browser)
+      .groupBy(schema.qaRoundPages.roundId, schema.qaBrowserTicks.browser, schema.qaBrowserTicks.viewport)
     for (const g of grouped) {
-      const perBrowser = tickedCounts.get(g.roundId) ?? new Map<string, number>()
-      perBrowser.set(g.browser, Number(g.n))
-      tickedCounts.set(g.roundId, perBrowser)
+      const list = tickedGroups.get(g.roundId) ?? []
+      list.push({ browser: g.browser, viewport: g.viewport, n: Number(g.n) })
+      tickedGroups.set(g.roundId, list)
     }
   }
 
   const items = rounds.map(round => {
     const own = pageRows.filter(p => p.roundId === round.id)
     const browsers = parseRoundBrowsers(round.browsers)
-    return { ...round, browsers, ...roundCounts(own, browsers, tickedCounts.get(round.id) ?? new Map<string, number>()), pages: own.length }
+    const viewports = parseRoundViewports(round.viewports)
+    const legacyViewports = isLegacyRoundViewports(round.viewports)
+    return {
+      ...round,
+      browsers,
+      viewports,
+      legacyViewports,
+      ...roundCounts(own, browsers, viewports, legacyViewports, tickedGroups.get(round.id) ?? []),
+      pages: own.length,
+    }
   })
   return NextResponse.json({ items })
 }
@@ -136,6 +184,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'browsers must be a non-empty list of chromium, firefox or webkit' }, { status: 400 })
     }
     browsers = parsed
+  }
+  // Omitted stores nothing: the round is a legacy round (NULL column).
+  let viewportsJson: string | undefined
+  if (body.viewports !== undefined) {
+    const parsed = parseViewportInput(body.viewports)
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+    viewportsJson = serialiseRoundViewports(parsed.keys)
   }
 
   const { id } = await params
@@ -193,11 +248,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     target,
     status: 'open',
     browsers: JSON.stringify(browsers),
+    ...(viewportsJson !== undefined ? { viewports: viewportsJson } : {}),
     createdBy: userId,
     createdAt: now,
   }
   const writes = [database.insert(schema.qaRounds).values(round), ...pageInserts]
   await database.batch([writes[0], ...writes.slice(1)])
 
-  return NextResponse.json({ item: { ...round, browsers, pages: planned.length } }, { status: 201 })
+  // The raw column string never leaves the route: the item carries the resolved keys.
+  const item = {
+    ...round,
+    browsers,
+    viewports: parseRoundViewports(viewportsJson),
+    legacyViewports: isLegacyRoundViewports(viewportsJson),
+    pages: planned.length,
+  }
+  return NextResponse.json({ item }, { status: 201 })
 }

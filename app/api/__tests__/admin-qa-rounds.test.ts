@@ -84,6 +84,7 @@ import { GET as roundPageGet, PATCH as roundPagePatch } from '@/app/api/admin/qa
 import { POST as scanPost } from '@/app/api/admin/qa/round-pages/[id]/scan/route'
 import { getRequestAuth } from '@/lib/server-auth'
 import { normaliseScanResult } from '@/lib/qa/normalise-scan'
+import { QA_CORE_VIEWPORT_KEYS } from '@/lib/qa/types'
 
 const ADMIN = { userId: 'user_liam', orgId: 'org_tahi', sessionId: 's1' }
 const CLIENT = { userId: 'user_client', orgId: 'org_client', sessionId: 's2' }
@@ -465,7 +466,7 @@ describe('browsers per round', () => {
       expect(state.reads.filter(t => t === 'qa_browser_ticks')).toHaveLength(1)
     })
 
-    it('skips the tick query for a Chrome only round and reports Chrome ticks', async () => {
+    it('runs the tick query even for a Chrome only round and reports Chrome ticks', async () => {
       seed('qa_sites', [seedSite()])
       seed('qa_rounds', [seedRound()])
       seed('qa_round_pages', [seedRoundPage({ vpXl: 1 })])
@@ -476,7 +477,7 @@ describe('browsers per round', () => {
       }
       expect(json.round.browsers).toEqual(['chromium'])
       expect(json.pages[0].browserTicks).toEqual({ chromium: { xl: true, desktop: false, tablet: false, mobile_l: false, mobile_p: false } })
-      expect(state.reads).not.toContain('qa_browser_ticks')
+      expect(state.reads).toContain('qa_browser_ticks')
     })
   })
 
@@ -664,5 +665,306 @@ describe('default browser and removed browsers', () => {
     seed('qa_rounds', [seedRound()])
     await roundPatch(jsonReq({ name: 'Renamed' }), ctx('round1'))
     expect(writesFor('qa_round_pages', 'update')).toHaveLength(0)
+  })
+})
+
+describe('viewport sets: rounds', () => {
+  const LEGACY_FIVE = ['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p']
+  const CORE_JSON = JSON.stringify(QA_CORE_VIEWPORT_KEYS)
+  const SMALL_JSON = '["phone_s","laptop_m"]'
+
+  interface RoundItem {
+    id: string
+    browsers: string[]
+    viewports: string[]
+    legacyViewports: boolean
+    ticksDone: number
+    ticksTotal: number
+    pages: number
+  }
+
+  describe('POST /api/admin/qa/sites/[id]/rounds', () => {
+    beforeEach(() => {
+      seed('qa_sites', [seedSite()])
+      seed('qa_pages', [seedPage('home', '/', null)])
+    })
+
+    it('stores no viewports value when it is omitted and returns the legacy five', async () => {
+      const res = await roundsPost(jsonReq({ name: 'R', target: 'staging' }), ctx('site1'))
+      expect(res.status).toBe(201)
+      const row = writesFor('qa_rounds')[0].rows[0]
+      expect(row.viewports === undefined || row.viewports === null).toBe(true)
+      const { item } = (await res.json()) as { item: RoundItem }
+      expect(item.viewports).toEqual(LEGACY_FIVE)
+      expect(item.legacyViewports).toBe(true)
+    })
+
+    it('stores an explicit core plus niche choice as canonical registry order JSON and returns it resolved', async () => {
+      const res = await roundsPost(
+        jsonReq({ name: 'R', target: 'staging', viewports: ['fold_narrow', 'laptop_m', 'phone_s', 'laptop_m'] }),
+        ctx('site1'),
+      )
+      expect(res.status).toBe(201)
+      expect(writesFor('qa_rounds')[0].rows[0].viewports).toBe('["phone_s","laptop_m","fold_narrow"]')
+      const { item } = (await res.json()) as { item: RoundItem }
+      expect(item.viewports).toEqual(['phone_s', 'laptop_m', 'fold_narrow'])
+      expect(item.legacyViewports).toBe(false)
+    })
+
+    it('400s a legacy key and names it as legacy', async () => {
+      const res = await roundsPost(jsonReq({ name: 'R', target: 'staging', viewports: ['xl'] }), ctx('site1'))
+      expect(res.status).toBe(400)
+      const { error } = (await res.json()) as { error: string }
+      expect(error).toContain('xl')
+      expect(error.toLowerCase()).toContain('legacy')
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('400s an unknown key, an empty list and a non-list before any database work', async () => {
+      for (const viewports of [['nope'], [], 'phone_s', [3]]) {
+        const res = await roundsPost(jsonReq({ name: 'R', target: 'staging', viewports }), ctx('site1'))
+        expect(res.status).toBe(400)
+      }
+      expect(state.writes).toHaveLength(0)
+      expect(state.reads).toHaveLength(0)
+    })
+
+    it('keeps every insert under 100 bound values with the full set chosen', async () => {
+      seed('qa_pages', Array.from({ length: 30 }, (_, i) => seedPage(`p${i}`, `/page-${i}`, null)))
+      const res = await roundsPost(
+        jsonReq({ name: 'Bulk', target: 'staging', browsers: ['chromium', 'firefox', 'webkit'], viewports: [...QA_CORE_VIEWPORT_KEYS, 'fold_narrow'] }),
+        ctx('site1'),
+      )
+      expect(res.status).toBe(201)
+      expect(state.writes.length).toBeGreaterThan(1)
+      for (const w of state.writes) {
+        const binds = w.table === 'qa_round_pages'
+          ? w.rows.length * 13
+          : w.rows.reduce((sum, r) => sum + Object.keys(r).length, 0)
+        expect(binds).toBeLessThanOrEqual(100)
+      }
+      // The round insert gains at most one bound value over the 8 it binds today.
+      expect(Object.keys(writesFor('qa_rounds')[0].rows[0]).length).toBeLessThanOrEqual(9)
+    })
+  })
+
+  describe('GET /api/admin/qa/sites/[id]/rounds', () => {
+    beforeEach(() => {
+      seed('qa_sites', [seedSite()])
+    })
+
+    it('gives a legacy round today numbers: column sum plus Firefox rows, pages x 5 x browsers', async () => {
+      seed('qa_rounds', [seedRound({ browsers: '["chromium","firefox"]' })])
+      seed('qa_round_pages', [
+        seedRoundPage({ id: 'rp1', vpXl: 1, vpDesktop: 1 }),
+        seedRoundPage({ id: 'rp2', path: '/about', sortOrder: 1, vpTablet: 1 }),
+      ])
+      seed('qa_browser_ticks', [
+        { roundId: 'round1', browser: 'firefox', viewport: 'desktop', n: 2 },
+        { roundId: 'round1', browser: 'firefox', viewport: 'xl', n: 1 },
+        { roundId: 'round1', browser: 'chromium', viewport: 'desktop', n: 1 },
+      ])
+      const { items } = (await (await roundsGet(getReq(), ctx('site1'))).json()) as { items: RoundItem[] }
+      expect(items).toHaveLength(1)
+      // 3 Chromium column ticks + 3 Firefox rows; the stray chromium row on a legacy key is ignored.
+      expect(items[0].ticksDone).toBe(6)
+      expect(items[0].ticksTotal).toBe(2 * 5 * 2)
+      expect(items[0].pages).toBe(2)
+      expect(items[0].viewports).toEqual(LEGACY_FIVE)
+      expect(items[0].legacyViewports).toBe(true)
+    })
+
+    it('counts a core round from its rows only, inside its browsers and set', async () => {
+      seed('qa_rounds', [seedRound({ id: 'round2', viewports: CORE_JSON, browsers: '["chromium"]' })])
+      seed('qa_round_pages', [
+        seedRoundPage({ id: 'rp1', roundId: 'round2', vpXl: 1, vpDesktop: 1 }),
+        seedRoundPage({ id: 'rp2', roundId: 'round2', path: '/about', sortOrder: 1 }),
+      ])
+      seed('qa_browser_ticks', [
+        { roundId: 'round2', browser: 'chromium', viewport: 'phone_m', n: 2 },
+        { roundId: 'round2', browser: 'chromium', viewport: 'laptop_m', n: 1 },
+        { roundId: 'round2', browser: 'chromium', viewport: 'xl', n: 1 },
+        { roundId: 'round2', browser: 'chromium', viewport: 'phone_compact', n: 1 },
+        { roundId: 'round2', browser: 'firefox', viewport: 'phone_m', n: 1 },
+      ])
+      const { items } = (await (await roundsGet(getReq(), ctx('site1'))).json()) as { items: RoundItem[] }
+      // The vp_* columns, the key outside the set and the browser outside the round all add nothing.
+      expect(items[0].ticksDone).toBe(3)
+      expect(items[0].ticksTotal).toBe(2 * 11 * 1)
+      expect(items[0].viewports).toEqual([...QA_CORE_VIEWPORT_KEYS])
+      expect(items[0].legacyViewports).toBe(false)
+    })
+
+    it('scales the total by the browsers of a core round and never returns the raw column', async () => {
+      seed('qa_rounds', [
+        seedRound({ id: 'round2', viewports: SMALL_JSON, browsers: '["chromium","webkit"]', createdAt: '2026-10-27T10:00:00.000Z' }),
+        seedRound({ id: 'round1' }),
+      ])
+      seed('qa_round_pages', [seedRoundPage({ id: 'rp1', roundId: 'round2' }), seedRoundPage({ id: 'rp9', roundId: 'round1' })])
+      seed('qa_browser_ticks', [{ roundId: 'round2', browser: 'webkit', viewport: 'laptop_m', n: 1 }])
+      const { items } = (await (await roundsGet(getReq(), ctx('site1'))).json()) as { items: RoundItem[] }
+      expect(items.map(i => i.id)).toEqual(['round2', 'round1'])
+      expect(items[0].ticksTotal).toBe(1 * 2 * 2)
+      expect(items[0].ticksDone).toBe(1)
+      expect(items[0].viewports).toEqual(['phone_s', 'laptop_m'])
+      expect(Array.isArray(items[0].viewports)).toBe(true)
+      expect(items[1].viewports).toEqual(LEGACY_FIVE)
+      expect(items[1].legacyViewports).toBe(true)
+      expect(items[1].ticksTotal).toBe(1 * 5 * 1)
+    })
+  })
+
+  describe('GET /api/admin/qa/rounds/[id]', () => {
+    beforeEach(() => {
+      seed('qa_sites', [seedSite()])
+      seed('qa_pages', [])
+    })
+
+    interface RoundJson {
+      round: { viewports: string[]; legacyViewports: boolean }
+      pages: { id: string; browserTicks: Record<string, Record<string, boolean>> }[]
+      viewportDefs: Record<string, unknown>[]
+    }
+
+    it('returns the legacy five for a legacy round with Chromium ticks from the columns', async () => {
+      seed('qa_rounds', [seedRound()])
+      seed('qa_round_pages', [seedRoundPage({ vpDesktop: 1 })])
+      const json = (await (await roundGet(getReq(), ctx('round1'))).json()) as RoundJson
+      expect(json.round.viewports).toEqual(LEGACY_FIVE)
+      expect(json.round.legacyViewports).toBe(true)
+      expect(json.pages[0].browserTicks.chromium).toEqual({ xl: false, desktop: true, tablet: false, mobile_l: false, mobile_p: false })
+      expect(json.viewportDefs.map(d => d.key)).toEqual(LEGACY_FIVE)
+    })
+
+    it('returns row based Chromium ticks for a core round and ignores the vp columns', async () => {
+      seed('qa_rounds', [seedRound({ viewports: CORE_JSON })])
+      seed('qa_round_pages', [seedRoundPage({ vpDesktop: 1 })])
+      seed('qa_browser_ticks', [
+        { roundPageId: 'rp1', browser: 'chromium', viewport: 'phone_m', ticked: 1 },
+        { roundPageId: 'rp1', browser: 'chromium', viewport: 'desktop', ticked: 1 },
+        { roundPageId: 'rp1', browser: 'chromium', viewport: 'phone_compact', ticked: 1 },
+      ])
+      const json = (await (await roundGet(getReq(), ctx('round1'))).json()) as RoundJson
+      expect(json.round.legacyViewports).toBe(false)
+      const ticks = json.pages[0].browserTicks.chromium
+      expect(Object.keys(ticks)).toEqual([...QA_CORE_VIEWPORT_KEYS])
+      expect(ticks.phone_m).toBe(true)
+      expect(ticks.laptop_m).toBe(false)
+      expect('desktop' in ticks).toBe(false)
+      expect('phone_compact' in ticks).toBe(false)
+    })
+
+    it('runs the tick query for a Chrome only round', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON })])
+      seed('qa_round_pages', [seedRoundPage()])
+      await roundGet(getReq(), ctx('round1'))
+      expect(state.reads).toContain('qa_browser_ticks')
+    })
+
+    it('returns the registry definition of each viewport with its Webflow breakpoint', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON })])
+      seed('qa_round_pages', [seedRoundPage()])
+      const json = (await (await roundGet(getReq(), ctx('round1'))).json()) as RoundJson
+      expect(json.round.viewports).toEqual(['phone_s', 'laptop_m'])
+      expect(json.viewportDefs).toHaveLength(2)
+      const laptop = json.viewportDefs[1]
+      expect(laptop).toMatchObject({
+        key: 'laptop_m', label: 'Laptop M', width: 1440, height: 780, dpr: 2, kind: 'laptop', tier: 'core', overview: true,
+      })
+      expect(typeof laptop.webflowBreakpoint).toBe('string')
+      expect((laptop.webflowBreakpoint as string).length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('PATCH /api/admin/qa/rounds/[id]', () => {
+    beforeEach(() => {
+      seed('qa_sites', [seedSite()])
+    })
+
+    function clearedWrites() {
+      return writesFor('qa_round_pages', 'update').filter(w => w.set && 'a11yCritical' in w.set)
+    }
+
+    it('changes the viewports of an open core round and stores them canonical', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON })])
+      const res = await roundPatch(jsonReq({ viewports: ['fold_narrow', 'laptop_m', 'phone_s'] }), ctx('round1'))
+      expect(res.status).toBe(200)
+      expect(writesFor('qa_rounds', 'update')[0].set).toEqual({ viewports: '["phone_s","laptop_m","fold_narrow"]' })
+      const json = (await res.json()) as { item: { viewports: string[]; legacyViewports: boolean }; recomputeSkipped: number }
+      expect(json.item.viewports).toEqual(['phone_s', 'laptop_m', 'fold_narrow'])
+      expect(json.item.legacyViewports).toBe(false)
+      expect(json.recomputeSkipped).toBe(0)
+    })
+
+    it('409s on a closed round and writes nothing', async () => {
+      seed('qa_rounds', [seedRound({ status: 'closed', viewports: SMALL_JSON })])
+      const res = await roundPatch(jsonReq({ viewports: ['phone_s'] }), ctx('round1'))
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'This round is closed' })
+      expect(writesFor('qa_rounds', 'update')).toHaveLength(0)
+    })
+
+    it('400s a legacy round with the fixed message and writes nothing', async () => {
+      seed('qa_rounds', [seedRound()])
+      const res = await roundPatch(jsonReq({ viewports: ['phone_s'] }), ctx('round1'))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'This round keeps the five viewports it was made with. Start a new round to use the new set.' })
+      expect(writesFor('qa_rounds', 'update')).toHaveLength(0)
+    })
+
+    it('400s invalid input before any read', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON })])
+      for (const viewports of [['xl'], ['nope'], [], 'phone_s']) {
+        const res = await roundPatch(jsonReq({ viewports }), ctx('round1'))
+        expect(res.status).toBe(400)
+      }
+      expect(state.reads).toHaveLength(0)
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('recounts the pages that have scans in a changed viewport', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON })])
+      seed('qa_round_pages', [seedRoundPage()])
+      seed('qa_scan_results', [{ roundPageId: 'rp1', viewport: 'laptop_m', browser: 'chromium', result: JSON.stringify(normaliseScanResult(cleanScan())), createdAt: NOW }])
+      seed('qa_link_results', [])
+      const res = await roundPatch(jsonReq({ viewports: ['phone_s'] }), ctx('round1'))
+      expect(res.status).toBe(200)
+      expect(state.reads).toContain('qa_scan_results')
+      // The only stored scan is on the removed viewport, so the page counts are cleared rather than left stale.
+      expect(clearedWrites()).toHaveLength(1)
+      expect(clearedWrites()[0].set).toMatchObject({ a11yCritical: null, perfIssues: null })
+    })
+
+    it('caps the recount at 40 pages and reports the rest as recomputeSkipped', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON })])
+      const ids = Array.from({ length: 45 }, (_, i) => `rp${String(i).padStart(2, '0')}`)
+      seed('qa_round_pages', ids.map((id, i) => seedRoundPage({ id, path: `/p${i}`, sortOrder: i })))
+      const stored = JSON.stringify(normaliseScanResult(cleanScan()))
+      seed('qa_scan_results', ids.map(id => ({ roundPageId: id, viewport: 'laptop_m', browser: 'chromium', result: stored, createdAt: NOW })))
+      seed('qa_link_results', [])
+      const res = await roundPatch(jsonReq({ viewports: ['phone_s'] }), ctx('round1'))
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { recomputeSkipped: number }).recomputeSkipped).toBe(5)
+      expect(clearedWrites()).toHaveLength(40)
+    })
+
+    it('recounts a page once when browsers and viewports both change', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON, browsers: '["chromium","firefox"]' })])
+      seed('qa_round_pages', [seedRoundPage()])
+      seed('qa_scan_results', [{ roundPageId: 'rp1', viewport: 'laptop_m', browser: 'firefox', result: JSON.stringify(normaliseScanResult(cleanScan())), createdAt: NOW }])
+      seed('qa_link_results', [])
+      const res = await roundPatch(jsonReq({ browsers: ['chromium'], viewports: ['phone_s'] }), ctx('round1'))
+      expect(res.status).toBe(200)
+      expect(clearedWrites()).toHaveLength(1)
+      expect(writesFor('qa_rounds', 'update')[0].set).toEqual({ browsers: '["chromium"]', viewports: '["phone_s"]' })
+    })
+
+    it('does not recount or read scans when only the name changes', async () => {
+      seed('qa_rounds', [seedRound({ viewports: SMALL_JSON })])
+      const res = await roundPatch(jsonReq({ name: 'Renamed' }), ctx('round1'))
+      expect(res.status).toBe(200)
+      expect(state.reads).not.toContain('qa_scan_results')
+      expect(writesFor('qa_round_pages', 'update')).toHaveLength(0)
+    })
   })
 })
