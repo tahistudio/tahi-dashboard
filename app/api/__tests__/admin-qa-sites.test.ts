@@ -412,6 +412,26 @@ describe('GET /api/admin/qa/sites/[id]', () => {
     const json = (await (await getSite(jsonReq('GET', '/sites/site_1'), ctx('site_1'))).json()) as { pages: Row[] }
     expect(json.pages.map(p => p.path)).toEqual(['/b', '/z', '/a'])
   })
+
+  it('returns each round with resolved viewports, never the raw column', async () => {
+    store.rows = {
+      organisations: [{ id: 'org_acme', name: 'Acme Ltd' }],
+      qa_sites: [site()],
+      qa_pages: [],
+      qa_rounds: [
+        { id: 'round_legacy', siteId: 'site_1', name: 'Old', browsers: '["chromium"]', viewports: null, createdAt: '2026-10-01T00:00:00.000Z' },
+        { id: 'round_core', siteId: 'site_1', name: 'New', browsers: '["chromium"]', viewports: '["laptop_m","phone_s"]', createdAt: '2026-11-01T00:00:00.000Z' },
+      ],
+    }
+    const json = (await (await getSite(jsonReq('GET', '/sites/site_1'), ctx('site_1'))).json()) as { rounds: Row[] }
+    const legacy = json.rounds.find(r => r.id === 'round_legacy') as Row
+    const core = json.rounds.find(r => r.id === 'round_core') as Row
+    expect(legacy.viewports).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+    expect(legacy.legacyViewports).toBe(true)
+    expect(core.viewports).toEqual(['phone_s', 'laptop_m'])
+    expect(core.legacyViewports).toBe(false)
+    for (const r of json.rounds) expect(typeof r.viewports).not.toBe('string')
+  })
 })
 
 describe('PATCH and DELETE /api/admin/qa/sites/[id]', () => {

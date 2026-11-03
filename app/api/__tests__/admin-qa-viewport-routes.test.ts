@@ -133,7 +133,7 @@ describe('viewport sets: scan POST', () => {
     const res = await scanPost(scanRequest({ viewport: 'x'.repeat(100), result: {} }), params)
     expect(res.status).toBe(400)
     const error = ((await res.json()) as { error: string }).error
-    expect(error).toBe('viewport must be a viewport key such as laptop_m')
+    expect(error).toBe('viewport must be a QA viewport key')
     expect(error.length).toBeLessThan(60)
     expect(dbCalls).not.toHaveBeenCalled()
     expect(loadRoundPage).not.toHaveBeenCalled()

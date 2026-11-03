@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!isRecord(body)) return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
   const viewport = body.viewport
   if (!isQaViewportKey(viewport)) {
-    return NextResponse.json({ error: 'viewport must be a viewport key such as laptop_m' }, { status: 400 })
+    return NextResponse.json({ error: 'viewport must be a QA viewport key' }, { status: 400 })
   }
   let requestedBrowser: QaBrowserKey | null = null
   if (body.browser !== undefined && body.browser !== null) {
