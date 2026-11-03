@@ -169,9 +169,16 @@ describe('scrubResponseHeaders by load type', () => {
 describe('static page headers', () => {
   it('lock the worker pages down: no sources, sandboxed, no referrer, no sniffing', () => {
     const h = staticPageHeaders()
-    expect(h['content-security-policy']).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    expect(h['content-security-policy']).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox")
     expect(h['referrer-policy']).toBe('no-referrer')
     expect(h['x-content-type-options']).toBe('nosniff')
+  })
+  it('lets the external link open but never allows a script', () => {
+    const csp = staticPageHeaders()['content-security-policy']
+    expect(csp).toContain("default-src 'none'")
+    expect(csp).toContain('allow-popups')
+    expect(csp).not.toContain('allow-scripts')
+    expect(csp).not.toContain('allow-same-origin')
   })
   it('keep what the pages already sent', () => {
     const h = staticPageHeaders()

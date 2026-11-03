@@ -31,7 +31,7 @@ import { useRound, type QaPagePatch } from './use-round'
 import { useActiveBrowser } from './use-active-browser'
 import { fetchFreshViewBaseUrl, useViewToken } from './use-view-token'
 import { useViewMode } from './use-view-mode'
-import { defaultSingleFrameDevice, isTokenFresh, showsSingleFrame, viewAtFullSizeFeatures, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
+import { defaultSingleFrameDevice, isTokenFresh, showsSingleFrame, viewportOrphaned, viewAtFullSizeFeatures, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
 import { useScanAll, SCAN_ALL_VIEWPORTS } from './scan-all'
 import { PageRail, filterPages, type QaRailFilter } from './page-rail'
 import { ViewportStrip } from './viewport-strip'
@@ -458,6 +458,13 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     if (!keepComposer) setComposer(null)
   }, [postToFrames, frameLoaded])
 
+  // The shown device can change without a click (rotating a phone across the narrow breakpoint swaps the
+  // default device). Comment mode or an open card tied to a frame that is no longer mounted is cleared.
+  useEffect(() => {
+    if (viewportOrphaned(oneFrame, commentViewportRef.current, mobileViewport)) applyCommentViewport(null)
+    if (viewportOrphaned(oneFrame, composerRef.current?.viewport ?? null, mobileViewport)) setComposer(null)
+  }, [oneFrame, mobileViewport, applyCommentViewport])
+
   // A new page reloads every frame, so comment mode, the composer and the selection start clean.
   useEffect(() => {
     applyCommentViewport(null)
@@ -634,7 +641,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     if (next === viewMode) return
     setComposer(null)
     const deviceAfter = deviceChoice ?? defaultSingleFrameDevice(isMobile, next)
-    if (next === 'inspect' && commentViewportRef.current && commentViewportRef.current !== deviceAfter) applyCommentViewport(null)
+    if (viewportOrphaned(showsSingleFrame(isMobile, next), commentViewportRef.current, deviceAfter)) applyCommentViewport(null)
     setViewMode(next)
   }
 

@@ -469,7 +469,7 @@ export function ViewportStrip({
           fill
           options={inspectDeviceOptions(availableWidth)}
         />
-        {allViewportsScanned(scanStates) ? null : (
+        {readOnly || allViewportsScanned(scanStates) ? null : (
           <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem' }}>{INSPECT_SCAN_NOTE}</p>
         )}
         <ViewportFrame key={v.key} {...frameProps(v, v.height / 16, false)} inspect columnWidthRem={availableWidth / 16} />

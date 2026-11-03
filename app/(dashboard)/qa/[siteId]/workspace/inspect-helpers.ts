@@ -28,6 +28,15 @@ export function defaultSingleFrameDevice(narrowLayout: boolean, mode: QaViewMode
   return narrowLayout && mode === 'inspect' ? 'mobile_p' : 'desktop'
 }
 
+/**
+ * True when something (comment mode, an open comment card) is tied to a viewport whose frame is not
+ * mounted: exactly one frame is shown and it is a different one. With all five frames mounted
+ * nothing is orphaned, and with nothing in progress (null) there is nothing to clear.
+ */
+export function viewportOrphaned(singleFrame: boolean, tied: QaViewportKey | null, shown: QaViewportKey): boolean {
+  return singleFrame && tied !== null && tied !== shown
+}
+
 /** True when every viewport has a stored scan for the page, so the "scan the others" hint can go. */
 export function allViewportsScanned(states: Readonly<Record<QaViewportKey, QaScanState>>): boolean {
   return QA_VIEWPORTS.every(v => states[v.key] === 'scanned')

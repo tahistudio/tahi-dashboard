@@ -21,6 +21,7 @@ import {
   viewAtFullSizeHint,
   viewAtFullSizeKind,
   viewAtFullSizeUrl,
+  viewportOrphaned,
 } from '../inspect-helpers'
 
 describe('parseViewMode', () => {
@@ -57,6 +58,30 @@ describe('defaultSingleFrameDevice', () => {
     expect(defaultSingleFrameDevice(false, 'inspect')).toBe('desktop')
     expect(defaultSingleFrameDevice(false, 'overview')).toBe('desktop')
     expect(defaultSingleFrameDevice(true, 'overview')).toBe('desktop')
+  })
+})
+
+describe('viewportOrphaned', () => {
+  it('flags comment mode or a card tied to a frame that is not the one mounted', () => {
+    expect(viewportOrphaned(true, 'xl', 'desktop')).toBe(true)
+    expect(viewportOrphaned(true, 'desktop', 'mobile_p')).toBe(true)
+  })
+
+  it('does not flag the mounted frame, nothing in progress, or the five-frame layout', () => {
+    expect(viewportOrphaned(true, 'desktop', 'desktop')).toBe(false)
+    expect(viewportOrphaned(true, null, 'desktop')).toBe(false)
+    expect(viewportOrphaned(false, 'xl', 'desktop')).toBe(false)
+  })
+
+  it('covers every switch: Overview to Inspect, Overview to the narrow single frame, and a layout flip', () => {
+    // Commenting on XL in Overview, switching to Inspect on Desktop.
+    expect(viewportOrphaned(showsSingleFrame(false, 'inspect'), 'xl', defaultSingleFrameDevice(false, 'inspect'))).toBe(true)
+    // Narrow layout, Overview shows one frame (Desktop): a comment on Tablet is orphaned.
+    expect(viewportOrphaned(showsSingleFrame(true, 'overview'), 'tablet', defaultSingleFrameDevice(true, 'overview'))).toBe(true)
+    // Rotating from the wide to the narrow layout in Inspect swaps Desktop for Mobile P.
+    expect(viewportOrphaned(showsSingleFrame(true, 'inspect'), 'desktop', defaultSingleFrameDevice(true, 'inspect'))).toBe(true)
+    // Switching to Overview on the wide layout mounts every frame again.
+    expect(viewportOrphaned(showsSingleFrame(false, 'overview'), 'xl', 'desktop')).toBe(false)
   })
 })
 

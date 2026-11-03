@@ -111,9 +111,11 @@ export const escapeHtml = (s: string): string =>
 
 /**
  * CSP for the worker's own static pages (errors, "This link leaves the site"). They need no script,
- * image or frame, only their inline style attribute, and run in an opaque origin.
+ * image or frame, only their inline style attribute, and run in an opaque origin. The two popup
+ * flags let the external link on "This link leaves the site" (target=_blank) open; scripts stay
+ * blocked because the sandbox has no allow-scripts and default-src is 'none'.
  */
-export const STATIC_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+export const STATIC_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox allow-popups allow-popups-to-escape-sandbox"
 
 /** Headers for the worker's own static pages, on top of the status and content type. */
 export function staticPageHeaders(): Record<string, string> {
