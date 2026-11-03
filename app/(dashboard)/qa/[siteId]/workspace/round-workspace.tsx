@@ -29,7 +29,9 @@ import {
 import { QA_RAIL_COLLAPSE_REM, QA_SINGLE_FRAME_REM, narrowerThanRem, useWorkspaceWidth } from './use-workspace-width'
 import { useRound, type QaPagePatch } from './use-round'
 import { useActiveBrowser } from './use-active-browser'
-import { useViewToken } from './use-view-token'
+import { fetchFreshViewBaseUrl, useViewToken } from './use-view-token'
+import { useViewMode } from './use-view-mode'
+import { isTokenFresh, showsSingleFrame, viewAtFullSizeUrl, type QaViewMode } from './inspect-helpers'
 import { useScanAll, SCAN_ALL_VIEWPORTS } from './scan-all'
 import { PageRail, filterPages, type QaRailFilter } from './page-rail'
 import { ViewportStrip } from './viewport-strip'
@@ -222,6 +224,10 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   const [railChoice, setRailChoice] = useState<boolean | null>(null)
   const railCollapsed = railChoice ?? narrowerThanRem(workspaceWidth, QA_RAIL_COLLAPSE_REM)
   const [railSheetOpen, setRailSheetOpen] = useState(false)
+  // Inspect (one frame at scale 1, the default) or Overview (all frames scaled). Remembered across visits.
+  const { mode: viewMode, setMode: setViewMode } = useViewMode()
+  // Inspect and the narrow layout mount exactly one frame; mobileViewport (despite the name) is which one.
+  const oneFrame = showsSingleFrame(isMobile, viewMode)
   const [mobileViewport, setMobileViewport] = useState<QaViewportKey>(MOBILE_DEFAULT)
   const [issuesOpen, setIssuesOpen] = useState(true)
   // Wide mode is the user's saved choice; it only takes effect on the desktop layout.
@@ -601,10 +607,47 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
     if (commentViewportRef.current && commentViewportRef.current !== key) applyCommentViewport(null)
   }
 
+  /**
+   * Switches between Inspect and Overview. Every frame remounts, so an open comment card has nothing to
+   * sit on, and comment mode on a frame that Inspect will not show is switched off.
+   */
+  function changeViewMode(next: QaViewMode) {
+    if (next === viewMode) return
+    setComposer(null)
+    if (next === 'inspect' && commentViewportRef.current && commentViewportRef.current !== mobileViewport) applyCommentViewport(null)
+    setViewMode(next)
+  }
+
+  /**
+   * Opens the page on screen at its true size in a new tab, through the viewer. The cached view token
+   * is used while it has more than a minute left, so the tab opens inside the click. Otherwise a fresh
+   * token is requested first. The URL carries the token and is only ever handed to window.open: it is
+   * not logged, shown, stored or put in a toast.
+   */
+  async function openFullSize() {
+    const path = selectedRow?.path
+    if (!path) return
+    let base = baseUrl
+    if (!base || !isTokenFresh(viewer.expiresAtMs, Date.now())) {
+      const fresh = await fetchFreshViewBaseUrl(siteId, round.target)
+      if (!fresh.ok) {
+        showToast(fresh.message, 'error')
+        return
+      }
+      base = fresh.baseUrl
+    }
+    const url = viewAtFullSizeUrl(base, path)
+    if (!url) {
+      showToast('Could not build the page link.', 'error')
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   function showIssue(issue: QaIssue) {
     if (!issue.selector) return
     const key: QaViewportKey = issue.viewport ?? 'desktop'
-    if (isMobile && mobileViewport !== key) {
+    if (oneFrame && mobileViewport !== key) {
       // The other frame has not loaded yet; queue until it loads or scans.
       pendingHighlights.current[key] = issue.selector
       changeMobileViewport(key)
@@ -616,7 +659,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
   function showComment(comment: NumberedComment) {
     setSelectedCommentId(comment.id)
     const key = comment.viewport
-    if (isMobile && mobileViewport !== key) {
+    if (oneFrame && mobileViewport !== key) {
       // The frame for that viewport is not mounted yet; focus the pin once it loads.
       pendingFocus.current[key] = comment.id
       changeMobileViewport(key)
@@ -1071,7 +1114,7 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
                 onChange={changeCommentView}
                 roundBrowsers={roundBrowsers}
                 activeBrowser={activeBrowser}
-                viewports={isMobile ? [mobileViewport] : QA_VIEWPORTS.map(v => v.key)}
+                viewports={oneFrame ? [mobileViewport] : QA_VIEWPORTS.map(v => v.key)}
                 shown={viewCount.shown}
                 total={viewCount.total}
               />
@@ -1114,6 +1157,9 @@ function RoundWorkspaceBody(props: RoundWorkspaceBodyProps) {
               onCommentToggle={toggleCommentViewport}
               onExpandedChange={handleExpandedChange}
               reloadKey={frameReload}
+              viewMode={viewMode}
+              onViewModeChange={changeViewMode}
+              onViewFull={() => void openFullSize()}
             />
           ) : (
             <p className="text-[var(--color-text-muted)]" style={{ fontSize: '0.875rem' }}>No pages in this round yet.</p>

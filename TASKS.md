@@ -1452,6 +1452,19 @@ scheduled; each needs a scope before building.
   returns per-category totals. Open before [x]: apply 0119 on production
   BEFORE the push, live smoke, 375px, dark mode. The SQA.5 plan now reserves
   0120 for its qa_via migration.
+- [ ] SQA.7 - [FE] Site QA Inspect mode and View at 100% (Liam, 2026-11-03: a
+  non-integer frame scale such as 0.864127 puts element edges between device
+  pixels, so a hairline shows that real Chrome does not; only scale 1 is
+  seam-free). Built and committed on a worktree branch, not merged: Inspect mode (default, one
+  device frame at scale 1 with no transform, sideways scroll in its own box,
+  device switcher, remembered in localStorage `tahi-qa-view-mode`), the old
+  all-frames layout kept as Overview with a "Scaled to fit" note, and a "View
+  at 100%" button on every frame header that opens the page in a new tab through
+  the proxy with a fresh token. No schema change; the five viewports are
+  unchanged. Open before [x]: push, live render check (Inspect at 1920 and 375,
+  DevTools shows no transform, Overview note, View at 100% tab), dark mode, 375px.
+  Worker follow-ups (not done): skip the scanner and add a CSP sandbox on top-level
+  loads of the qa-view origin.
 - [ ] NX16 - [Infra] Upgrade Next.js 15 to 16. OpenNext 1.17 refuses to
   build Next 15 since its support window ended (21 Oct 2026); the first
   dashboard deploy after that (f77a59b6, 2026-10-27) failed at "Build

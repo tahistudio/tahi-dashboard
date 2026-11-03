@@ -33,6 +33,15 @@ test.use({
 
 test.beforeEach(async ({ page }) => {
   await primePage(page)
+  // Inspect (one frame at scale 1) is the default view mode. These flows were written against the
+  // five scaled frames, so they run in Overview.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('tahi-qa-view-mode', 'overview')
+    } catch {
+      // Storage can be blocked; the flows then run in the default mode.
+    }
+  })
 })
 
 async function archiveSite(page: Page, siteUrl: string): Promise<void> {

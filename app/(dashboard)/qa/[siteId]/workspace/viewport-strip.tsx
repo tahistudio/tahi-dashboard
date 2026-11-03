@@ -1,13 +1,14 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
-import { Link2, Maximize2, Minimize2, Unlink2 } from 'lucide-react'
+import { Info, Link2, Maximize2, Minimize2, Unlink2 } from 'lucide-react'
 import { SegmentedControl } from '@/components/tahi/segmented-control'
 import { QA_VIEWPORTS, type QaScanResult, type QaScrollMessage, type QaScrollSyncMessage, type QaScrollToMessage, type QaViewportKey } from '@/lib/qa/types'
 import { ViewportFrame, frameOuterWidthRem, type QaViewportDef } from './viewport-frame'
 import { comparablePath } from './comparable-path'
 import { createRelayQueue, parseScrollMessage, relayTargets, scrollToFor, syncActive, type RelayQueue } from './scroll-helpers'
 import { viewportForSource } from './comments-helpers'
+import { inspectDeviceOptions, type QaViewMode } from './inspect-helpers'
 import type { QaScanState, QaTickMap } from './qa-types'
 
 const ROW_REM = 28
@@ -128,7 +129,19 @@ export interface ViewportStripProps {
   onExpandedChange?: (viewport: QaViewportKey | null) => void
   /** Bumped to reload every frame; each bump adds a cache-busting query the viewer forwards. 0 is the plain URL. */
   reloadKey?: number
+  /**
+   * Inspect shows one frame at scale 1 (the device chosen with mobileViewport), Overview the
+   * scaled layout. Inspect and the single-frame layout both mount exactly one frame.
+   */
+  viewMode: QaViewMode
+  onViewModeChange: (mode: QaViewMode) => void
+  /** Opens the current page at its true size in a new tab. Omit to hide the "View at 100%" buttons. */
+  onViewFull?: () => void
 }
+
+/** Shown under the mode control in Overview, and as the tooltip of its option. */
+export const OVERVIEW_NOTE = 'Scaled to fit. Thin lines can appear on edges at this scale. Use Inspect for pixel accurate checks.'
+const INSPECT_NOTE = 'One device at its true size (1:1), no scaling.'
 
 function isScanMessage(data: unknown): data is { type: 'qa:scan'; version: 1; url: string; viewportWidth: number; result: QaScanResult } {
   if (!data || typeof data !== 'object') return false
@@ -161,6 +174,9 @@ export function ViewportStrip({
   onCommentToggle,
   onExpandedChange,
   reloadKey = 0,
+  viewMode,
+  onViewModeChange,
+  onViewFull,
 }: ViewportStripProps) {
   const viewOrigin = useMemo(() => {
     try {
@@ -170,6 +186,7 @@ export function ViewportStrip({
     }
   }, [baseUrl])
   const isMobile = singleFrame
+  const inspect = viewMode === 'inspect'
   const [expandedKey, setExpandedKey] = useState<QaViewportKey | null>(null)
   const [availableWidth, setAvailableWidth] = useState(0)
   const [screenHeight, setScreenHeight] = useState(0)
@@ -184,7 +201,7 @@ export function ViewportStrip({
   readOnlyRef.current = readOnly
   // Synced scrolling: on by default, restored after mount like the other prefs.
   const [syncOn, setSyncOnState] = useState(true)
-  const syncIsActive = syncActive(syncOn, isMobile, expandedKey)
+  const syncIsActive = syncActive(syncOn, isMobile || inspect, expandedKey)
   const syncActiveRef = useRef(syncIsActive)
   syncActiveRef.current = syncIsActive
   // Frames that have loaded their page. Before that a frame is the dashboard's own blank document.
@@ -250,7 +267,7 @@ export function ViewportStrip({
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [isMobile, expandedKey])
+  }, [isMobile, expandedKey, inspect])
 
   // Scan results: only from our own frames, only from the viewer origin.
   useEffect(() => {
@@ -362,10 +379,10 @@ export function ViewportStrip({
     onExpandedChangeRef.current?.(expandedKey)
   }, [expandedKey])
 
-  // Leave expanded mode when the path changes or the layout switches to mobile.
+  // Leave expanded mode when the path changes, the layout switches to mobile or Inspect takes over.
   useEffect(() => {
     setExpandedKey(null)
-  }, [path, isMobile])
+  }, [path, isMobile, inspect])
 
   // The query is dropped when paths are compared (comparablePath), so a reload key never breaks matching.
   const src = reloadKey > 0
@@ -384,6 +401,7 @@ export function ViewportStrip({
       onExpand: () => setExpandedKey(expanded ? null : v.key),
       readOnly,
       readOnlyReason,
+      onViewFull,
       commenting: commentViewport === v.key,
       onCommentToggle: () => onCommentToggle(v.key),
       onLoad: () => {
@@ -403,6 +421,61 @@ export function ViewportStrip({
     }
   }
 
+  const modeControl = (
+    <SegmentedControl<QaViewMode>
+      value={viewMode}
+      onChange={onViewModeChange}
+      ariaLabel="Preview mode"
+      size="sm"
+      options={[
+        { value: 'inspect', label: 'Inspect', title: INSPECT_NOTE },
+        { value: 'overview', label: 'Overview', title: OVERVIEW_NOTE },
+      ]}
+    />
+  )
+  const overviewNote = (
+    <p className="flex items-start text-[var(--color-text-muted)]" style={{ gap: '0.375rem', fontSize: '0.75rem' }}>
+      <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+      <span>{OVERVIEW_NOTE}</span>
+    </p>
+  )
+  const wideButton = (
+    <button
+      type="button"
+      onClick={() => onWideChange(!wide)}
+      aria-pressed={wide}
+      className="flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
+      style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
+    >
+      {wide ? <Minimize2 className="size-4" aria-hidden="true" /> : <Maximize2 className="size-4" aria-hidden="true" />}
+      {wide ? 'Exit wide' : 'Wide'}
+    </button>
+  )
+
+  if (inspect) {
+    // One frame at its true size. The device switcher doubles as the narrow layout's viewport switcher.
+    const v = QA_VIEWPORTS.find(x => x.key === mobileViewport) ?? QA_VIEWPORTS[1]
+    return (
+      <div className="flex w-full min-w-0 flex-col" style={{ gap: '0.5rem' }} ref={containerRef}>
+        <div className="flex flex-wrap items-center justify-between" style={{ gap: '0.5rem' }}>
+          <div className="flex items-center" style={{ gap: '0.5rem' }}>
+            <span className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem', fontWeight: 600 }}>View</span>
+            {modeControl}
+          </div>
+          {isMobile ? null : wideButton}
+        </div>
+        <SegmentedControl<QaViewportKey>
+          value={v.key}
+          onChange={onMobileViewportChange}
+          ariaLabel="Device"
+          fill
+          options={inspectDeviceOptions(availableWidth)}
+        />
+        <ViewportFrame key={v.key} {...frameProps(v, v.height / 16, false)} inspect columnWidthRem={availableWidth / 16} />
+      </div>
+    )
+  }
+
   if (isMobile) {
     const v = QA_VIEWPORTS.find(x => x.key === mobileViewport) ?? QA_VIEWPORTS[1]
     // One frame scaled to the width on offer, but never taller than about 70svh.
@@ -411,6 +484,13 @@ export function ViewportStrip({
     const rowRem = (v.height * scale) / 16
     return (
       <div className="flex w-full min-w-0 flex-col" style={{ gap: '0.75rem' }} ref={containerRef}>
+        <div className="flex flex-col" style={{ gap: '0.5rem' }}>
+          <div className="flex items-center" style={{ gap: '0.5rem' }}>
+            <span className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem', fontWeight: 600 }}>View</span>
+            {modeControl}
+          </div>
+          {overviewNote}
+        </div>
         <SegmentedControl<QaViewportKey>
           value={v.key}
           onChange={onMobileViewportChange}
@@ -453,38 +533,36 @@ export function ViewportStrip({
   const rowRemFor = (v: QaViewportDef) => (effectiveZoom === 'actual' ? actualRowRem(v) : sharedRowRem)
   return (
     <div className="flex w-full min-w-0 flex-col" style={{ gap: '0.5rem' }}>
-      <div className="flex flex-wrap items-center justify-end" style={{ gap: '0.5rem' }}>
-        <span className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Zoom</span>
-        <SegmentedControl<QaZoom>
-          value={effectiveZoom}
-          onChange={setZoom}
-          ariaLabel="Preview zoom"
-          size="sm"
-          options={zoomOptions}
-        />
-        <button
-          type="button"
-          onClick={() => setSyncOn(!syncOn)}
-          aria-pressed={syncOn}
-          title={syncOn ? 'All frames scroll together. Click to scroll each frame on its own.' : 'Frames scroll independently. Click to scroll them together.'}
-          className={`flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border px-3 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)] ${syncOn ? 'border-[var(--color-brand)] bg-[var(--color-brand-50)]' : 'border-[var(--color-border)] bg-[var(--color-bg)]'}`}
-          style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
-        >
-          {syncOn ? <Link2 className="size-4" aria-hidden="true" /> : <Unlink2 className="size-4" aria-hidden="true" />}
-          {/* Constant text so the visible label is the accessible name; the pressed fill and icon show the state. */}
-          Sync scroll
-        </button>
-        <button
-          type="button"
-          onClick={() => onWideChange(!wide)}
-          aria-pressed={wide}
-          className="flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)]"
-          style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
-        >
-          {wide ? <Minimize2 className="size-4" aria-hidden="true" /> : <Maximize2 className="size-4" aria-hidden="true" />}
-          {wide ? 'Exit wide' : 'Wide'}
-        </button>
+      <div className="flex flex-wrap items-center justify-between" style={{ gap: '0.5rem' }}>
+        <div className="flex items-center" style={{ gap: '0.5rem' }}>
+          <span className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem', fontWeight: 600 }}>View</span>
+          {modeControl}
+        </div>
+        <div className="flex flex-wrap items-center justify-end" style={{ gap: '0.5rem' }}>
+          <span className="text-[var(--color-text-muted)]" style={{ fontSize: '0.75rem', fontWeight: 600 }}>Zoom</span>
+          <SegmentedControl<QaZoom>
+            value={effectiveZoom}
+            onChange={setZoom}
+            ariaLabel="Preview zoom"
+            size="sm"
+            options={zoomOptions}
+          />
+          <button
+            type="button"
+            onClick={() => setSyncOn(!syncOn)}
+            aria-pressed={syncOn}
+            title={syncOn ? 'All frames scroll together. Click to scroll each frame on its own.' : 'Frames scroll independently. Click to scroll them together.'}
+            className={`flex min-h-[2.75rem] items-center rounded-[var(--radius-leaf-sm)] border px-3 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand)] ${syncOn ? 'border-[var(--color-brand)] bg-[var(--color-brand-50)]' : 'border-[var(--color-border)] bg-[var(--color-bg)]'}`}
+            style={{ gap: '0.375rem', fontSize: '0.8125rem', fontWeight: 600 }}
+          >
+            {syncOn ? <Link2 className="size-4" aria-hidden="true" /> : <Unlink2 className="size-4" aria-hidden="true" />}
+            {/* Constant text so the visible label is the accessible name; the pressed fill and icon show the state. */}
+            Sync scroll
+          </button>
+          {wideButton}
+        </div>
       </div>
+      {overviewNote}
       <div
         ref={containerRef}
         className="relative flex w-full min-w-0 items-start overflow-x-auto pb-2"
