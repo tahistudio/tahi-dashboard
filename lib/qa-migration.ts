@@ -45,3 +45,12 @@ export const QA_BROWSERS_MIGRATION = [
   `DROP INDEX IF EXISTS idx_qa_scan_results_page_vp`,
   `ALTER TABLE qa_comments ADD COLUMN browser text NOT NULL DEFAULT 'chromium'`,
 ] as const
+
+/**
+ * Viewport set per round (SQA.8), mirrored in drizzle/migrations/0121_qa_round_viewports.sql. Nullable with no
+ * default: NULL is a round made before the viewport set and keeps the five legacy viewports. The migrate runner
+ * tolerates "duplicate column name", so a rerun is safe.
+ */
+export const QA_ROUND_VIEWPORTS_MIGRATION = [
+  `ALTER TABLE qa_rounds ADD COLUMN viewports text`,
+] as const
