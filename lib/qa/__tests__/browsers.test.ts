@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   countTicks,
   detectBrowser,
+  emptyTickMap,
   issueDedupeKey,
   mergeBrowserIssues,
   mergeBrowserTicks,
@@ -9,7 +10,14 @@ import {
   parseRoundBrowsers,
 } from '@/lib/qa/browsers'
 import { browserPageIssues } from '@/lib/qa/issue-rules'
-import { QA_BROWSERS, browserLabel, type QaIssue, type QaScanResult } from '@/lib/qa/types'
+import {
+  QA_BROWSERS,
+  QA_CORE_VIEWPORT_KEYS,
+  QA_LEGACY_VIEWPORT_KEYS,
+  browserLabel,
+  type QaIssue,
+  type QaScanResult,
+} from '@/lib/qa/types'
 
 const UA = {
   chromeWin: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
@@ -291,5 +299,152 @@ describe('scansByBrowser with a browser filter', () => {
     expect(Object.keys(all)).toEqual(['chromium', 'firefox'])
     expect(Object.keys(scansByBrowser([row('chromium'), row('firefox')], ['chromium']))).toEqual(['chromium'])
     expect(scansByBrowser([row('firefox')], ['chromium'])).toEqual({})
+  })
+
+  it('leaves out scans on viewports that are not in the set, like a removed browser', async () => {
+    const { scansByBrowser } = await import('@/lib/qa/server')
+    const row = (browser: string, viewport: string) => ({ viewport, browser, result: JSON.stringify({}) })
+    const rows = [row('chromium', 'desktop'), row('chromium', 'phone_m'), row('firefox', 'phone_m')]
+    const all = scansByBrowser(rows)
+    expect(Object.keys(all.chromium ?? {})).toEqual(['desktop', 'phone_m'])
+    const core = scansByBrowser(rows, undefined, QA_CORE_VIEWPORT_KEYS)
+    expect(Object.keys(core.chromium ?? {})).toEqual(['phone_m'])
+    expect(Object.keys(core.firefox ?? {})).toEqual(['phone_m'])
+    expect(scansByBrowser([row('chromium', 'phone_m')], ['chromium'], QA_LEGACY_VIEWPORT_KEYS)).toEqual({})
+  })
+})
+
+describe('emptyTickMap', () => {
+  it('defaults to the five legacy keys, all false, in legacy order', () => {
+    const map = emptyTickMap()
+    expect(map).toEqual({ xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false })
+    expect(Object.keys(map)).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+    expect(Object.keys(map)).toEqual([...QA_LEGACY_VIEWPORT_KEYS])
+  })
+
+  it('covers every key of the given set', () => {
+    const map = emptyTickMap(QA_CORE_VIEWPORT_KEYS)
+    expect(Object.keys(map)).toHaveLength(11)
+    expect(Object.keys(map)).toEqual([...QA_CORE_VIEWPORT_KEYS])
+    expect(Object.values(map).every(v => v === false)).toBe(true)
+  })
+})
+
+describe('mergeBrowserTicks over a viewport set', () => {
+  const page = (id: string, over: Partial<{ vpXl: number; vpDesktop: number; vpTablet: number; vpMobileL: number; vpMobileP: number }> = {}) => ({
+    id, vpXl: 0, vpDesktop: 0, vpTablet: 0, vpMobileL: 0, vpMobileP: 0, ...over,
+  })
+
+  it('gives a legacy round exactly the object it always had, in the same key order', () => {
+    const merged = mergeBrowserTicks(
+      [page('p1', { vpXl: 1, vpMobileP: 1 })],
+      [{ roundPageId: 'p1', browser: 'firefox', viewport: 'tablet', ticked: 1 }],
+      ['chromium', 'firefox'],
+      QA_LEGACY_VIEWPORT_KEYS,
+    )
+    const chromium = merged.get('p1')?.chromium
+    const firefox = merged.get('p1')?.firefox
+    expect(chromium).toEqual({ xl: true, desktop: false, tablet: false, mobile_l: false, mobile_p: true })
+    expect(Object.keys(chromium ?? {})).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+    expect(firefox).toEqual({ xl: false, desktop: false, tablet: true, mobile_l: false, mobile_p: false })
+    expect(Object.keys(firefox ?? {})).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+    expect(JSON.stringify(merged.get('p1'))).toBe(
+      '{"chromium":{"xl":true,"desktop":false,"tablet":false,"mobile_l":false,"mobile_p":true},'
+      + '"firefox":{"xl":false,"desktop":false,"tablet":true,"mobile_l":false,"mobile_p":false}}',
+    )
+  })
+
+  it('uses the legacy five when no set is given', () => {
+    const withSet = mergeBrowserTicks([page('p1', { vpTablet: 1 })], [], ['chromium', 'webkit'], QA_LEGACY_VIEWPORT_KEYS)
+    const without = mergeBrowserTicks([page('p1', { vpTablet: 1 })], [], ['chromium', 'webkit'])
+    expect(JSON.stringify(without.get('p1'))).toBe(JSON.stringify(withSet.get('p1')))
+  })
+
+  it('reads chromium from the columns for a legacy round and ignores a chromium row on a legacy key', () => {
+    const merged = mergeBrowserTicks(
+      [page('p1', { vpDesktop: 1 })],
+      [
+        { roundPageId: 'p1', browser: 'chromium', viewport: 'desktop', ticked: 0 },
+        { roundPageId: 'p1', browser: 'chromium', viewport: 'xl', ticked: 1 },
+      ],
+      ['chromium'],
+      QA_LEGACY_VIEWPORT_KEYS,
+    )
+    expect(merged.get('p1')?.chromium?.desktop).toBe(true)
+    expect(merged.get('p1')?.chromium?.xl).toBe(false)
+  })
+
+  it('reads firefox and webkit rows on legacy keys', () => {
+    const merged = mergeBrowserTicks(
+      [page('p1')],
+      [
+        { roundPageId: 'p1', browser: 'firefox', viewport: 'xl', ticked: 1 },
+        { roundPageId: 'p1', browser: 'webkit', viewport: 'mobile_l', ticked: 1 },
+      ],
+      ['chromium', 'firefox', 'webkit'],
+      QA_LEGACY_VIEWPORT_KEYS,
+    )
+    expect(merged.get('p1')?.firefox?.xl).toBe(true)
+    expect(merged.get('p1')?.webkit?.mobile_l).toBe(true)
+    expect(merged.get('p1')?.chromium?.xl).toBe(false)
+  })
+
+  it('reads chromium rows for a core round and ignores the vp_* columns', () => {
+    const merged = mergeBrowserTicks(
+      [page('p1', { vpDesktop: 1, vpXl: 1 })],
+      [
+        { roundPageId: 'p1', browser: 'chromium', viewport: 'laptop_m', ticked: 1 },
+        { roundPageId: 'p1', browser: 'chromium', viewport: 'phone_s', ticked: 0 },
+        { roundPageId: 'p1', browser: 'firefox', viewport: 'phone_s', ticked: 1 },
+      ],
+      ['chromium', 'firefox'],
+      QA_CORE_VIEWPORT_KEYS,
+    )
+    const chromium = merged.get('p1')?.chromium ?? {}
+    expect(Object.keys(chromium)).toEqual([...QA_CORE_VIEWPORT_KEYS])
+    expect(chromium.laptop_m).toBe(true)
+    expect(chromium.phone_s).toBe(false)
+    expect('desktop' in chromium).toBe(false)
+    expect('xl' in chromium).toBe(false)
+    expect(Object.values(chromium).filter(Boolean)).toHaveLength(1)
+    expect(merged.get('p1')?.firefox?.phone_s).toBe(true)
+  })
+
+  it('ignores a row whose viewport is outside the set and a row for a browser outside the round', () => {
+    const merged = mergeBrowserTicks(
+      [page('p1')],
+      [
+        { roundPageId: 'p1', browser: 'firefox', viewport: 'desktop_qhd', ticked: 1 },
+        { roundPageId: 'p1', browser: 'firefox', viewport: 'xl', ticked: 1 },
+        { roundPageId: 'p1', browser: 'webkit', viewport: 'phone_m', ticked: 1 },
+      ],
+      ['chromium', 'firefox'],
+      QA_CORE_VIEWPORT_KEYS,
+    )
+    const firefox = merged.get('p1')?.firefox ?? {}
+    expect(Object.values(firefox).some(Boolean)).toBe(false)
+    expect('desktop_qhd' in firefox).toBe(false)
+    expect(Object.keys(merged.get('p1') ?? {})).toEqual(['chromium', 'firefox'])
+  })
+
+  it('countTicks counts over the set for a core round with three browsers', () => {
+    const merged = mergeBrowserTicks(
+      [page('p1')],
+      [
+        { roundPageId: 'p1', browser: 'chromium', viewport: 'phone_s', ticked: 1 },
+        { roundPageId: 'p1', browser: 'chromium', viewport: 'laptop_m', ticked: 1 },
+        { roundPageId: 'p1', browser: 'firefox', viewport: 'phone_s', ticked: 1 },
+        { roundPageId: 'p1', browser: 'webkit', viewport: 'tablet_s', ticked: 1 },
+        { roundPageId: 'p1', browser: 'webkit', viewport: 'phone_m', ticked: 1 },
+        { roundPageId: 'p1', browser: 'webkit', viewport: 'phone_l', ticked: 0 },
+      ],
+      ['chromium', 'firefox', 'webkit'],
+      QA_CORE_VIEWPORT_KEYS,
+    )
+    const ticks = merged.get('p1') ?? {}
+    expect(countTicks(ticks, ['chromium', 'firefox', 'webkit'], QA_CORE_VIEWPORT_KEYS)).toBe(5)
+    expect(countTicks(ticks, ['chromium'], QA_CORE_VIEWPORT_KEYS)).toBe(2)
+    expect(countTicks(ticks, ['chromium', 'firefox', 'webkit'], ['phone_s', 'phone_m'])).toBe(3)
+    expect(countTicks(ticks, ['chromium', 'firefox', 'webkit'])).toBe(0)
   })
 })

@@ -3,15 +3,20 @@
  *
  * A page renders with the engine of the browser it is open in, so a round can
  * cover several browsers and every tick, scan and comment says which one it
- * came from. Chromium ticks stay in the qa_round_pages.vp_* columns (so rounds
- * made before browsers existed read the same); Firefox and WebKit ticks live in
- * qa_browser_ticks.
+ * came from. Chromium ticks on the five legacy viewports stay in the
+ * qa_round_pages.vp_* columns (so rounds made before browsers existed read the
+ * same). Every other tick (Firefox and WebKit on any viewport, Chromium on the
+ * registry viewports) is a qa_browser_ticks row. The round's viewport set
+ * (qa_rounds.viewports) decides which keys are read.
  */
 import {
   QA_BROWSER_KEYS,
   QA_DEFAULT_BROWSER,
-  QA_VIEWPORT_KEYS,
+  QA_LEGACY_VIEWPORT_KEYS,
   isQaBrowserKey,
+  isQaViewportKey,
+  legacyTickColumn,
+  tickStoreFor,
   type QaBrowserKey,
   type QaIssue,
   type QaViewportKey,
@@ -66,10 +71,13 @@ export function parseBrowserInput(value: unknown): QaBrowserKey[] | null {
 }
 
 /** Ticks for one browser on one round page. */
-export type QaBrowserTickMap = Record<QaViewportKey, boolean>
+export type QaBrowserTickMap = Partial<Record<QaViewportKey, boolean>>
 
-export function emptyTickMap(): QaBrowserTickMap {
-  return { xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false }
+/** Every given key false. The default is the five legacy keys. */
+export function emptyTickMap(keys: readonly QaViewportKey[] = QA_LEGACY_VIEWPORT_KEYS): QaBrowserTickMap {
+  const map: QaBrowserTickMap = {}
+  for (const key of keys) map[key] = false
+  return map
 }
 
 /** The vp_* columns of a qa_round_pages row. */
@@ -100,41 +108,54 @@ export interface BrowserTickRow {
 }
 
 /**
- * Ticks per browser for every page of a round. Chromium comes from the vp_*
- * columns, the other browsers from the qa_browser_ticks rows of the whole round
- * (one query). Only the round's own browsers are returned: a browser removed from
- * the round keeps its rows but is hidden. A page with no row for a browser has no
- * ticks there.
+ * Ticks per browser for every page of a round, over the round's viewport set
+ * (the legacy five by default). Chromium on a key that has a vp_* column reads
+ * that column; every other tick comes from the qa_browser_ticks rows of the
+ * whole round (one query). A chromium row on a legacy key is ignored: the
+ * column wins. Only the round's own browsers and viewports are returned: a
+ * browser or viewport removed from the round keeps its rows but is hidden. A
+ * page with no row for a browser has no ticks there.
  */
 export function mergeBrowserTicks(
   pages: (ChromiumTickColumns & { id: string })[],
   tickRows: readonly BrowserTickRow[],
   browsers: readonly QaBrowserKey[],
+  viewports: readonly QaViewportKey[] = QA_LEGACY_VIEWPORT_KEYS,
 ): Map<string, Partial<Record<QaBrowserKey, QaBrowserTickMap>>> {
   const out = new Map<string, Partial<Record<QaBrowserKey, QaBrowserTickMap>>>()
   for (const page of pages) {
     const perBrowser: Partial<Record<QaBrowserKey, QaBrowserTickMap>> = {}
-    for (const b of browsers) perBrowser[b] = b === 'chromium' ? chromiumTicks(page) : emptyTickMap()
+    for (const b of browsers) {
+      const map = emptyTickMap(viewports)
+      for (const key of viewports) {
+        const column = legacyTickColumn(key)
+        if (column !== null && tickStoreFor(b, key) === 'column') map[key] = page[column] === 1
+      }
+      perBrowser[b] = map
+    }
     out.set(page.id, perBrowser)
   }
+  const inSet = new Set<string>(viewports)
   for (const row of tickRows) {
-    if (row.browser === 'chromium' || !isQaBrowserKey(row.browser)) continue
-    if (!(QA_VIEWPORT_KEYS as readonly string[]).includes(row.viewport)) continue
+    if (!isQaBrowserKey(row.browser) || !isQaViewportKey(row.viewport)) continue
+    if (!inSet.has(row.viewport)) continue
+    if (tickStoreFor(row.browser, row.viewport) !== 'row') continue
     const map = out.get(row.roundPageId)?.[row.browser]
-    if (map) map[row.viewport as QaViewportKey] = row.ticked === 1
+    if (map) map[row.viewport] = row.ticked === 1
   }
   return out
 }
 
-/** Ticks done across the given browsers for one page's tick maps. */
+/** Ticks done across the given browsers over the viewport set (the legacy five by default) for one page's tick maps. */
 export function countTicks(
   perBrowser: Partial<Record<QaBrowserKey, QaBrowserTickMap>>,
   browsers: readonly QaBrowserKey[],
+  viewports: readonly QaViewportKey[] = QA_LEGACY_VIEWPORT_KEYS,
 ): number {
   let n = 0
   for (const b of browsers) {
     const map = perBrowser[b]
-    if (map) n += QA_VIEWPORT_KEYS.filter(v => map[v]).length
+    if (map) n += viewports.filter(v => map[v]).length
   }
   return n
 }

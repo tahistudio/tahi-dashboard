@@ -25,7 +25,7 @@ Goal: as above.
 Constraints:
 - Legacy keys `xl`, `desktop`, `tablet`, `mobile_l`, `mobile_p` keep their exact dimensions (1920x1080, 1440x900, 768x1024, 425x860, 375x812), their labels and their storage. A legacy round renders, ticks, scans, comments and reports exactly as it does today.
 - Production never breaks during rollout: the migration lands first, readers that understand both shapes ship before any writer creates a new-shape round, and the default for a new round flips to core only in the same push as the UI that can show it.
-- MCP parity (CLAUDE.md rule 14): every dashboard capability added here (choose a round's viewports, change them, tick, comment and file requests on the new keys) is reachable through the worker MCP. The MCP worker is deployed separately and by Liam.
+- MCP parity (CLAUDE.md rule 14): every dashboard capability added here (choose a round's viewports, change them, tick, comment and file requests on the new keys) is reachable through the worker MCP. The MCP worker deploys through its own GitHub Actions workflow on the push to main that touches its path filter (see the correction at the top).
 - No `any`, no console.log, no em dashes, en dashes or double hyphens anywhere (code, comments, copy, SQL comments), rem units, CSS vars, 44px touch targets, no single-side borders, guard order getRequestAuth > isTahiAdmin > requireFeature('qa_tester') > requireAdmin on every route, at most 100 bound parameters per D1 statement, never export non-route symbols from route.ts.
 
 Definition of done:
@@ -35,7 +35,7 @@ Definition of done:
 4. Push 1 and push 2 deployed ("Deploy dashboard" and, because lib/qa changes, "qa-view deploy" both green), the post-deploy health probe passes (AGENTS.md line 51).
 5. Live smoke on portal.tahi.studio: an existing legacy round unchanged; a new core round; a round with niche devices; Inspect steps through all of a round's viewports; report correct (section 14).
 6. 375px (no sideways scroll, 44px targets) and dark mode checked on the workspace, the start round dialog, the edit viewports dialog and the report.
-7. MCP worker deployed by Liam, MCP smoke passed.
+7. "MCP worker deploy" workflow green for the push that carries T12 (checked with gh run list, real conclusion), MCP smoke passed.
 8. security-reviewer passed the write paths; opus-reviewer passed each push and the whole against this request; AGENTS.md, STATUS.md, TASKS.md, DECISIONS.md and the run log updated.
 
 Irreversible: only migration 0121 (an additive nullable column). Everything else is a code change and reverts cleanly (section 8.4).
@@ -372,9 +372,9 @@ Changed tools (all stay in DESIGNER_BLOCKED_TOOLS; no new tool is added, so tool
 | create_qa_request, add_qa_comment | `viewport` loses its `enum`; description lists the keys and says it must be one of the round's |
 | list_qa_comments, list_qa_round_comments, get_qa_comment | description: viewportInfo also carries dpr, tier and kind |
 
-Descriptions are built once at module load from the imported constants (one helper, for example `qaViewportHelp()` in qa-tools.ts, exported for the parity test), so they can never list a stale key set at source level. The deployed worker's text only changes when Liam deploys it; since validation is server-side and no enum is published, an outdated description is cosmetic.
+Descriptions are built once at module load from the imported constants (one helper, for example `qaViewportHelp()` in qa-tools.ts, exported for the parity test), so they can never list a stale key set at source level. The deployed worker's text only changes when its workflow redeploys it (and a Claude session sees new descriptions only after a fresh session); since validation is server-side and no enum is published, an outdated description is cosmetic.
 
-Deliberately not done: adding lib/qa/viewports.ts to the mcp-worker-deploy.yml path filter. That would make a dashboard push deploy the MCP worker, which must stay Liam's action.
+Withdrawn by the correction at the top: T12 adds lib/qa/viewports.ts to the mcp-worker-deploy.yml path filter, so a registry change redeploys the worker that imports it.
 
 ---
 
@@ -388,7 +388,7 @@ Deliberately not done: adding lib/qa/viewports.ts to the mcp-worker-deploy.yml p
 | M | Migration 0121 applied on production and local D1 (Opus) | none |
 | Push 1 | T1 to T5: registry, readers, validators, writers. POST round without `viewports` still stores NULL (legacy). Explicit `viewports` accepted from the API only | none for any existing flow; a legacy round reads and writes exactly as before |
 | Push 2 | T7 to T11 plus T9's default flip: UI driven by the round set, start round picker, edit devices, report, e2e; POST round without `viewports` now means core | new rounds are core by default |
-| Worker | T12, committed separately and deployed by Liam ("MCP worker deploy" workflow) after push 2 | MCP can read and write the new keys |
+| Worker | T12, committed separately; the "MCP worker deploy" workflow deploys it automatically on the push to main that carries it, after push 2 | MCP can read and write the new keys |
 | Cleanup | T13 (aliases removed), T14 docs | none |
 
 T12 can be built in parallel with push 2; it deploys after push 2 because its descriptions say "omit for the core 11", which is only true once push 2 is live. Deploying it earlier is safe (the dashboard validates every key) but describes the default wrongly for a while.
@@ -400,7 +400,7 @@ T12 can be built in parallel with push 2; it deploys after push 2 because its de
 | Old dashboard Worker (during a rollback) reading a core round | viewports column set, chromium rows in qa_browser_ticks, new keys in scans and comments | Ignores the column; mergeBrowserTicks skips chromium rows and unknown keys; shows the legacy five frames with no ticks; comment groups drop unknown keys; viewportInfoFor falls back to the desktop def (a phone_m comment reads as Desktop 1440 to MCP). No crash and no data lost. Caveats: old code lets people tick the legacy five on a core round (Chromium to vp_* columns, Firefox and WebKit rows on legacy keys), which roll-forward hides again; the old site list counts Firefox and WebKit rows on any key over pages x 5, so progress can show above 100% |
 | Old browser tab (JS from before push 2) after push 2 | Start round posts without `viewports`, so the round is core | The old workspace shows five legacy frames; their ticks, scans and comments get 400 "viewport xl is not part of this round" toasts. A reload fixes it. Mention it in the push 2 note to Liam |
 | Stale MCP worker after push 2 | start_qa_round without viewports | Creates a core round (fine) |
-| Stale MCP worker, update_qa_round_page with new keys | its viewportTicks drops them | Ticks only: body becomes `{}` and the route answers 400 "Nothing to update" (loud). Ticks plus status or note: the tick is silently lost while the status saves. This is the one silent failure; it ends when Liam deploys the worker. Until then, tell assistants (in the push 2 note) to tick through the dashboard |
+| Stale MCP worker, update_qa_round_page with new keys | its viewportTicks drops them | Ticks only: body becomes `{}` and the route answers 400 "Nothing to update" (loud). Ticks plus status or note: the tick is silently lost while the status saves. This is the one silent failure; it ends when the push carrying T12 redeploys the worker. Until then, tell assistants (in the push 2 note) to tick through the dashboard |
 | Stale MCP worker, add_qa_comment with a new key | its own check refuses anything but the five | Loud error; no write |
 | Stale MCP worker, create_qa_request | passes the string; stale schema enum may make the client refuse first | Either a client-side refusal or a correct write |
 | New MCP worker against a dashboard without push 1 (wrong order) | new keys | Dashboard 400s every one (loud); legacy keys keep working |
@@ -642,18 +642,18 @@ Done: the spec passes locally against the QA worktree. Commit `SQA.8: e2e for th
 - [ ] Full vitest, type-check, lint, build, e2e.
 - [ ] With Liam's go: push, both workflows green, health probe, then the live smoke in section 14. Tell Liam: reload any open QA tab; until the MCP worker is deployed, tick new rounds in the dashboard, not through an assistant.
 
-### Task T12: MCP worker (sonnet-worker, M; Liam deploys)
+### Task T12: MCP worker (sonnet-worker, M; its workflow deploys it on the push to main)
 
 Files: workers/mcp-server/src/qa-tools.ts, workers/mcp-server/src/index.ts (the Site QA block, lines 1706 to 1844 only), app/api/__tests__/mcp-qa-tool-parity.test.ts.
 - [ ] Section 7 and the 3.5 rows. No new tool. No enum on viewport arguments. Descriptions from `qaViewportHelp()`.
 - [ ] TypeScript in workers/mcp-server (npx tsc with the no-emit flag, run in that folder) passes with the new relative import (it already imports ../../../lib/mcp-identity at runtime).
 - [ ] Tests: section 11 item 8.
-Done: green. Commit on its own branch `SQA.8: MCP tools read and write the round's viewports`. Opus reviews (G3), then hands Liam the branch to merge and the "MCP worker deploy" run; nobody else pushes workers/mcp-server.
+Done: green. Commit on its own branch `SQA.8: MCP tools read and write the round's viewports`. Opus reviews (G3), then, with Liam's go, merges and pushes it; the "MCP worker deploy" workflow deploys the worker from that push (verify its real conclusion with gh run list).
 
 ### Gate G3: MCP (Opus, then Liam)
 
 - [ ] security-reviewer quick pass on the passthrough (section 10 point 8); opus-reviewer.
-- [ ] Liam merges and deploys the worker.
+- [ ] With Liam's go: merge and push; the "MCP worker deploy" workflow deploys the worker; check its real conclusion with gh run list.
 - [ ] MCP smoke as Liam: get_qa_round on a core round shows viewports and viewportDefs; update_qa_round_page ticks phone_m and the dashboard shows it; add_qa_comment on laptop_m draws a pin; start_qa_round with phone_m and desktop_qhd creates that set; update_qa_round on a legacy round is refused with the legacy message; a malformed key gives the worker error.
 
 ### Task T13: Remove the deprecated aliases and the legacy defaults (sonnet-worker, S; opus-reviewer checks)
@@ -687,7 +687,7 @@ Done: docs committed and pushed with the last push.
 
 - Say go for the production migration apply and each push (his standing rule covers them; confirm in the session).
 - Review and approve the T6 designs in Claude Design.
-- Merge and deploy the MCP worker branch after push 2 (the classifier blocks agents from deploying it).
+- Say go for merging the MCP worker branch after push 2 (its push deploys the worker through GitHub Actions; there is no manual deploy step).
 - Reload open QA tabs after push 2.
 
 ---
@@ -702,5 +702,7 @@ Everything else here was a technical call decided above: the keys, the Overview 
 
 ## Changelog
 
+- 2026-11-03, backend phase T1 to T5b built on branch worktree-agent-ad7426429e58f6362 (not pushed; push 1 waits on G1's production steps). Deviations: T2 committed before T1 (independent files); T5b's scan and comments route cases live in app/api/__tests__/admin-qa-viewport-routes.test.ts so T5a and T5b could run in parallel; T5b removed the T1 test that read lib/qa/comments.ts as text, because T5b deleted that file's breakpoint record by design (viewports.test.ts and comments.test.ts still pin the strings); GET /api/admin/qa/sites/[id] (missing from 3.3) now returns resolved viewports and legacyViewports instead of the raw column, found by the G1 reviews; the scan route's unknown key error reads "viewport must be a QA viewport key". Note for the push 1 message: on a legacy page with no desktop scan, the primary scan now follows QA_PRIMARY_PREFERENCE then registry order (xl first) instead of the first stored row, so its counts can shift at its next recompute. G1 status: security-reviewer PASS; opus-reviewer FAIL on the raw column leak only, fixed and re-reviewed (see the fix commit). Still open at G1: the T0 production read-only checks, applying 0121 on production and the seeded local D1, push 1 itself and its live smoke.
+- 2026-11-03, T0 preflight (Opus, code side only). Inspect mode is merged (this branch starts at fdd06683, on top of the SQA.7 merge 1cc72df2). Entry points for T8a and T8b: the Inspect device list is `inspectDeviceOptions(availableWidthPx)` in workspace/inspect-helpers.ts, which iterates QA_VIEWPORTS (feed it the round set); the default single frame device is `defaultSingleFrameDevice(narrowLayout, mode)` in the same file ('mobile_p' in the narrow Inspect layout, else 'desktop'; T8b swaps these for the round's narrowest key and primaryViewportFor); the Overview is the non-inspect branch of ViewportStrip (viewport-strip.tsx), which iterates QA_VIEWPORTS for the frames, the zoom math and the expanded frame; "open Inspect on a viewport" already exists as `changeMobileViewport(key)` in round-workspace.tsx (sets `deviceChoice`), used by showIssue and showComment when one frame is mounted, with pendingHighlights and pendingFocus queued until the frame loads, so T8b needs no new entry point. inspect-helpers.ts is not in the 3.4 inventory: its VIEWPORT_SHORT_LABEL record, allViewportsScanned and showInspectScanNote also take the five keys (T1 made them Partial; T8a should drop VIEWPORT_SHORT_LABEL for the registry shortLabel). viewport-frame.tsx line 188 reads VIEWPORT_SHORT_LABEL with no fallback (empty label for a non-legacy key until T8a). SQA.5's 0120 is not in drizzle/migrations. The production read-only checks (PRAGMA table_info(qa_rounds), round count, chromium rows in qa_browser_ticks) were NOT run: remote wrangler is out of bounds for this phase and is left to Liam's session before 0121 is applied.
 - 2026-11-03, revision 2 (Opus), after a fresh opus-reviewer FAIL on doc issues: T3 depends on T2; test-file ownership chain T4a, T5a, T5b with T4b's report block in admin-qa-request.test.ts; full e2e inventory and T11 rewrites; one combined recount for browsers and viewports; tick writes in one batch; comment filter shows same-tier hidden keys only; round list returns resolved viewports; SQA.5 response and ticksNative notes; T13 removes the optional defaults; T11 needs T10; rollback caveats; niche count 5; Overview split moved to a plan choice; 50-item rule refuses.
 - 2026-11-03, revision 1 (Opus): written from main at e0001ad0. Found that qa_browser_ticks is already a generic row table, so the recommended model needs no tick migration; only qa_rounds.viewports (0121). Found the silent tick drop in the stale MCP worker's viewportTicks, the bind cap risk at 16 keys, the width collisions between tiers, and the `/s+/` regex slip in the 0119 migration test.

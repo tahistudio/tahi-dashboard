@@ -4363,6 +4363,10 @@ export const qaRounds = sqliteTable('qa_rounds', {
   closedAt: text('closed_at'),
   // JSON QaBrowserKey[] the round covers, never empty (migration 0118)
   browsers: text('browsers').notNull().default('["chromium"]'),
+  // JSON QaViewportKey[] the round covers (migration 0121; lib/qa/viewports.ts). NULL is a round made
+  // before the viewport set: it keeps the five legacy viewports. Nullable with NO default on purpose:
+  // drizzle binds JS defaults on insert, and a default would stamp rows that must read as legacy.
+  viewports: text('viewports'),
 }, (table) => [index('idx_qa_rounds_site').on(table.siteId)])
 
 export const qaRoundPages = sqliteTable('qa_round_pages', {
@@ -4372,6 +4376,8 @@ export const qaRoundPages = sqliteTable('qa_round_pages', {
   path: text('path').notNull(),
   groupKey: text('group_key'),
   sortOrder: integer('sort_order').notNull().default(0),
+  // Chromium ticks on the five legacy viewports only (tickStoreFor in lib/qa/viewports.ts). Every other
+  // tick is a qa_browser_ticks row.
   vpXl: integer('vp_xl').notNull().default(0),
   vpDesktop: integer('vp_desktop').notNull().default(0),
   vpTablet: integer('vp_tablet').notNull().default(0),
@@ -4413,12 +4419,13 @@ export const qaScanResults = sqliteTable('qa_scan_results', {
   createdAt: text('created_at').notNull(),
 }, (table) => [uniqueIndex('idx_qa_scan_results_page_vp_browser').on(table.roundPageId, table.viewport, table.browser)])
 
-// Firefox and WebKit ticks per round page and viewport (migration 0118). Chromium ticks stay in the
-// qa_round_pages.vp_* columns so rounds made before browsers existed read the same.
+// Every tick except Chromium ticks on the five legacy viewports, one row per round page, browser and
+// viewport (migration 0118; tickStoreFor in lib/qa/viewports.ts). Chromium ticks on legacy viewports stay
+// in the qa_round_pages.vp_* columns so rounds made before browsers and the viewport set read the same.
 export const qaBrowserTicks = sqliteTable('qa_browser_ticks', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   roundPageId: text('round_page_id').notNull(),
-  // QaBrowserKey, 'firefox' | 'webkit'
+  // QaBrowserKey. 'firefox' | 'webkit' on legacy viewports; any browser, chromium included, on the others
   browser: text('browser').notNull(),
   // QaViewportKey
   viewport: text('viewport').notNull(),

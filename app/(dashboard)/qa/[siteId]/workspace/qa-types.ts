@@ -123,7 +123,7 @@ export interface QaRoundSummary {
 export type QaScanState = 'loading' | 'scanned' | 'no_scan' | 'failed'
 
 /** Ticks for one round page keyed by viewport. */
-export type QaTickMap = Record<QaViewportKey, boolean>
+export type QaTickMap = Partial<Record<QaViewportKey, boolean>>
 
 export function emptyTicks(): QaTickMap {
   return { xl: false, desktop: false, tablet: false, mobile_l: false, mobile_p: false }

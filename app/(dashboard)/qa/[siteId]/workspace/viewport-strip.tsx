@@ -100,7 +100,7 @@ export interface ViewportStripProps {
   baseUrl: string
   /** Path of the page being viewed, starting with "/". */
   path: string
-  scanStates: Record<QaViewportKey, QaScanState>
+  scanStates: Partial<Record<QaViewportKey, QaScanState>>
   ticks: QaTickMap
   readOnly: boolean
   /** Why the strip is read only when that is not a closed round (for example the browser is not part of the round). */
@@ -392,9 +392,9 @@ export function ViewportStrip({
       viewport: v,
       src,
       rowHeightRem,
-      ticked: ticks[v.key],
+      ticked: ticks[v.key] ?? false,
       onTick: (value: boolean) => onTick(v.key, value),
-      scanState: scanStates[v.key],
+      scanState: scanStates[v.key] ?? 'loading',
       expanded,
       onExpand: () => setExpandedKey(expanded ? null : v.key),
       readOnly,
@@ -499,7 +499,7 @@ export function ViewportStrip({
           fill
           options={QA_VIEWPORTS.map(x => (
             availableWidth > 0 && availableWidth < SHORT_LABEL_BELOW_PX
-              ? { value: x.key, label: VIEWPORT_SHORT_LABEL[x.key], title: `${x.label} (${x.width}px)` }
+              ? { value: x.key, label: VIEWPORT_SHORT_LABEL[x.key] ?? x.shortLabel, title: `${x.label} (${x.width}px)` }
               : { value: x.key, label: x.label }
           ))}
         />

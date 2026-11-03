@@ -7,7 +7,7 @@ import { schema } from '@/db/d1'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { isRecord, loadOrgNames, parseSiteFieldPatch } from '@/lib/qa/server'
 import { parseRoundBrowsers } from '@/lib/qa/browsers'
-import { QA_VIEWPORT_KEYS } from '@/lib/qa/types'
+import { isLegacyRoundViewports, isQaBrowserKey, parseRoundViewports, tickStoreFor } from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
@@ -82,16 +82,25 @@ export async function GET(req: NextRequest) {
   }
   const statsByRound = new Map(statRows.map(r => [r.roundId, r]))
 
-  // Ticked Firefox and WebKit ticks per open round: one grouped query per chunk of rounds.
-  const browserTickCounts = new Map<string, number>()
+  // Ticked rows per open round, grouped by browser and viewport: one grouped query per chunk of rounds.
+  const tickGroups = new Map<string, { browser: string; viewport: string; n: number }[]>()
   for (const ids of chunk([...newestOpen.values()].map(r => r.id), ID_CHUNK)) {
     const grouped = await database
-      .select({ roundId: schema.qaRoundPages.roundId, browser: schema.qaBrowserTicks.browser, n: sql<number>`count(*)` })
+      .select({
+        roundId: schema.qaRoundPages.roundId,
+        browser: schema.qaBrowserTicks.browser,
+        viewport: schema.qaBrowserTicks.viewport,
+        n: sql<number>`count(*)`,
+      })
       .from(schema.qaBrowserTicks)
       .innerJoin(schema.qaRoundPages, eq(schema.qaBrowserTicks.roundPageId, schema.qaRoundPages.id))
       .where(and(inArray(schema.qaRoundPages.roundId, ids), eq(schema.qaBrowserTicks.ticked, 1)))
-      .groupBy(schema.qaRoundPages.roundId, schema.qaBrowserTicks.browser)
-    for (const g of grouped) browserTickCounts.set(`${g.roundId}|${g.browser}`, Number(g.n))
+      .groupBy(schema.qaRoundPages.roundId, schema.qaBrowserTicks.browser, schema.qaBrowserTicks.viewport)
+    for (const g of grouped) {
+      const list = tickGroups.get(g.roundId) ?? []
+      list.push({ browser: g.browser, viewport: g.viewport, n: Number(g.n) })
+      tickGroups.set(g.roundId, list)
+    }
   }
 
   const names = await loadOrgNames(database, sites.map(s => s.orgId))
@@ -99,9 +108,20 @@ export async function GET(req: NextRequest) {
     const round = newestOpen.get(site.id)
     const stats = round ? statsByRound.get(round.id) : undefined
     const browsers = round ? parseRoundBrowsers(round.browsers) : []
-    // Ticks across the round's browsers: Chromium from the vp_* columns, the rest from qa_browser_ticks.
-    let ticksDone = browsers.includes('chromium') ? Number(stats?.ticksDone ?? 0) : 0
-    if (round) for (const b of browsers) if (b !== 'chromium') ticksDone += browserTickCounts.get(`${round.id}|${b}`) ?? 0
+    const viewports = round ? parseRoundViewports(round.viewports) : []
+    const legacyViewports = round ? isLegacyRoundViewports(round.viewports) : true
+    // Ticks across the round's browsers and viewports. A legacy round's Chromium ticks are the vp_* columns;
+    // every other tick is a qa_browser_ticks row inside the round's browsers and set (a Chromium row on a
+    // legacy key is never counted: the column wins).
+    let ticksDone = legacyViewports && browsers.includes('chromium') ? Number(stats?.ticksDone ?? 0) : 0
+    if (round) {
+      const inSet = new Set<string>(viewports)
+      for (const g of tickGroups.get(round.id) ?? []) {
+        if (!isQaBrowserKey(g.browser) || !browsers.includes(g.browser)) continue
+        if (!inSet.has(g.viewport) || tickStoreFor(g.browser, g.viewport) !== 'row') continue
+        ticksDone += g.n
+      }
+    }
     return {
       ...site,
       orgName: names.get(site.orgId) ?? null,
@@ -110,8 +130,10 @@ export async function GET(req: NextRequest) {
         name: round.name,
         target: round.target,
         browsers,
+        viewports,
+        legacyViewports,
         ticksDone,
-        ticksTotal: Number(stats?.pageCount ?? 0) * QA_VIEWPORT_KEYS.length * browsers.length,
+        ticksTotal: Number(stats?.pageCount ?? 0) * viewports.length * browsers.length,
         failing: Number(stats?.failing ?? 0),
         issues: Number(stats?.issues ?? 0),
       } : null,

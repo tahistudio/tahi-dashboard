@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { QaScanResult, QaLinkResult } from '@/lib/qa/types'
+import { primaryViewportFor, type QaScanResult, type QaLinkResult } from '@/lib/qa/types'
 import { seoIssues, launchIssues, perfIssues, a11yIssues, linkIssues, pageIssues, countIssues, duplicateMetaIssues } from '@/lib/qa/issue-rules'
 
 function scan(over: Partial<QaScanResult> = {}): QaScanResult {
@@ -86,6 +86,59 @@ describe('pageIssues', () => {
   it('combines everything and counts', () => {
     const issues = pageIssues({ desktop: scan() }, 'live', 'acme.webflow.io', new Map())
     expect(countIssues(issues).seoIssues).toBe(0)
+  })
+})
+
+describe('primary viewport', () => {
+  const withTitle = (title: string) => scan({ seo: { ...scan().seo, title } })
+  const titleOf = (issues: ReturnType<typeof pageIssues>) => issues.map(i => i.code)
+
+  it('takes the primary scan from desktop for a legacy page', () => {
+    const noTitle = scan({ seo: { ...scan().seo, title: null } })
+    const issues = pageIssues({ desktop: scan(), mobile_p: noTitle }, 'live', 'acme.webflow.io', new Map())
+    expect(titleOf(issues)).not.toContain('title_missing')
+    const swapped = pageIssues({ desktop: noTitle, mobile_p: scan() }, 'live', 'acme.webflow.io', new Map())
+    expect(titleOf(swapped)).toContain('title_missing')
+  })
+
+  it('takes the primary scan from laptop_m for core scans', () => {
+    const noTitle = scan({ seo: { ...scan().seo, title: null } })
+    const fine = pageIssues({ phone_s: noTitle, laptop_m: withTitle('Acme, web design for builders') }, 'live', 'acme.webflow.io', new Map())
+    expect(titleOf(fine)).not.toContain('title_missing')
+    const bad = pageIssues({ phone_s: scan(), laptop_m: noTitle }, 'live', 'acme.webflow.io', new Map())
+    expect(titleOf(bad)).toContain('title_missing')
+  })
+
+  it('falls back through primaryViewportFor when the preferred scans are missing', () => {
+    const noTitle = scan({ seo: { ...scan().seo, title: null } })
+    expect(primaryViewportFor(['phone_s', 'tablet_s'])).toBe('phone_s')
+    const issues = pageIssues({ phone_s: noTitle, tablet_s: scan() }, 'live', 'acme.webflow.io', new Map())
+    expect(titleOf(issues)).toContain('title_missing')
+    const other = pageIssues({ phone_s: scan(), tablet_s: noTitle }, 'live', 'acme.webflow.io', new Map())
+    expect(titleOf(other)).not.toContain('title_missing')
+  })
+
+  it('returns no issues when there are no scans', () => {
+    expect(pageIssues({}, 'live', 'acme.webflow.io', new Map())).toEqual([])
+    expect(launchIssues({})).toEqual([])
+  })
+
+  it('keys overflow issues by the new viewport key', () => {
+    const overflow = scan({ layout: { horizontalOverflow: true, overflowingElements: [{ selector: '.wide', width: 600 }] } })
+    const launch = launchIssues({ laptop_m: scan(), phone_m: overflow })
+    const found = launch.filter(i => i.code === 'horizontal_overflow')
+    expect(found).toHaveLength(1)
+    expect(found[0].viewport).toBe('phone_m')
+    const page = pageIssues({ laptop_m: scan(), phone_m: overflow }, 'live', 'acme.webflow.io', new Map())
+    expect(page.find(i => i.code === 'horizontal_overflow')?.viewport).toBe('phone_m')
+  })
+
+  it('reads content issues from the primary scan only', () => {
+    const leftover = scan({ content: { imagesMissingAlt: [], stagingLeftovers: [{ kind: 'lorem_ipsum', sample: 'Lorem ipsum', selector: 'p' }], forms: [] } })
+    const fromLaptop = launchIssues({ laptop_m: leftover, phone_s: scan() })
+    expect(fromLaptop.map(i => i.code)).toContain('staging_leftover')
+    const fromPhone = launchIssues({ laptop_m: scan(), phone_s: leftover })
+    expect(fromPhone.map(i => i.code)).not.toContain('staging_leftover')
   })
 })
 

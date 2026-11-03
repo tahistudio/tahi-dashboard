@@ -7,11 +7,13 @@ import { schema } from '@/db/d1'
 import { desc, eq } from 'drizzle-orm'
 import { isRecord, loadOrgNames, loadSite, parseSiteFieldPatch } from '@/lib/qa/server'
 import { parseRoundBrowsers } from '@/lib/qa/browsers'
+import { isLegacyRoundViewports, parseRoundViewports } from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 
 /**
- * GET /api/admin/qa/sites/[id]  - site, its pages (active first, then removed) and rounds.
+ * GET /api/admin/qa/sites/[id]  - site, its pages (active first, then removed) and rounds. Each round carries
+ *                                 its resolved browsers, viewports and legacyViewports (never the raw columns).
  * PATCH                          - edit name, URLs or notes.
  * DELETE                         - archive the site (sets archivedAt, keeps the rows).
  */
@@ -41,7 +43,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   return NextResponse.json({
     item: { ...site, orgName: names.get(site.orgId) ?? null },
     pages,
-    rounds: rounds.map(r => ({ ...r, browsers: parseRoundBrowsers(r.browsers) })),
+    // The resolved keys replace the raw viewports column (NULL or a JSON string), as on every other round route.
+    rounds: rounds.map(r => ({
+      ...r,
+      browsers: parseRoundBrowsers(r.browsers),
+      viewports: parseRoundViewports(r.viewports),
+      legacyViewports: isLegacyRoundViewports(r.viewports),
+    })),
   })
 }
 

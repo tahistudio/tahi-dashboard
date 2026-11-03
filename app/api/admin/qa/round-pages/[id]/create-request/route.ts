@@ -7,7 +7,7 @@ import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { createRequestRecord, type RequestCreateInput } from '@/lib/request-writes'
 import { loadRoundPage, targetOrigin } from '@/lib/qa/server'
-import { QA_VIEWPORTS, QA_VIEWPORT_KEYS, browserLabel, isQaBrowserKey, type QaBrowserKey, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
+import { browserLabel, isQaBrowserKey, isQaViewportKey, viewportDef, type QaBrowserKey, type QaTarget, type QaViewportKey } from '@/lib/qa/types'
 
 const TITLE_MAX = 200
 const DESCRIPTION_MAX = 4000
@@ -48,10 +48,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   let viewport: QaViewportKey | null = null
   if (fields.viewport !== undefined && fields.viewport !== null) {
-    if (typeof fields.viewport !== 'string' || !QA_VIEWPORT_KEYS.includes(fields.viewport as QaViewportKey)) {
+    if (!isQaViewportKey(fields.viewport)) {
       return NextResponse.json({ error: 'viewport is not a known QA viewport' }, { status: 400 })
     }
-    viewport = fields.viewport as QaViewportKey
+    viewport = fields.viewport
   }
 
   let browser: QaBrowserKey | null = null
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const lines: string[] = []
   if (description) lines.push(description, '')
   lines.push(`Page: ${origin}${roundPage.path}`)
-  const vp = viewport ? QA_VIEWPORTS.find(v => v.key === viewport) : undefined
+  const vp = viewport ? viewportDef(viewport) : null
   if (vp) lines.push(`Viewport: ${vp.label} (${vp.width}px)`)
   if (browser) lines.push(`Browser: ${browserLabel(browser)}`)
   lines.push(`From QA round: ${round.name}`)
