@@ -1,27 +1,40 @@
 /**
  * GET   /api/admin/qa/round-pages/[id]
- *       { roundPage, status, note, categories, pagespeed, browsers, ticks, scans, links, issues }.
+ *       { roundPage, status, note, categories, pagespeed, browsers, viewports, ticks, scans, links, issues }.
  *       categories has { total, fail, warn, info } for a11y, links, seo, launch and perf (total is the
  *       count on the issue panel tab); pagespeed is { mobile?, desktop? } scores or null. Scans keyed by browser, then
- *       viewport; the round's browsers and this page's ticks per browser; the link results
- *       for this page's URLs; and every issue for the page: the page-level rules per browser,
- *       merged so an identical issue seen in several browsers appears once (with its
- *       browsers), plus duplicate title and description checks across the round's scanned
- *       desktop results.
+ *       viewport; the round's browsers; viewports is the round's resolved viewport keys (a legacy
+ *       round gets xl, desktop, tablet, mobile_l, mobile_p); this page's ticks per browser over
+ *       those viewports; the link results for this page's URLs; and every issue for the page:
+ *       the page-level rules per browser, merged so an identical issue seen in several browsers
+ *       appears once (with its browsers), plus duplicate title and description checks across
+ *       the round's scanned results on the round's primary viewport (desktop for a legacy
+ *       round, laptop_m for the core set; see primaryViewportFor).
  *
  * PATCH /api/admin/qa/round-pages/[id]
- *       Body: { vp?: { xl?, desktop?, tablet?, mobile_l?, mobile_p? } (booleans),
+ *       Body: { vp?: { [viewportKey]: boolean } (the keys of the round's viewport set; a legacy
+ *                 round uses xl, desktop, tablet, mobile_l, mobile_p),
  *               browser?: 'chromium' | 'firefox' | 'webkit' (default: the round's first browser; applies to vp;
  *               400 when it is not one of the round's browsers),
  *               status?: 'untested' | 'pass' | 'fail', note?: string | null (max 4000) }.
- *       Chromium ticks write the vp_* columns; Firefox and WebKit ticks upsert qa_browser_ticks.
- *       409 when the round is closed.
+ *       Where a tick is stored: a Chromium tick on a legacy key writes the vp_* column of the page;
+ *       every other tick (Firefox and WebKit, and Chromium on any other key) upserts qa_browser_ticks.
+ *       The page update and every tick chunk go to D1 in one batch, so a failure never leaves a
+ *       partial tick set.
+ *       Errors, in this order: 400 for a body that is not an object, an unknown browser, a vp that
+ *       is not an object, a key that is not a registry viewport (the key echoed up to 40
+ *       characters) or a non boolean value, a bad status or note, or nothing to update (all
+ *       before any database read); 404; 409 when the round is closed; 400 when the browser is not
+ *       one of the round's browsers; 400 when a vp key is not part of the round's viewport set.
+ *       The response item is the page row with the update applied plus browserTicks, this
+ *       page's settled ticks per round browser over the round's viewports.
  */
 import { getRequestAuth, isTahiAdmin } from '@/lib/server-auth'
 import { requireFeature } from '@/lib/require-feature'
 import { requireAdmin } from '@/lib/require-admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { and, eq, inArray, sql } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
 import { db } from '@/lib/db'
 import { schema } from '@/db/d1'
 import { loadRoundPage, rowToLinkResult, scannedLinkUrls, scansByBrowser, targetOrigin } from '@/lib/qa/server'
@@ -31,30 +44,35 @@ import { mergeBrowserTicks, parseRoundBrowsers } from '@/lib/qa/browsers'
 import { categorySummaries, parseStoredPageSpeed } from '@/lib/qa/category-summary'
 import {
   QA_BROWSER_KEYS,
-  QA_PRIMARY_VIEWPORT,
   isQaBrowserKey,
+  isQaViewportKey,
+  legacyTickColumn,
+  parseRoundViewports,
+  primaryViewportFor,
+  tickStoreFor,
   type QaBrowserKey,
   type QaLinkResult,
   type QaTarget,
+  type QaViewportKey,
 } from '@/lib/qa/types'
 
 type D1 = ReturnType<typeof import('drizzle-orm/d1').drizzle>
 type ScanRow = typeof schema.qaScanResults.$inferSelect
 type RoundPageUpdate = Partial<typeof schema.qaRoundPages.$inferInsert>
+interface TickRowWrite {
+  roundPageId: string
+  browser: QaBrowserKey
+  viewport: QaViewportKey
+  ticked: number
+  updatedBy: string | null
+  updatedAt: string
+}
 
 const ID_QUERY_CHUNK = 90
 const NOTE_MAX = 4000
 const PAGE_STATUSES = ['untested', 'pass', 'fail'] as const
-
-/** Maps the API's viewport names to round page columns. */
-const VP_COLUMNS = {
-  xl: 'vpXl',
-  desktop: 'vpDesktop',
-  tablet: 'vpTablet',
-  mobile_l: 'vpMobileL',
-  mobile_p: 'vpMobileP',
-} as const
-type VpApiKey = keyof typeof VP_COLUMNS
+/** Rows per qa_browser_ticks upsert statement: 7 binds per row today, 8 once SQA.5 adds via, under the D1 cap of 100. */
+const TICK_UPSERT_CHUNK = 10
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -84,12 +102,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const ownRows = await database.select().from(schema.qaScanResults)
     .where(eq(schema.qaScanResults.roundPageId, roundPage.id))
   const browsers = parseRoundBrowsers(round.browsers)
-  // Scans of a browser removed from the round stay stored but are hidden.
-  const scans = scansByBrowser(ownRows, browsers)
+  const viewports = parseRoundViewports(round.viewports)
+  // Scans of a browser or viewport removed from the round stay stored but are hidden.
+  const scans = scansByBrowser(ownRows, browsers, viewports)
 
   const tickRows = await database.select().from(schema.qaBrowserTicks)
     .where(eq(schema.qaBrowserTicks.roundPageId, roundPage.id))
-  const ticks = mergeBrowserTicks([roundPage], tickRows, browsers).get(roundPage.id) ?? {}
+  const ticks = mergeBrowserTicks([roundPage], tickRows, browsers, viewports).get(roundPage.id) ?? {}
 
   const urls = scannedLinkUrls(scans)
   const linkRows: (typeof schema.qaLinkResults.$inferSelect)[] = []
@@ -102,24 +121,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Duplicate title and description checks look across every scanned page of the round.
   const roundPages = await database.select().from(schema.qaRoundPages).where(eq(schema.qaRoundPages.roundId, round.id))
   const pathById = new Map(roundPages.map(p => [p.id, p.path]))
-  const desktopRows: ScanRow[] = []
-  for (const idChunk of chunk(roundPages.map(p => p.id), ID_QUERY_CHUNK)) {
-    desktopRows.push(...await database.select().from(schema.qaScanResults)
-      .where(and(inArray(schema.qaScanResults.roundPageId, idChunk), eq(schema.qaScanResults.viewport, QA_PRIMARY_VIEWPORT))))
+  // The round's primary viewport supplies the SEO fields; a set always has one, the guard is for the type.
+  const primary = primaryViewportFor(viewports)
+  const primaryRows: ScanRow[] = []
+  if (primary !== null) {
+    for (const idChunk of chunk(roundPages.map(p => p.id), ID_QUERY_CHUNK)) {
+      primaryRows.push(...await database.select().from(schema.qaScanResults)
+        .where(and(inArray(schema.qaScanResults.roundPageId, idChunk), eq(schema.qaScanResults.viewport, primary))))
+    }
   }
-  // One desktop scan per page, from its first browser in the usual order, so a page scanned in
-  // several browsers does not read as a duplicate of itself.
+  // One primary viewport scan per page, from its first browser in the usual order, so a page
+  // scanned in several browsers does not read as a duplicate of itself.
   const browserRank = (key: string) => {
     const i = QA_BROWSER_KEYS.findIndex(b => b === key)
     return i === -1 ? QA_BROWSER_KEYS.length : i
   }
-  const firstDesktop = new Map<string, ScanRow>()
-  for (const row of desktopRows) {
+  const firstPrimary = new Map<string, ScanRow>()
+  for (const row of primaryRows) {
     if (!browsers.some(b => b === row.browser)) continue
-    const held = firstDesktop.get(row.roundPageId)
-    if (!held || browserRank(row.browser) < browserRank(held.browser)) firstDesktop.set(row.roundPageId, row)
+    const held = firstPrimary.get(row.roundPageId)
+    if (!held || browserRank(row.browser) < browserRank(held.browser)) firstPrimary.set(row.roundPageId, row)
   }
-  const metaPages = [...firstDesktop.values()].flatMap(row => {
+  const metaPages = [...firstPrimary.values()].flatMap(row => {
     const path = pathById.get(row.roundPageId)
     if (path === undefined) return []
     const seo = parseStoredScan(row.result).seo
@@ -144,6 +167,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     categories: categorySummaries(issues),
     pagespeed: parseStoredPageSpeed(roundPage.pagespeed),
     browsers,
+    viewports,
     ticks,
     scans,
     links,
@@ -171,13 +195,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.vp === undefined) return NextResponse.json({ error: 'browser needs vp' }, { status: 400 })
     requestedBrowser = body.browser
   }
-  const tickWrites: { viewport: VpApiKey; ticked: number }[] = []
+  const tickWrites: { viewport: QaViewportKey; ticked: number }[] = []
   if (body.vp !== undefined) {
     if (!isRecord(body.vp)) return NextResponse.json({ error: 'vp must be an object' }, { status: 400 })
     for (const [key, value] of Object.entries(body.vp)) {
-      if (!(key in VP_COLUMNS)) return NextResponse.json({ error: `Unknown viewport ${key}` }, { status: 400 })
-      if (typeof value !== 'boolean') return NextResponse.json({ error: `vp.${key} must be a boolean` }, { status: 400 })
-      tickWrites.push({ viewport: key as VpApiKey, ticked: value ? 1 : 0 })
+      if (!isQaViewportKey(key)) return NextResponse.json({ error: `Unknown viewport ${key.slice(0, 40)}` }, { status: 400 })
+      if (typeof value !== 'boolean') return NextResponse.json({ error: `vp.${key.slice(0, 40)} must be a boolean` }, { status: 400 })
+      tickWrites.push({ viewport: key, ticked: value ? 1 : 0 })
     }
   }
   if (body.status !== undefined) {
@@ -211,22 +235,51 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (tickWrites.length > 0 && !roundBrowsers.includes(browser)) {
     return NextResponse.json({ error: 'That browser is not part of this round' }, { status: 400 })
   }
+  const viewports = parseRoundViewports(loaded.round.viewports)
+  for (const w of tickWrites) {
+    if (!viewports.includes(w.viewport)) {
+      return NextResponse.json(
+        { error: `viewport ${w.viewport} is not part of this round (it uses: ${viewports.join(', ')})` },
+        { status: 400 },
+      )
+    }
+  }
 
   const now = new Date().toISOString()
-  // Chromium ticks stay in the vp_* columns; the other browsers upsert qa_browser_ticks.
-  if (browser === 'chromium') {
-    for (const w of tickWrites) update[VP_COLUMNS[w.viewport]] = w.ticked
+  // Chromium on a legacy key stays in the vp_* column; every other tick is a qa_browser_ticks row.
+  const rowWrites: TickRowWrite[] = []
+  for (const w of tickWrites) {
+    const column = legacyTickColumn(w.viewport)
+    if (column !== null && tickStoreFor(browser, w.viewport) === 'column') {
+      update[column] = w.ticked
+    } else {
+      rowWrites.push({ roundPageId: id, browser, viewport: w.viewport, ticked: w.ticked, updatedBy: userId, updatedAt: now })
+    }
   }
   update.updatedBy = userId
   update.updatedAt = now
-  await database.update(schema.qaRoundPages).set(update).where(eq(schema.qaRoundPages.id, id))
-  if (browser !== 'chromium' && tickWrites.length > 0) {
-    await database.insert(schema.qaBrowserTicks)
-      .values(tickWrites.map(w => ({ roundPageId: id, browser, viewport: w.viewport, ticked: w.ticked, updatedBy: userId, updatedAt: now })))
+
+  // The page update and every tick chunk go in one batch, so a failure never leaves a partial tick set.
+  const statements: BatchItem<'sqlite'>[] = [database.update(schema.qaRoundPages).set(update).where(eq(schema.qaRoundPages.id, id))]
+  for (const rows of chunk(rowWrites, TICK_UPSERT_CHUNK)) {
+    statements.push(database.insert(schema.qaBrowserTicks)
+      .values(rows)
       .onConflictDoUpdate({
         target: [schema.qaBrowserTicks.roundPageId, schema.qaBrowserTicks.browser, schema.qaBrowserTicks.viewport],
         set: { ticked: sql`excluded.ticked`, updatedBy: userId, updatedAt: now },
-      })
+      }))
   }
-  return NextResponse.json({ item: { ...loaded.roundPage, ...update } })
+  await database.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  // This page's settled ticks. This request's row writes are laid over what was read, so the
+  // answer is right even if the read raced the batch.
+  const stored = await database.select().from(schema.qaBrowserTicks)
+    .where(eq(schema.qaBrowserTicks.roundPageId, id))
+  const written = new Set(rowWrites.map(r => `${r.browser}:${r.viewport}`))
+  const tickRows = [
+    ...stored.filter(r => !written.has(`${r.browser}:${r.viewport}`)),
+    ...rowWrites,
+  ]
+  const browserTicks = mergeBrowserTicks([{ ...loaded.roundPage, ...update }], tickRows, roundBrowsers, viewports).get(id) ?? {}
+  return NextResponse.json({ item: { ...loaded.roundPage, ...update, browserTicks } })
 }

@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { getTableName } from 'drizzle-orm'
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 
 type Row = Record<string, unknown>
 interface Write { op: 'insert' | 'update'; table: string; rows: Row[]; set?: Row }
@@ -15,6 +16,8 @@ const state = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   writes: [] as Write[],
   reads: [] as string[],
+  batches: [] as number[],
+  wheres: [] as { table: string; cond: unknown }[],
 }))
 
 vi.mock('@/lib/server-auth', () => ({
@@ -30,7 +33,7 @@ vi.mock('@/db/d1', async () => ({
 }))
 
 vi.mock('@/lib/db', () => {
-  function thenable<T>(value: () => T, onRun?: () => void) {
+  function thenable<T>(value: () => T, onRun?: () => void, onWhere?: (cond: unknown) => void) {
     const builder = {
       then(resolve: (v: T) => unknown, reject?: (e: unknown) => unknown) {
         onRun?.()
@@ -39,7 +42,10 @@ vi.mock('@/lib/db', () => {
       onConflictDoUpdate: () => builder,
       innerJoin: () => builder,
       groupBy: () => builder,
-      where: () => builder,
+      where: (cond?: unknown) => {
+        onWhere?.(cond)
+        return builder
+      },
       orderBy: () => builder,
       limit: () => builder,
     }
@@ -50,7 +56,7 @@ vi.mock('@/lib/db', () => {
       from: (table: unknown) => {
         const name = getTableName(table as Parameters<typeof getTableName>[0])
         state.reads.push(name)
-        return thenable(() => [...(state.tables[name] ?? [])])
+        return thenable(() => [...(state.tables[name] ?? [])], undefined, cond => state.wheres.push({ table: name, cond }))
       },
     }),
     insert: (table: unknown) => {
@@ -69,6 +75,7 @@ vi.mock('@/lib/db', () => {
       }
     },
     batch: async (items: PromiseLike<unknown>[]) => {
+      state.batches.push(items.length)
       const out: unknown[] = []
       for (const item of items) out.push(await item)
       return out
@@ -84,7 +91,7 @@ import { GET as roundPageGet, PATCH as roundPagePatch } from '@/app/api/admin/qa
 import { POST as scanPost } from '@/app/api/admin/qa/round-pages/[id]/scan/route'
 import { getRequestAuth } from '@/lib/server-auth'
 import { normaliseScanResult } from '@/lib/qa/normalise-scan'
-import { QA_CORE_VIEWPORT_KEYS } from '@/lib/qa/types'
+import { QA_CORE_VIEWPORT_KEYS, QA_SELECTABLE_VIEWPORT_KEYS } from '@/lib/qa/types'
 
 const ADMIN = { userId: 'user_liam', orgId: 'org_tahi', sessionId: 's1' }
 const CLIENT = { userId: 'user_client', orgId: 'org_client', sessionId: 's2' }
@@ -160,6 +167,8 @@ beforeEach(() => {
   state.tables = {}
   state.writes = []
   state.reads = []
+  state.batches = []
+  state.wheres = []
   vi.mocked(getRequestAuth).mockResolvedValue(ADMIN)
 })
 
@@ -965,6 +974,240 @@ describe('viewport sets: rounds', () => {
       expect(res.status).toBe(200)
       expect(state.reads).not.toContain('qa_scan_results')
       expect(writesFor('qa_round_pages', 'update')).toHaveLength(0)
+    })
+  })
+})
+
+describe('viewport sets: round page', () => {
+  const CORE_JSON = JSON.stringify(QA_CORE_VIEWPORT_KEYS)
+  const ALL_JSON = JSON.stringify(QA_SELECTABLE_VIEWPORT_KEYS)
+  const BOTH = '["chromium","firefox"]'
+  const dialect = new SQLiteSyncDialect()
+
+  function seedPatchWorld(round: Row) {
+    seed('qa_round_pages', [seedRoundPage()])
+    seed('qa_rounds', [round])
+    seed('qa_sites', [seedSite()])
+  }
+
+  function pageUpdate(): Row {
+    return writesFor('qa_round_pages', 'update')[0].set ?? {}
+  }
+
+  async function errorOf(res: Response): Promise<string> {
+    return ((await res.json()) as { error: string }).error
+  }
+
+  describe('PATCH ticks', () => {
+    it('legacy round, chromium, xl: sets the vp column and writes no qa_browser_ticks row', async () => {
+      seedPatchWorld(seedRound())
+      const res = await roundPagePatch(jsonReq({ vp: { xl: true } }), ctx('rp1'))
+      expect(res.status).toBe(200)
+      expect(pageUpdate()).toMatchObject({ vpXl: 1, updatedBy: 'user_liam' })
+      expect(writesFor('qa_browser_ticks')).toHaveLength(0)
+    })
+
+    it('legacy round, firefox, desktop: writes a row and no vp column', async () => {
+      seedPatchWorld(seedRound({ browsers: BOTH }))
+      const res = await roundPagePatch(jsonReq({ browser: 'firefox', vp: { desktop: true } }), ctx('rp1'))
+      expect(res.status).toBe(200)
+      const [write] = writesFor('qa_browser_ticks')
+      expect(write.rows).toEqual([
+        expect.objectContaining({ roundPageId: 'rp1', browser: 'firefox', viewport: 'desktop', ticked: 1, updatedBy: 'user_liam' }),
+      ])
+      expect('vpDesktop' in pageUpdate()).toBe(false)
+    })
+
+    it('core round, chromium, laptop_m: writes a row and no vp column', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON }))
+      const res = await roundPagePatch(jsonReq({ vp: { laptop_m: true } }), ctx('rp1'))
+      expect(res.status).toBe(200)
+      const [write] = writesFor('qa_browser_ticks')
+      expect(write.rows).toEqual([
+        expect.objectContaining({ roundPageId: 'rp1', browser: 'chromium', viewport: 'laptop_m', ticked: 1 }),
+      ])
+      const set = pageUpdate()
+      expect(Object.keys(set).filter(k => k.startsWith('vp'))).toEqual([])
+      expect(set.updatedBy).toBe('user_liam')
+    })
+
+    it('core round, xl: 400 naming the set, and nothing is written', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON }))
+      const res = await roundPagePatch(jsonReq({ vp: { xl: true } }), ctx('rp1'))
+      expect(res.status).toBe(400)
+      expect(await errorOf(res)).toBe(`viewport xl is not part of this round (it uses: ${QA_CORE_VIEWPORT_KEYS.join(', ')})`)
+      expect(state.writes).toHaveLength(0)
+      expect(state.batches).toHaveLength(0)
+    })
+
+    it('a legacy round refuses a registry key outside its five', async () => {
+      seedPatchWorld(seedRound())
+      const res = await roundPagePatch(jsonReq({ vp: { laptop_m: true } }), ctx('rp1'))
+      expect(res.status).toBe(400)
+      expect(await errorOf(res)).toBe('viewport laptop_m is not part of this round (it uses: xl, desktop, tablet, mobile_l, mobile_p)')
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('the 409 for a closed round comes before the set check', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON, status: 'closed' }))
+      const res = await roundPagePatch(jsonReq({ vp: { xl: true } }), ctx('rp1'))
+      expect(res.status).toBe(409)
+      expect(await errorOf(res)).toBe('This round is closed')
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('the browser 400 comes before the set check', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON }))
+      const res = await roundPagePatch(jsonReq({ browser: 'firefox', vp: { xl: true } }), ctx('rp1'))
+      expect(res.status).toBe(400)
+      expect(await errorOf(res)).toBe('That browser is not part of this round')
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('400s a key that is not a registry viewport before any database read, echoing at most 40 characters', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON }))
+      const spaced = await roundPagePatch(jsonReq({ vp: { 'Phone M': true } }), ctx('rp1'))
+      expect(spaced.status).toBe(400)
+      expect(await errorOf(spaced)).toBe('Unknown viewport Phone M')
+
+      const long = await roundPagePatch(jsonReq({ vp: { [`a${'b'.repeat(59)}`]: true } }), ctx('rp1'))
+      expect(long.status).toBe(400)
+      expect(await errorOf(long)).toBe(`Unknown viewport a${'b'.repeat(39)}`)
+
+      const notBoolean = await roundPagePatch(jsonReq({ vp: { [`a${'b'.repeat(59)}`]: 1 } }), ctx('rp1'))
+      expect(notBoolean.status).toBe(400)
+
+      const notObject = await roundPagePatch(jsonReq({ vp: ['laptop_m'] }), ctx('rp1'))
+      expect(notObject.status).toBe(400)
+      expect(await errorOf(notObject)).toBe('vp must be an object')
+
+      const badValue = await roundPagePatch(jsonReq({ vp: { laptop_m: 'yes' } }), ctx('rp1'))
+      expect(badValue.status).toBe(400)
+      expect(await errorOf(badValue)).toBe('vp.laptop_m must be a boolean')
+
+      expect(state.reads).toEqual([])
+      expect(state.writes).toHaveLength(0)
+    })
+
+    it('all 16 selectable keys: every insert has at most 10 rows and stays under 100 binds, in one batch with the update', async () => {
+      seedPatchWorld(seedRound({ viewports: ALL_JSON }))
+      const vp = Object.fromEntries(QA_SELECTABLE_VIEWPORT_KEYS.map(k => [k, true]))
+      const res = await roundPagePatch(jsonReq({ vp }), ctx('rp1'))
+      expect(res.status).toBe(200)
+      const inserts = writesFor('qa_browser_ticks')
+      expect(inserts.map(w => w.rows.length)).toEqual([10, 6])
+      for (const w of inserts) {
+        expect(w.rows.length).toBeLessThanOrEqual(10)
+        // Six named columns plus the id drizzle generates when it builds the statement.
+        const binds = w.rows.reduce((sum, r) => sum + Object.keys(r).length + 1, 0)
+        expect(binds).toBe(w.rows.length * 7)
+        expect(binds).toBeLessThan(100)
+      }
+      expect(inserts.flatMap(w => w.rows.map(r => r.viewport))).toEqual([...QA_SELECTABLE_VIEWPORT_KEYS])
+      expect(writesFor('qa_round_pages', 'update')).toHaveLength(1)
+      // One batch carried the page update and both tick chunks.
+      expect(state.batches).toEqual([3])
+    })
+
+    it('a status only patch is still a single statement batch', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON }))
+      const res = await roundPagePatch(jsonReq({ status: 'pass' }), ctx('rp1'))
+      expect(res.status).toBe(200)
+      expect(state.batches).toEqual([1])
+      expect(writesFor('qa_browser_ticks')).toHaveLength(0)
+    })
+
+    it('returns browserTicks for the round set: the ticked key true, every other key of the set false', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON }))
+      const res = await roundPagePatch(jsonReq({ vp: { laptop_m: true } }), ctx('rp1'))
+      const { item } = (await res.json()) as { item: { browserTicks: Record<string, Record<string, boolean>> } }
+      expect(Object.keys(item.browserTicks)).toEqual(['chromium'])
+      expect(Object.keys(item.browserTicks.chromium)).toEqual([...QA_CORE_VIEWPORT_KEYS])
+      expect(item.browserTicks.chromium.laptop_m).toBe(true)
+      for (const key of QA_CORE_VIEWPORT_KEYS.filter(k => k !== 'laptop_m')) {
+        expect(item.browserTicks.chromium[key]).toBe(false)
+      }
+    })
+
+    it('browserTicks keeps what the page already had stored and lets this request win', async () => {
+      seedPatchWorld(seedRound({ viewports: CORE_JSON }))
+      seed('qa_browser_ticks', [
+        { roundPageId: 'rp1', browser: 'chromium', viewport: 'phone_s', ticked: 1 },
+        { roundPageId: 'rp1', browser: 'chromium', viewport: 'laptop_m', ticked: 1 },
+      ])
+      const res = await roundPagePatch(jsonReq({ vp: { laptop_m: false } }), ctx('rp1'))
+      const { item } = (await res.json()) as { item: { browserTicks: Record<string, Record<string, boolean>> } }
+      expect(item.browserTicks.chromium.phone_s).toBe(true)
+      expect(item.browserTicks.chromium.laptop_m).toBe(false)
+    })
+
+    it('legacy round browserTicks reads Chromium from the update and Firefox from rows', async () => {
+      seedPatchWorld(seedRound({ browsers: BOTH }))
+      seed('qa_browser_ticks', [{ roundPageId: 'rp1', browser: 'firefox', viewport: 'tablet', ticked: 1 }])
+      const res = await roundPagePatch(jsonReq({ vp: { xl: true } }), ctx('rp1'))
+      const { item } = (await res.json()) as { item: { vpXl: number; browserTicks: Record<string, Record<string, boolean>> } }
+      expect(item.vpXl).toBe(1)
+      expect(item.browserTicks.chromium).toEqual({ xl: true, desktop: false, tablet: false, mobile_l: false, mobile_p: false })
+      expect(item.browserTicks.firefox).toEqual({ xl: false, desktop: false, tablet: true, mobile_l: false, mobile_p: false })
+    })
+  })
+
+  describe('GET', () => {
+    function seedGetWorld(round: Row) {
+      seed('qa_round_pages', [seedRoundPage()])
+      seed('qa_rounds', [round])
+      seed('qa_sites', [seedSite()])
+      seed('qa_scan_results', [])
+      seed('qa_link_results', [])
+      seed('qa_browser_ticks', [])
+    }
+
+    /** Viewport values bound by the duplicate meta query: the only scan query that names a viewport. */
+    function boundParams(): unknown[] {
+      return state.wheres
+        .filter(w => w.table === 'qa_scan_results')
+        .flatMap(w => dialect.sqlToQuery(w.cond as Parameters<typeof dialect.sqlToQuery>[0]).params)
+    }
+
+    it('reads laptop_m scans for the duplicate check on a core round, and returns the set', async () => {
+      seedGetWorld(seedRound({ viewports: CORE_JSON }))
+      const res = await roundPageGet(getReq(), ctx('rp1'))
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { viewports: string[] }
+      expect(json.viewports).toEqual([...QA_CORE_VIEWPORT_KEYS])
+      const params = boundParams()
+      expect(params).toContain('laptop_m')
+      expect(params).not.toContain('desktop')
+    })
+
+    it('reads desktop scans for the duplicate check on a legacy round, and returns the legacy five', async () => {
+      seedGetWorld(seedRound())
+      const res = await roundPageGet(getReq(), ctx('rp1'))
+      const json = (await res.json()) as { viewports: string[] }
+      expect(json.viewports).toEqual(['xl', 'desktop', 'tablet', 'mobile_l', 'mobile_p'])
+      const params = boundParams()
+      expect(params).toContain('desktop')
+      expect(params).not.toContain('laptop_m')
+    })
+
+    it('hides scans and ticks of a viewport outside the round set, and merges ticks over the set', async () => {
+      seedGetWorld(seedRound({ viewports: '["phone_s","laptop_m"]' }))
+      const stored = JSON.stringify(normaliseScanResult(cleanScan()))
+      seed('qa_scan_results', [
+        { roundPageId: 'rp1', viewport: 'laptop_m', browser: 'chromium', result: stored, createdAt: NOW },
+        { roundPageId: 'rp1', viewport: 'desktop', browser: 'chromium', result: stored, createdAt: NOW },
+      ])
+      seed('qa_browser_ticks', [
+        { roundPageId: 'rp1', browser: 'chromium', viewport: 'laptop_m', ticked: 1 },
+        { roundPageId: 'rp1', browser: 'chromium', viewport: 'tablet_s', ticked: 1 },
+      ])
+      const res = await roundPageGet(getReq(), ctx('rp1'))
+      const json = (await res.json()) as {
+        scans: Record<string, Record<string, unknown>>
+        ticks: Record<string, Record<string, boolean>>
+      }
+      expect(Object.keys(json.scans.chromium)).toEqual(['laptop_m'])
+      expect(json.ticks.chromium).toEqual({ phone_s: false, laptop_m: true })
     })
   })
 })
